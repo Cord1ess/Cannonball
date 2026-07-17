@@ -118,3 +118,18 @@ export function addInkOutline(mesh: THREE.Mesh, thickness: number = INK_WEIGHT.p
   mesh.add(hull)
   return hull
 }
+
+/**
+ * Dispose every geometry + material under a root (hulls included).
+ * Shared textures survive — only per-object GPU resources are freed.
+ * This is what makes arena morphs leak-free (architecture.md not-to-do #4).
+ */
+export function disposeHierarchy(root: THREE.Object3D): void {
+  root.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) {
+      obj.geometry.dispose()
+      const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
+      for (const material of materials) material.dispose()
+    }
+  })
+}

@@ -128,6 +128,19 @@ export function tickDecalTexture(size = 128): THREE.CanvasTexture {
   return toTexture(canvas)
 }
 
+/** The bean face plate: simple black rectangular eyes (reference image style). */
+export function faceTexture(size = 96): THREE.CanvasTexture {
+  const [canvas, ctx] = makeCanvas(size, size)
+  ctx.clearRect(0, 0, size, size)
+  ctx.fillStyle = '#1c1a18'
+  const eyeW = size * 0.13
+  const eyeH = size * 0.3
+  const y = size * 0.34
+  ctx.fillRect(size * 0.28 - eyeW / 2, y, eyeW, eyeH)
+  ctx.fillRect(size * 0.72 - eyeW / 2, y, eyeW, eyeH)
+  return toTexture(canvas)
+}
+
 /** Fine paper grain for the fullscreen overlay quad. */
 export function grainTexture(size = 256): THREE.CanvasTexture {
   const [canvas, ctx] = makeCanvas(size, size)
