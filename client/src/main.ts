@@ -4,14 +4,16 @@ import { isPointerLocked, requestPointerLock } from '@vendor/platform/fullscreen
 import { ChaseCamera } from './game/camera.ts'
 import { createHud } from './game/hud.ts'
 import { createGameInput } from './game/input.ts'
-import { createSandbox } from './game/sandbox.ts'
+import { createOnlineGame, type OnlineGame } from './game/online.ts'
+import { createSandbox, type Sandbox } from './game/sandbox.ts'
+import { connect } from './net/connection.ts'
 import { createGrainOverlay } from './render/grain.ts'
 import { PALETTE } from './render/palette.ts'
 import { makeSky } from './render/sky.ts'
 
 /**
- * M1: the offline arena sandbox — the header fun-test.
- * One player, five dummies, full local tick loop, morphing polygon arena.
+ * M2: online by default (server-authoritative, predicted), `?offline` for
+ * the M1 sandbox. `?lag=100` adds artificial send latency for honesty.
  */
 
 // --- renderer ---------------------------------------------------------------------
@@ -40,14 +42,29 @@ sun.position.set(6, 10, 4)
 scene.add(sun)
 scene.add(makeSky())
 
-// --- game -------------------------------------------------------------------------
+// --- game boot -----------------------------------------------------------------------
 
 const input = createGameInput()
 const chase = new ChaseCamera(camera3)
 const hud = createHud()
-const sandbox = createSandbox(scene, chase, hud)
 const grain = createGrainOverlay()
 const time = new Time()
+
+let game: Sandbox | OnlineGame
+const wantOffline = new URLSearchParams(location.search).has('offline')
+if (wantOffline) {
+  game = createSandbox(scene, chase, hud)
+  console.log('[cannonball] offline sandbox mode')
+} else {
+  try {
+    const conn = await connect()
+    game = createOnlineGame(scene, chase, hud, conn)
+    console.log(`[cannonball] online — session ${conn.sessionId}`)
+  } catch (error) {
+    console.warn('[cannonball] server unreachable, falling back to offline sandbox', error)
+    game = createSandbox(scene, chase, hud)
+  }
+}
 
 renderer.domElement.addEventListener('click', () => {
   if (!isPointerLocked(document)) void requestPointerLock(renderer.domElement)
@@ -65,7 +82,7 @@ function frame(nowMs: number): void {
   if (locked) chase.addMouse(input.pointerDeltaX, input.pointerDeltaY)
   if (input.justPressed('jump')) jumpQueued = true
   if (input.justPressed('dive')) diveQueued = true
-  if (input.justPressed('restart') && sandbox.gameOver) sandbox.reset()
+  if (input.justPressed('restart') && game.gameOver) game.reset()
 
   const steps = time.consumeFixedSteps()
   for (let i = 0; i < steps; i++) {
@@ -84,18 +101,18 @@ function frame(nowMs: number): void {
       dirZ /= len
     }
 
-    sandbox.fixedStep({ dirX, dirZ, jump: jumpQueued, dive: diveQueued, sprint: input.pressed('sprint') })
+    game.fixedStep({ dirX, dirZ, jump: jumpQueued, dive: diveQueued, sprint: input.pressed('sprint') })
     jumpQueued = false
     diveQueued = false
   }
 
-  sandbox.frameUpdate(time.unscaledDelta, time.alpha, input.axis('lean'))
+  game.frameUpdate(time.unscaledDelta, time.alpha, input.axis('lean'))
 
   hud.update({
-    tickRemaining: sandbox.tickRemaining,
-    zones: sandbox.hudZones(),
-    alarm: sandbox.ballAlarm(),
-    stamina: sandbox.staminaFrac(),
+    tickRemaining: game.tickRemaining,
+    zones: game.hudZones(),
+    alarm: game.ballAlarm(),
+    stamina: game.staminaFrac(),
     locked,
   })
 
@@ -106,4 +123,4 @@ function frame(nowMs: number): void {
 
 requestAnimationFrame(frame)
 
-console.log('[cannonball] M1 sandbox — WASD run, Shift sprint, Space jump, Click/Ctrl mid-air = DIVE, Q/E tilt, R restart')
+console.log('[cannonball] WASD run, Shift sprint, Space jump, Click/Ctrl mid-air = DIVE, Q/E tilt')
