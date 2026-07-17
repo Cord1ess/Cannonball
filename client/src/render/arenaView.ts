@@ -141,6 +141,9 @@ export function createArenaView(radius = 28): ArenaView {
       ctx.drawImage(img, 0, 0)
       const id = ctx.getImageData(0, 0, s, s)
       const d = id.data
+      // EXACT approved pipeline — absolute min/max on the ORIGINAL PNG.
+      // Never feed this a lossy re-encode: JPEG smoothing + ringing shifts
+      // this normalization and washes the whole pitch out (it happened).
       let lo = 1
       let hi = 0
       for (let i = 0; i < s * s; i++) {
@@ -148,15 +151,13 @@ export function createArenaView(radius = 28): ArenaView {
         if (lum < lo) lo = lum
         if (lum > hi) hi = lum
       }
-      // the ground is the SHADOW layer under the blades: it lives well below
-      // the blade colors (deep base, capped ceiling) so blades blend DOWN
-      // into it instead of competing with it
-      const base = new THREE.Color(PALETTE.grassBase).multiplyScalar(0.62)
+      const base = new THREE.Color(PALETTE.grassBase).multiplyScalar(0.85)
       const tip = new THREE.Color(PALETTE.grassTip)
       const span = Math.max(0.01, hi - lo)
       for (let i = 0; i < s * s; i++) {
         const lum = (d[i * 4]! + d[i * 4 + 1]! + d[i * 4 + 2]!) / 765
-        const t = Math.pow((lum - lo) / span, 1.3) * 0.62
+        // gamma keeps the ground a touch deeper than the blade tips
+        const t = Math.pow((lum - lo) / span, 1.2) * 0.9
         d[i * 4] = Math.round((base.r + (tip.r - base.r) * t) * 255)
         d[i * 4 + 1] = Math.round((base.g + (tip.g - base.g) * t) * 255)
         d[i * 4 + 2] = Math.round((base.b + (tip.b - base.b) * t) * 255)
@@ -164,7 +165,7 @@ export function createArenaView(radius = 28): ArenaView {
       ctx.putImageData(id, 0, 0)
       groundTex.needsUpdate = true
     }
-    img.src = '/textures/pitch_grass.jpg'
+    img.src = '/textures/pitch_grass.png'
   }
   const floor = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.6, SEGMENTS), [
     makeToonMaterial(PALETTE.warmGray), // side

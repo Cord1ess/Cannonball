@@ -107,6 +107,10 @@ source folder `grass_02_1k/` gitignored). Feedback pass 4: the tile's luminance 
 onto the EXACT blade palette at load (grassBase→grassTip, unlit MeshBasicMaterial like the
 blades) so ground/blade color can never drift; ground chalk LINES removed (they doubled the
 blade-shader lines) — ground keeps only the pale neutral wash + faint mow bands.
+**⚠ NEVER re-encode pitch_grass.png (e.g. to JPEG "for size") and never touch the ground
+remap/blade-root constants.** The remap normalizes by the image's absolute min/max luminance;
+JPEG smoothing+ringing shifts that and washes the whole pitch out pale (cost 3 feedback
+rounds). PNG + this exact pipeline = the user-approved look. It is DONE.
 Wedge tint planes/strip lines/decals/disc meshes deleted (grass replaced them). Crowd: cubes →
 instanced BEAN spectators (torso+arms merged geometry + baked face plates, 2 draws, ~900), FIVE
 tiers + parapets + pennant flags; `recolorCrowd` at every morph dresses each wedge's stands
