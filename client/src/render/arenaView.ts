@@ -4,7 +4,8 @@ import { WALL_HEIGHT } from '@shared/constants.ts'
 import type { Arena } from '@shared/sim/arena.ts'
 import { yawTowardCenter } from '@shared/sim/arena.ts'
 import { KITS } from '@shared/cosmetics/jerseys.ts'
-import { createGrassField, type GrassField } from './grass.ts'
+import { createGrassField, type GrassBody, type GrassField } from './grass.ts'
+import { createWindStreaks, type WindStreaks } from './windStreaks.ts'
 import { addInkOutline, disposeHierarchy, INK_WEIGHT, makeToonMaterial } from './materials.ts'
 import { PALETTE } from './palette.ts'
 
@@ -22,7 +23,9 @@ export interface ArenaView {
   setZones(arena: Arena, zoneColors: readonly number[]): void
   /** meterFrac per zone [0..1] heats that wedge's grass */
   setDanger(fracs: readonly number[]): void
-  /** advances the grass wind */
+  /** bodies (players + ball) that flatten/part the grass this frame */
+  setGrassBodies(bodies: readonly GrassBody[]): void
+  /** advances the grass wind + wind streaks */
   update(dt: number): void
   dispose(): void
 }
@@ -234,6 +237,10 @@ export function createArenaView(radius = 28): ArenaView {
   const grass = createGrassField(radius, neutralRadius)
   group.add(grass.mesh)
 
+  // wind made visible: white streaks drifting on the wind, pulsing with gusts
+  const streaks: WindStreaks = createWindStreaks()
+  group.add(streaks.mesh)
+
   // seamless ring wall the players bounce off
   const wall = new THREE.Mesh(ringGeometry(radius, radius + 1.8, WALL_HEIGHT), makeToonMaterial(PALETTE.warmGray))
   addInkOutline(wall, INK_WEIGHT.arena)
@@ -423,13 +430,19 @@ export function createArenaView(radius = 28): ArenaView {
       grass.setDanger(fracs)
     },
 
+    setGrassBodies(list: readonly GrassBody[]): void {
+      grass.setBodies(list)
+    },
+
     update(dt: number): void {
       elapsed += dt
-      grass.update(elapsed)
+      const wind = grass.update(elapsed)
+      streaks.update(dt, wind.windX, wind.windZ, wind.gust)
     },
 
     dispose(): void {
       grass.dispose()
+      streaks.dispose()
       disposeHierarchy(group)
     },
   }

@@ -7,8 +7,11 @@ import { PALETTE } from './palette.ts'
  * curled and wind-animated in the vertex shader) but rebuilt for OUR flat
  * toon style and for gameplay:
  *
- * - one InstancedBufferGeometry, ~110k thin blades, 5 verts each — one draw
- * - coherent gust flow + per-blade flutter, sway scaled by tipness²
+ * - one InstancedBufferGeometry, ~160k thin blades, 5 verts each — one draw
+ * - LAYERED non-uniform wind: a slow base sway + big rolling gust fronts that
+ *   sweep across the field + per-blade flutter, all scaled by tipness²
+ * - INTERACTIVE: up to N bodies (players + ball) push blades radially away
+ *   and flatten them — grass parts around anyone standing in it
  * - the ZONES live in the shader: chalk division lines, the neutral-circle
  *   ring, per-zone danger tint and concentric mow bands are all computed
  *   per blade from uniforms — a morph is a uniform write, nothing rebuilds
@@ -18,12 +21,23 @@ import { PALETTE } from './palette.ts'
  */
 
 const MAX_ZONES = 6
+const MAX_BODIES = 8
+
+/** a body that pushes grass: world xz + radius (players ~0.5, ball ~2) */
+export interface GrassBody {
+  x: number
+  z: number
+  radius: number
+}
 
 export interface GrassField {
   readonly mesh: THREE.Mesh
   setZones(zoneCount: number, zoneColors: readonly number[]): void
   setDanger(fracs: readonly number[]): void
-  update(time: number): void
+  /** feed the bodies that flatten grass this frame (players + ball) */
+  setBodies(bodies: readonly GrassBody[]): void
+  /** advance wind time + expose the current wind direction (for streaks) */
+  update(time: number): { windX: number; windZ: number; gust: number }
   dispose(): void
 }
 
@@ -33,11 +47,14 @@ const VERT = /* glsl */ `
 
   uniform float uTime;
   uniform vec2 uWindDir;
+  uniform vec4 uBodies[${MAX_BODIES}]; // xz = pos, z-comp(w?) see below: x,y=pos z=radius w=unused
+  uniform int uBodyCount;
 
   varying float vT;         // 0 root .. 1 tip
   varying float vColorVar;
   varying vec2 vWorldXZ;
   varying float vEdge;      // 0 blade center .. 1 side edge (crayon border)
+  varying float vFlat;      // 0 upright .. 1 flattened by a body
 
   void main() {
     float t = position.y;   // blade template stores height-fraction in Y
@@ -49,6 +66,8 @@ const VERT = /* glsl */ `
     float c = cos(yaw);
     float s = sin(yaw);
 
+    vec2 root = aData.xy;
+
     // template X is the blade's width axis — rotate into place
     vec3 p = vec3(position.x * c, t * aData.w, position.x * -s);
 
@@ -57,14 +76,41 @@ const VERT = /* glsl */ `
     p.x += s * curl * t * t;
     p.z += c * curl * t * t;
 
-    // wind: coherent world-space gust flow + per-blade flutter (tipness²)
-    float gph = dot(aData.xy, uWindDir) * 0.14 + uTime * 1.35;
-    float gust = sin(gph) * 0.6 + sin(gph * 0.47 + 1.7) * 0.4;
+    // --- LAYERED non-uniform wind ------------------------------------------
+    // 1) slow base sway, coherent across the field
+    float base = dot(root, uWindDir) * 0.05 + uTime * 0.7;
+    float baseSway = sin(base) * 0.5 + sin(base * 0.37 + 1.1) * 0.3;
+    // 2) big rolling GUST FRONTS: a low-frequency wave sweeping along the wind,
+    //    so patches of the field surge together then calm — never uniform
+    float gp = dot(root, uWindDir) * 0.09 - uTime * 1.1;
+    float gustFront = smoothstep(0.2, 1.0, sin(gp) * 0.5 + 0.5); // 0..1 pulses
+    float gustSway = sin(gp * 2.3 + root.x * 0.3) * gustFront;
+    // 3) per-blade flutter (high freq, individual)
     float flutter = sin(uTime * 7.0 + aSeed.x * 6.2831) * 0.16;
-    float sway = (gust * 0.16 + flutter * 0.05) * t * t;
+
+    float sway = (baseSway * 0.13 + gustSway * 0.22 + flutter * 0.05) * t * t;
     p.xz += uWindDir * sway;
 
-    vec3 world = vec3(aData.x + p.x, p.y, aData.y + p.z);
+    // --- INTERACTIVE displacement ------------------------------------------
+    // bodies push blade tips radially away and mash them down
+    float flat = 0.0;
+    for (int i = 0; i < ${MAX_BODIES}; i++) {
+      if (i >= uBodyCount) break;
+      vec2 d = root - uBodies[i].xy;
+      float dist = length(d);
+      float rad = uBodies[i].z;
+      float infl = 1.0 - smoothstep(rad * 0.35, rad, dist);
+      if (infl > 0.0) {
+        vec2 push = (dist > 0.001 ? d / dist : vec2(1.0, 0.0));
+        // bend away from the body, stronger at the tip; mash height down
+        p.xz += push * infl * 0.7 * t;
+        flat = max(flat, infl);
+      }
+    }
+    p.y *= 1.0 - flat * 0.6; // flattened blades lose height
+    vFlat = flat;
+
+    vec3 world = vec3(root.x + p.x, p.y, root.y + p.z);
     vWorldXZ = world.xz;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(world, 1.0);
   }
@@ -86,6 +132,7 @@ const FRAG = /* glsl */ `
   varying float vColorVar;
   varying vec2 vWorldXZ;
   varying float vEdge;
+  varying float vFlat;
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -135,11 +182,14 @@ const FRAG = /* glsl */ `
     float neutral = 1.0 - smoothstep(uNeutralR - 0.2 + wob * 0.12, uNeutralR + 0.1 + wob * 0.12, r);
     col = mix(col, vec3(0.92, 0.9, 0.81), neutral * 0.4);
 
+    // trodden blades read a touch darker (pressed, in shadow)
+    col *= 1.0 - vFlat * 0.22;
+
     gl_FragColor = vec4(col, 1.0);
   }
 `
 
-export function createGrassField(radius: number, neutralRadius: number, blades = 110000): GrassField {
+export function createGrassField(radius: number, neutralRadius: number, blades = 160000): GrassField {
   // blade template: two side pairs + a pointed tip; Y carries height-fraction.
   // half-width must match the vertex shader's vEdge normalization (0.05)
   const template = new THREE.BufferGeometry()
@@ -174,6 +224,8 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
   geo.setAttribute('aData', new THREE.InstancedBufferAttribute(data, 4))
   geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 2))
 
+  const windDir = new THREE.Vector2(0.8, 0.6).normalize()
+  const bodies = Array.from({ length: MAX_BODIES }, () => new THREE.Vector4(0, 0, 0, 0))
   const zoneColors = Array.from({ length: MAX_ZONES }, () => new THREE.Color(PALETTE.grassBase))
   const material = new THREE.ShaderMaterial({
     vertexShader: VERT,
@@ -181,7 +233,7 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
     side: THREE.DoubleSide,
     uniforms: {
       uTime: { value: 0 },
-      uWindDir: { value: new THREE.Vector2(0.8, 0.6).normalize() },
+      uWindDir: { value: windDir },
       uBase: { value: new THREE.Color(PALETTE.grassBase) },
       uTip: { value: new THREE.Color(PALETTE.grassTip) },
       uChalk: { value: new THREE.Color(PALETTE.chalk) },
@@ -190,6 +242,8 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
       uRadius: { value: radius },
       uZoneColors: { value: zoneColors },
       uDanger: { value: new Array(MAX_ZONES).fill(0) },
+      uBodies: { value: bodies },
+      uBodyCount: { value: 0 },
     },
   })
 
@@ -208,8 +262,20 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
       const danger = material.uniforms.uDanger!.value as number[]
       for (let i = 0; i < MAX_ZONES; i++) danger[i] = Math.min(1, fracs[i] ?? 0)
     },
-    update(time: number): void {
+    setBodies(list: readonly GrassBody[]): void {
+      const n = Math.min(MAX_BODIES, list.length)
+      for (let i = 0; i < n; i++) {
+        const b = list[i]!
+        bodies[i]!.set(b.x, b.z, b.radius, 0)
+      }
+      material.uniforms.uBodyCount!.value = n
+    },
+    update(time: number): { windX: number; windZ: number; gust: number } {
       material.uniforms.uTime!.value = time
+      // report the gust envelope at the field center so streaks pulse with it
+      const gp = -time * 1.1
+      const gust = Math.max(0, Math.sin(gp) * 0.5 + 0.5)
+      return { windX: windDir.x, windZ: windDir.y, gust }
     },
     dispose(): void {
       geo.dispose()

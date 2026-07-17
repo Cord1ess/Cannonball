@@ -236,6 +236,12 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
       const interval = TICK_SECONDS_PER_SURVIVOR * survivors
       arenaView.setDanger(zoneSeat.map((seat) => (meters[seat] ?? 0) / Math.max(1, interval * 0.5)))
 
+      // grass parts around the player + ball (sandbox test path)
+      const bodies = []
+      if (players[0]!.y < 1.2) bodies.push({ x: px, z: pz, radius: 1.1 })
+      if (by < BALL_RADIUS + 1.2) bodies.push({ x: bx, z: bz, radius: BALL_RADIUS + 0.8 })
+      arenaView.setGrassBodies(bodies)
+
       camera.update(dt, px, py, pz)
     },
 

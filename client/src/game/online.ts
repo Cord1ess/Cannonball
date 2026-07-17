@@ -31,6 +31,7 @@ import {
   type SaveStore,
 } from '@vendor/platform/save-data.ts'
 import { createArenaView, type ArenaView } from '../render/arenaView.ts'
+import type { GrassBody } from '../render/grass.ts'
 import { createBallView, type BallView } from '../render/ballView.ts'
 import { createBean, type Bean } from '../render/bean.ts'
 import { PALETTE } from '../render/palette.ts'
@@ -181,6 +182,17 @@ export function createOnlineGame(
   let timeOffset: number | null = null
   let lastPatchAt = 0
   const serverMe = { x: 0, y: 0, z: 0, has: false }
+  // pooled grass bodies — reused each frame so the hot path never allocates
+  const grassBodyPool: GrassBody[] = Array.from({ length: 8 }, () => ({ x: 0, z: 0, radius: 0 }))
+  const grassBodies: GrassBody[] = []
+  const pushBody = (x: number, z: number, radius: number): void => {
+    const b = grassBodyPool[grassBodies.length]
+    if (!b) return
+    b.x = x
+    b.z = z
+    b.radius = radius
+    grassBodies.push(b)
+  }
 
   // --- match UI plumbing --------------------------------------------------------------
   let draftOffers: Record<CardPool, string[]> | null = null
@@ -710,6 +722,15 @@ export function createOnlineGame(
       const zoneSeatArr = state.zoneSeat
       const zoneOwner = zone >= 0 && zoneSeatArr ? zoneSeatArr[zone] : undefined
       ballView.update(bx, by, bz, zoneOwner !== undefined ? (seatColors[zoneOwner] ?? null) : null)
+
+      // grass parts around bodies near the ground: self + alive remotes + ball
+      grassBodies.length = 0
+      if (localSim && aliveOf(mySeat) && selfY < 1.2) pushBody(selfX, selfZ, 1.1)
+      for (const remote of remotes.values()) {
+        if (aliveOf(remote.seat) && remote.stub.y < 1.2) pushBody(remote.stub.x, remote.stub.z, 1.1)
+      }
+      if (by < BALL_RADIUS + 1.2) pushBody(bx, bz, BALL_RADIUS + 0.8)
+      arenaView.setGrassBodies(grassBodies)
 
       const fracs: number[] = []
       const capacity =

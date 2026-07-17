@@ -103,7 +103,17 @@ Feedback pass 3 (top-down gaps): the floor under the blades now wears the user's
 grass_02 tile, preprocessed ONCE offline (playwright canvas: white-clover flowers masked by
 blue/green ratio > 0.62 — probed, grass tops out ~0.45 — dilated, onion-peel inpainted, then
 pastelized to palette) → `client/public/textures/pitch_grass.png` (the ONLY authored asset;
-source folder `grass_02_1k/` gitignored). Feedback pass 4: the tile's luminance is remapped
+source folder `grass_02_1k/` gitignored). **Grass upgrades (user request, all in the vertex shader — measured near-zero cost, ~2ms/frame
+uncapped at 160k):** blade count 110k→160k; wind is now LAYERED and non-uniform (slow base sway +
+big rolling gust fronts that sweep across the field + per-blade flutter); INTERACTIVE displacement
+— up to 8 bodies (players + ball, fed each frame from online.ts/sandbox.ts via `setGrassBodies`,
+pooled/no-alloc) push blades radially away and mash their height, trodden blades darken; wind made
+VISIBLE via `render/windStreaks.ts` (90 instanced additive dashes drifting on the wind, length +
+alpha pulse with the gust envelope the grass returns from `update()`). ArenaView threads wind→
+streaks and exposes `setGrassBodies`. Perf headroom confirmed earlier: fill-bound not geometry-
+bound, ~5x headroom at 1080p, so all this was free.
+
+Feedback pass 4: the tile's luminance is remapped
 onto the EXACT blade palette at load (grassBase→grassTip, unlit MeshBasicMaterial like the
 blades) so ground/blade color can never drift; ground chalk LINES removed (they doubled the
 blade-shader lines) — ground keeps only the pale neutral wash + faint mow bands.
