@@ -204,17 +204,28 @@ const FRAG = /* glsl */ `
     // which painted zone sector is this blade in?
     int zone = int(mod(floor(angle / span + 0.5), uZoneCount));
 
-    // danger heat: the wedge scorches toward warning RED as its meter fills.
-    // NO tint at rest — team colors must NEVER bleed into the grass (they did,
-    // via a 0.06 floor, so a yellow-kit wedge had permanently yellow grass).
+    // OWNERSHIP: each wedge takes a clear tint of its owner's team color so
+    // you always know whose zone you're standing in. On top, DANGER scorches
+    // it toward red as that wedge's meter fills. (This intentional tint is
+    // NOT the old bug — that was a stray team-color floor on the danger mix;
+    // this is a deliberate, readable ownership signal.)
+    vec3 ownerCol = uBase;
     float danger = 0.0;
     for (int i = 0; i < ${MAX_ZONES}; i++) {
-      if (i == zone) danger = uDanger[i];
+      if (i == zone) { ownerCol = uZoneColors[i]; danger = uDanger[i]; }
     }
-    col = mix(col, vec3(0.78, 0.24, 0.20), danger * 0.4);
+    // stronger toward the wall, fading to plain grass near the neutral disc,
+    // so the center stays clean and the tint reads as "this side is theirs"
+    float ownEdge = smoothstep(uNeutralR, uRadius * 0.9, r);
+    col = mix(col, ownerCol, 0.16 * ownEdge);
+    col = mix(col, vec3(0.82, 0.20, 0.16), danger * 0.45);
 
-    // chalk: zone division lines + neutral ring — wobbly width, grainy fill
-    float toBoundary = abs(mod(angle + span * 0.5, span) - span * 0.5) * r + wob * 0.1;
+    // chalk: zone division lines + neutral ring — wobbly width, grainy fill.
+    // The BOUNDARY between zone i and i+1 is at (i+0.5)*span (zones are
+    // CENTERED on k*span, matching footprintZone's round(angle/span)). So the
+    // line sits where mod(angle, span) is near span*0.5 — NOT k*span, which
+    // would draw straight through each zone's middle (the old bug).
+    float toBoundary = abs(mod(angle, span) - span * 0.5) * r + wob * 0.1;
     float chalk = 1.0 - smoothstep(0.1, 0.28 + wob * 0.06, toBoundary);
     chalk *= step(uNeutralR, r); // lines start at the neutral circle
     chalk = max(chalk, 1.0 - smoothstep(0.12, 0.32, abs(r - uNeutralR + wob * 0.12)));

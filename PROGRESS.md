@@ -15,6 +15,18 @@ matchUi `nameOf(seat)`), and as **floating billboard tags over each bean's head*
 with two-browser same-room test: both names propagate, tags render over heads (screenshotted).
 Gameplay time DOUBLED for playtesting (tick 10s×survivors, duel 30s).
 
+### Zone fixes (critical — playtest feedback)
+BUG: chalk division lines were drawn at k*span (the zone CENTERS = zoneAngles[i]) instead of
+(k+0.5)*span (the BOUNDARIES) — so a line ran through each zone's middle, not between zones.
+Fixed the grass frag `toBoundary` to `mod(angle, span)` (numerically verified: all 6 lines now
+sit exactly where footprintZone flips owners). WHO-OWNS-WHAT indicator added: (1) each wedge's
+grass now takes a deliberate 16% tint of its OWNER's team color, fading toward the neutral disc
+(this is intentional + readable, NOT the old danger-floor bleed bug); danger red layers on top.
+(2) floating owner-name labels — one persistent `nameTag` per zone placed at the wedge's wall
+anchor, showing the owner's name colored by their kit (`zoneLabels` pool in online.ts, driven
+from state.zoneSeat + playerNameOf). Own wedge shows your name too (tells you which slice to
+defend). Both verified on a live 6-zone arena.
+
 ---
 
 ## DONE

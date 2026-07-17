@@ -9,7 +9,7 @@ import {
   SPRINT_SPEED,
   STAMINA_MAX,
 } from '@shared/constants.ts'
-import { footprintZone, makeArena, type Arena } from '@shared/sim/arena.ts'
+import { footprintZone, makeArena, zoneAnchor, type Arena } from '@shared/sim/arena.ts'
 import type { NetHandoutRead, NetInput, NetPlayerRead, NetStateRead } from '@shared/sim/net.ts'
 import {
   applyWindToPlayer,
@@ -175,6 +175,12 @@ export function createOnlineGame(
   let myBean: Bean | null = null
   const myTag: NameTag = createNameTag()
   scene.add(myTag.sprite)
+  // one persistent owner label per zone (placed in the wedge, shows whose it is)
+  const zoneLabels: NameTag[] = Array.from({ length: 6 }, () => {
+    const t = createNameTag()
+    scene.add(t.sprite)
+    return t
+  })
   const selfSnaps: Snap[] = []
   const inputBuffer: NetInput[] = []
   let seq = 0
@@ -296,6 +302,14 @@ export function createOnlineGame(
       if (p.seat === seat) alive = p.alive
     })
     return alive
+  }
+
+  function playerNameOf(seat: number): string {
+    let name = `Player ${seat + 1}`
+    state.players.forEach((p) => {
+      if (p.seat === seat && p.name) name = p.name
+    })
+    return name
   }
 
   function ensureLocal(): void {
@@ -862,6 +876,25 @@ export function createOnlineGame(
         fracs.push((state.meters?.[seat] ?? 0) / Math.max(1, capacity))
       }
       arenaView.setDanger(fracs)
+
+      // zone-owner labels: one floating tag per wedge, near its wall, showing
+      // whose zone it is + colored by that owner — the primary "who owns what".
+      const zoneCount = zoneSeatArr?.length ?? 0
+      const showZoneLabels = isPlayPhase(state.phase ?? 0)
+      for (let i = 0; i < zoneLabels.length; i++) {
+        const label = zoneLabels[i]!
+        if (!showZoneLabels || i >= zoneCount) {
+          label.setVisible(false)
+          continue
+        }
+        const seat = zoneSeatArr[i] ?? 0
+        const owner = playerNameOf(seat)
+        label.set(owner, toHex(seatColors[seat] ?? 0x888888))
+        const a = zoneAnchor(arena, i, 0.86) // out near the wall of this wedge
+        // place() adds +2.55 internally; pass a low base so it floats ~1.3m up
+        label.place(a.x, -1.25, a.z)
+        label.setVisible(true)
+      }
 
       // camera: chase while playing/waiting, slow orbit while eliminated
       if (this.spectating()) {
