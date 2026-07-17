@@ -11,7 +11,8 @@ import { Client, type Room } from '@colyseus/sdk'
  * if our player never appears in replicated state, the zombie connection is
  * dropped and we retry with a clean join. An empty frozen world can't happen.
  *
- * URL flags: `?fresh` forces a brand-new room · `?lag=100` delays sends N ms.
+ * URL flags: `?fresh` forces a brand-new room · `?lag=100` delays sends N ms
+ * · `?fast` creates the room with 0.15x phase timers (dev iteration).
  */
 
 const TOKEN_KEY = 'cannonball:reconnection'
@@ -50,6 +51,7 @@ export async function connect(): Promise<Connection> {
   const client = new Client(endpoint)
   const params = new URLSearchParams(location.search)
   const fresh = params.has('fresh')
+  const roomOptions = params.has('fast') ? { fast: true } : {}
 
   let room: Room | null = null
 
@@ -69,8 +71,8 @@ export async function connect(): Promise<Connection> {
   // 2) fresh join (with one verified retry against zombie connections)
   for (let attempt = 0; attempt < 2 && !room; attempt++) {
     room = fresh
-      ? await withTimeout(client.create('match'), 6000, 'create')
-      : await withTimeout(client.joinOrCreate('match'), 6000, 'join')
+      ? await withTimeout(client.create('match', roomOptions), 6000, 'create')
+      : await withTimeout(client.joinOrCreate('match', roomOptions), 6000, 'join')
     if (!(await stateArrives(room, 3000))) {
       console.warn('[net] joined but state never arrived — dropping zombie connection, retrying')
       try {
@@ -92,7 +94,7 @@ export async function connect(): Promise<Connection> {
     } catch {
       /* already dead */
     }
-    room = await withTimeout(client.joinOrCreate('match'), 6000, 'rejoin')
+    room = await withTimeout(client.joinOrCreate('match', roomOptions), 6000, 'rejoin')
     if (!(await stateArrives(room, 3000))) throw new Error('server replicates no state')
   }
 

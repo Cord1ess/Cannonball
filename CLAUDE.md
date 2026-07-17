@@ -38,7 +38,9 @@ Giant ball, wedge zones, tick eliminations, dive-headers, card draft. Solo dev +
 - `Room<{ state: MatchStateT }>` generic; `onLeave(client, code)` — code 4000 = consented.
 - Colyseus 0.17 serves `GET /__healthcheck` itself; never add a custom request handler (it races).
 - Room option `{ fast: true }` scales all pauses/ticks ×0.15 (tests/dev).
-- Client URL flags: `?offline` (M1 sandbox) · `?fresh` (new room) · `?lag=100` (send delay).
-- Debug: backquote = panel (reset round/ball, ball-to-me, wind, elim-me, new room), G = server ghosts.
+- Client URL flags: `?offline` (M1 sandbox) · `?fresh` (new room) · `?lag=100` (send delay)
+  · `?fast` (create room with 0.15x phase timers).
+- Debug: backquote = panel (skip-phase, live ±bot, freeze ticks, reset round/ball, ball-to-me,
+  wind, elim-me, new room), G = server ghosts.
 - Reload reconnects to the same seat via sessionStorage token + 20s grace.
 - All tuning constants live in `shared/src/constants.ts`; cards in `shared/src/cards/definitions.ts`.

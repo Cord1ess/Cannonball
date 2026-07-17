@@ -12,7 +12,8 @@ import { createDebugDraw, type DebugDraw } from '@vendor/debug/debug-draw.ts'
 
 export interface DebugHooks {
   label: string
-  /** debug commands: resetRound | resetBall | ballToMe | windToggle | elimMe */
+  /** debug commands: skipPhase | botPlus | botMinus | freeze | resetRound |
+   *  resetBall | ballToMe | windToggle | elimMe */
   send(cmd: string): void
   /** per-frame stats, rendered in the panel */
   info(): Record<string, string | number>
@@ -25,6 +26,12 @@ export interface DebugPanel {
 }
 
 const BUTTONS: ReadonlyArray<readonly [string, string]> = [
+  // fast iteration: skip drives the whole flow, bots join/leave LIVE mid-match,
+  // freeze stops the match clock (ticks/eliminations) while physics stays on
+  ['skip phase »', 'skipPhase'],
+  ['+ bot live', 'botPlus'],
+  ['− bot live', 'botMinus'],
+  ['freeze ticks', 'freeze'],
   ['reset round', 'resetRound'],
   ['reset ball', 'resetBall'],
   ['ball to me', 'ballToMe'],
@@ -80,7 +87,7 @@ export function createDebugPanel(
   panel.appendChild(stats)
 
   const help = document.createElement('div')
-  help.textContent = '` panel · G ghosts · ?lag=100 · ?offline · ?fresh'
+  help.textContent = '` panel · G ghosts · ?lag=100 · ?offline · ?fresh · ?fast (0.15x timers)'
   help.style.cssText = 'margin-top:6px;color:#9b948a;'
   panel.appendChild(help)
 

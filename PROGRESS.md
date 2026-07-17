@@ -78,6 +78,14 @@ invalid-id/bot kits/lock), smoke+smoke-bots regressions, playwright lobby+launch
 **M4a AND M4b are NOT yet user-playtested in-browser — first thing next session may be feedback
 on card feel or jersey look.**
 
+### Debug fast-iteration tools (user pain: 30s waits per test loop)
+Panel (backquote) now has: **skip phase »** (one button drives lobby→draft→launch→arena→…→
+rematch, fast-forwarding every wait; draft auto-picks), **+/− bot live** (join/yank bots
+MID-MATCH — zones/cannons/crowd repaint instantly, no elimination ceremony; removal blocked
+below 2 alive), **freeze ticks** (toggle: physics/abilities stay live, accrual/ticks/
+eliminations stand still; auto-unfreezes at rematch). Plus `?fast` URL flag = create the room
+with 0.15x timers from the browser. `scripts/smoke-debug.ts` covers all three.
+
 ### M5a.2 — flat look + grass pitch + bean crowd (user feedback pass)
 Gouache texture KILLED everywhere (it had seams/scale problems): `makeToonMaterial(color)` is now
 a FLAT toon fill, Fall Guys-clean; stone palette brightened (warmGray/greenGray). THE PITCH:

@@ -109,6 +109,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #overtimeSeats: number[] = []
   #handoutTimer = 0
   #activeHandoutIds = new Set<string>()
+  /** debug: physics runs but the match clock (ticks/eliminations) stands still */
+  #frozen = false
   /** active restart cards per seat — expire at the next restart (idea.md §2) */
   #activeCards: string[][] = Array.from({ length: MAX_SEATS }, () => [])
   #freeSaves: number[] = new Array(MAX_SEATS).fill(0)
@@ -247,6 +249,18 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
           if (session && this.#alive[session.sim.seat] && this.#phase !== Phase.Lobby) {
             this.#eliminate(session.sim.seat)
           }
+          break
+        case 'skipPhase':
+          this.#debugSkipPhase()
+          break
+        case 'botPlus':
+          this.#debugAddBotLive()
+          break
+        case 'botMinus':
+          this.#debugRemoveBotLive()
+          break
+        case 'freeze':
+          this.#frozen = !this.#frozen
           break
       }
       console.log(`[room ${this.roomId}] debug: ${message?.cmd}`)
@@ -459,6 +473,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#clearHandout()
     this.#activeCards = Array.from({ length: MAX_SEATS }, () => [])
     this.#freeSaves.fill(0)
+    this.#frozen = false
     for (const session of this.#sessions.values()) {
       session.picks = {}
       session.offers = null
@@ -790,6 +805,10 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     for (const ability of this.#events.abilities) this.broadcast('ability', ability)
     clearEvents(this.#events)
 
+    // debug freeze: everything above (physics, abilities) stays live,
+    // everything below (accrual, ticks, eliminations) stands still
+    if (this.#frozen) return
+
     // zone ownership honors Slim/Wide Zone widths (indexed by zone order)
     const widths = this.#zoneSeat.map((seat) => {
       for (const session of this.#sessions.values()) {
@@ -876,6 +895,70 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     resetBall(this.#ball)
     this.broadcast('overtime', { seats: losers })
     this.#enter(Phase.Overtime, 0)
+  }
+
+  // --- debug fast-iteration tools ------------------------------------------------
+
+  /** one button drives the whole flow: lobby starts, waits fast-forward */
+  #debugSkipPhase(): void {
+    switch (this.#phase) {
+      case Phase.Lobby:
+        this.#startMatch()
+        break
+      case Phase.Draft:
+        this.#finishDraft()
+        break
+      case Phase.Launch:
+        this.#fire()
+        break
+      case Phase.Restart:
+        if (!this.state.handout.revealed) this.#autoAssignHandout()
+        this.#morphArena(this.state.halftime)
+        this.state.halftime = false
+        this.#clearHandout()
+        this.#beginLaunch()
+        break
+      case Phase.End:
+        this.#toLobby()
+        break
+    }
+  }
+
+  /** drop a bot straight onto the field mid-match: zones repaint live */
+  #debugAddBotLive(): void {
+    if (!this.#addBot()) return
+    if (this.#phase === Phase.Lobby) return // normal lobby join is enough
+    const session = [...this.#sessions.values()].pop()
+    if (!session) return
+    const seat = session.sim.seat
+    this.#alive[seat] = true
+    this.#meters[seat] = 0
+    this.#cumulative[seat] = 0
+    this.#morphArena()
+    const zone = this.#zoneSeat.indexOf(seat)
+    const anchor = zoneAnchor(this.#arena, Math.max(zone, 0), 0.6)
+    session.sim.x = anchor.x
+    session.sim.z = anchor.z
+    session.sim.y = 0
+    session.sim.vx = session.sim.vy = session.sim.vz = 0
+    session.sim.yaw = yawTowardCenter(anchor.x, anchor.z)
+  }
+
+  /** yank the last-added bot without any elimination ceremony */
+  #debugRemoveBotLive(): void {
+    const entries = [...this.#sessions.entries()]
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const [id, session] = entries[i]!
+      if (!session.isBot) continue
+      // never leave a live match with fewer than 2 beans standing
+      if (this.#phase !== Phase.Lobby && this.#alive[session.sim.seat] && this.#survivors <= 2) return
+      this.#sessions.delete(id)
+      this.state.players.delete(id)
+      this.#alive[session.sim.seat] = false
+      if (this.#phase === Phase.Lobby) this.#resolveKits()
+      else this.#morphArena()
+      return
+    }
   }
 
   #cardsOf(session: Session): string[] {
