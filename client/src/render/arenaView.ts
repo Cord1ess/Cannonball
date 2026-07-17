@@ -172,15 +172,18 @@ export function createArenaView(radius = 28): ArenaView {
         if (lum < lo) lo = lum
         if (lum > hi) hi = lum
       }
+      // GROUND_DARKEN uniformly deepens the finished tile (1 = neutral).
+      // This is the ONE knob for "make the ground darker/lighter."
+      const GROUND_DARKEN = 0.88
       const base = new THREE.Color(PALETTE.grassBase).multiplyScalar(0.85)
       const tip = new THREE.Color(PALETTE.grassTip)
       const span = Math.max(0.01, hi - lo)
       for (let i = 0; i < s * s; i++) {
         const lum = (d[i * 4]! + d[i * 4 + 1]! + d[i * 4 + 2]!) / 765
         const t = Math.pow((lum - lo) / span, 1.2) * 0.9
-        d[i * 4] = Math.round((base.r + (tip.r - base.r) * t) * 255)
-        d[i * 4 + 1] = Math.round((base.g + (tip.g - base.g) * t) * 255)
-        d[i * 4 + 2] = Math.round((base.b + (tip.b - base.b) * t) * 255)
+        d[i * 4] = Math.round((base.r + (tip.r - base.r) * t) * 255 * GROUND_DARKEN)
+        d[i * 4 + 1] = Math.round((base.g + (tip.g - base.g) * t) * 255 * GROUND_DARKEN)
+        d[i * 4 + 2] = Math.round((base.b + (tip.b - base.b) * t) * 255 * GROUND_DARKEN)
       }
       ctx.putImageData(id, 0, 0)
       // canvas is fully painted NOW — build a fresh texture from it and swap.
