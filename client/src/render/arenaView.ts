@@ -102,7 +102,7 @@ export function createArenaView(radius = 28): ArenaView {
   // floor slab: soil-green top under the grass, stone rim
   const floor = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.6, SEGMENTS), [
     makeToonMaterial(PALETTE.warmGray), // side
-    makeToonMaterial(0x3e7f45), // top: soil under the pitch
+    makeToonMaterial(0x74ad6b), // top: soil under the pitch, pastel like the blades
     makeToonMaterial(PALETTE.warmGray), // bottom
   ])
   floor.position.y = -0.3

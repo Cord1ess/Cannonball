@@ -85,6 +85,8 @@ a FLAT toon fill, Fall Guys-clean; stone palette brightened (warmGray/greenGray)
 achrefelouafi/GrassSystemThreeJS per user, rebuilt in our style): ~60k blades, 5 verts each, ONE
 draw call, wind gust+flutter in the vertex shader; ZONES LIVE IN THE SHADER — chalk division
 lines, neutral-circle ring, per-zone danger heat, mow bands — so a morph is a uniform write.
+Feedback pass 2: pastel sun-washed greens, ~110k thinner blades (w 0.05), crayon discipline —
+chalk lines wobble + grain like hand strokes, blades darken toward their side edges.
 Wedge tint planes/strip lines/decals/disc meshes deleted (grass replaced them). Crowd: cubes →
 instanced BEAN spectators (torso+arms merged geometry + baked face plates, 2 draws, ~900), FIVE
 tiers + parapets + pennant flags; `recolorCrowd` at every morph dresses each wedge's stands

@@ -7,11 +7,14 @@ import { PALETTE } from './palette.ts'
  * curled and wind-animated in the vertex shader) but rebuilt for OUR flat
  * toon style and for gameplay:
  *
- * - one InstancedBufferGeometry, ~60k blades, 5 verts each — one draw call
+ * - one InstancedBufferGeometry, ~110k thin blades, 5 verts each — one draw
  * - coherent gust flow + per-blade flutter, sway scaled by tipness²
  * - the ZONES live in the shader: chalk division lines, the neutral-circle
  *   ring, per-zone danger tint and concentric mow bands are all computed
  *   per blade from uniforms — a morph is a uniform write, nothing rebuilds
+ * - crayon discipline: chalk lines wobble and grain like hand-drawn strokes,
+ *   and every blade darkens toward its side edges — a drawn border, not a
+ *   vector fill
  */
 
 const MAX_ZONES = 6
@@ -34,11 +37,13 @@ const VERT = /* glsl */ `
   varying float vT;         // 0 root .. 1 tip
   varying float vColorVar;
   varying vec2 vWorldXZ;
+  varying float vEdge;      // 0 blade center .. 1 side edge (crayon border)
 
   void main() {
     float t = position.y;   // blade template stores height-fraction in Y
     vT = t;
     vColorVar = aSeed.y;
+    vEdge = abs(position.x) / 0.05; // template half-width
 
     float yaw = aData.z;
     float c = cos(yaw);
@@ -80,48 +85,64 @@ const FRAG = /* glsl */ `
   varying float vT;
   varying float vColorVar;
   varying vec2 vWorldXZ;
+  varying float vEdge;
+
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
 
   void main() {
     float r = length(vWorldXZ);
 
-    // flat toon gradient root->tip + per-blade brightness scatter + base AO
+    // flat pastel gradient root->tip + per-blade scatter + soft base shade
     vec3 col = mix(uBase, uTip, vT);
-    col *= mix(0.92, 1.08, vColorVar);
-    col *= mix(0.62, 1.0, smoothstep(0.0, 0.45, vT));
+    col *= mix(0.93, 1.07, vColorVar);
+    col *= mix(0.78, 1.0, smoothstep(0.0, 0.45, vT));
 
-    // concentric mow bands, like a real groundskeeper drives
-    float band = step(2.4, mod(r, 4.8));
-    col *= mix(0.94, 1.045, band);
+    // crayon border: each blade darkens toward its drawn side edges
+    col *= 1.0 - smoothstep(0.45, 1.0, vEdge) * 0.2;
 
-    // which painted zone sector is this blade in?
     float tau = 6.2831853;
     float span = tau / uZoneCount;
     float angle = mod(atan(vWorldXZ.y, vWorldXZ.x) + tau, tau);
+
+    // hand wobble: every painted border drifts like a crayon stroke
+    float wob = sin(angle * 21.0 + r * 2.3) * 0.6 + sin(angle * 8.0 - r * 4.1) * 0.4;
+    float grain = hash(floor(vWorldXZ * 6.5)); // crayon grain speckle
+
+    // concentric mow bands, edges wobbling too
+    float band = step(2.4, mod(r + wob * 0.35, 4.8));
+    col *= mix(0.95, 1.04, band);
+
+    // which painted zone sector is this blade in?
     int zone = int(mod(floor(angle / span + 0.5), uZoneCount));
 
     // danger heat: the wedge blushes with its seat's color
     for (int i = 0; i < ${MAX_ZONES}; i++) {
-      if (i == zone) col = mix(col, uZoneColors[i], 0.06 + uDanger[i] * 0.34);
+      if (i == zone) col = mix(col, uZoneColors[i], 0.06 + uDanger[i] * 0.32);
     }
 
-    // chalk: zone division lines (constant world width) + neutral ring
-    float toBoundary = abs(mod(angle + span * 0.5, span) - span * 0.5) * r;
-    float chalk = 1.0 - smoothstep(0.14, 0.3, toBoundary);
+    // chalk: zone division lines + neutral ring — wobbly width, grainy fill
+    float toBoundary = abs(mod(angle + span * 0.5, span) - span * 0.5) * r + wob * 0.1;
+    float chalk = 1.0 - smoothstep(0.1, 0.28 + wob * 0.06, toBoundary);
     chalk *= step(uNeutralR, r); // lines start at the neutral circle
-    chalk = max(chalk, 1.0 - smoothstep(0.16, 0.34, abs(r - uNeutralR)));
-    col = mix(col, uChalk, chalk * 0.9);
+    chalk = max(chalk, 1.0 - smoothstep(0.12, 0.32, abs(r - uNeutralR + wob * 0.12)));
+    chalk *= 0.62 + 0.38 * grain; // the stroke breathes, never a vector fill
+    col = mix(col, uChalk, chalk * 0.92);
 
-    // the neutral disc counts for nobody: pale, worn turf
-    col = mix(col, vec3(0.91, 0.89, 0.8), (1.0 - step(uNeutralR, r)) * 0.42);
+    // the neutral disc counts for nobody: pale, worn turf (wobbly rim)
+    float neutral = 1.0 - smoothstep(uNeutralR - 0.2 + wob * 0.12, uNeutralR + 0.1 + wob * 0.12, r);
+    col = mix(col, vec3(0.92, 0.9, 0.81), neutral * 0.4);
 
     gl_FragColor = vec4(col, 1.0);
   }
 `
 
-export function createGrassField(radius: number, neutralRadius: number, blades = 60000): GrassField {
-  // blade template: two side pairs + a pointed tip; Y carries height-fraction
+export function createGrassField(radius: number, neutralRadius: number, blades = 110000): GrassField {
+  // blade template: two side pairs + a pointed tip; Y carries height-fraction.
+  // half-width must match the vertex shader's vEdge normalization (0.05)
   const template = new THREE.BufferGeometry()
-  const w = 0.085
+  const w = 0.05
   template.setAttribute(
     'position',
     new THREE.Float32BufferAttribute(
@@ -145,7 +166,7 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
     data[i * 4] = Math.cos(a) * r
     data[i * 4 + 1] = Math.sin(a) * r
     data[i * 4 + 2] = Math.random() * Math.PI * 2
-    data[i * 4 + 3] = 0.42 + Math.random() * 0.34 // blade height in meters
+    data[i * 4 + 3] = 0.36 + Math.random() * 0.3 // blade height in meters
     seed[i * 2] = Math.random()
     seed[i * 2 + 1] = Math.random()
   }

@@ -10,10 +10,10 @@ export const PALETTE = {
   greenGray: 0xdcd2b8,
   offWhite: 0xefebe0,
   shadowShape: 0xc2beb8,
-  // the pitch
-  grassBase: 0x4f9e54,
-  grassTip: 0x8ecf6f,
-  chalk: 0xf4f0e0,
+  // the pitch — pastel, sun-washed greens
+  grassBase: 0x8cc981,
+  grassTip: 0xcdecab,
+  chalk: 0xf6f2e2,
   // ink
   ink: 0x4a443c,
   // team accents (fallback kit set — the "red postbox" role)
