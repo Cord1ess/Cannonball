@@ -10,6 +10,7 @@ import {
   BALL_RADIUS,
   BALL_RESTITUTION,
   BALL_SUBSTEP_TRAVEL,
+  BODY_FRICTION_MU,
   BODY_RESTITUTION,
   CONTACT_CORRECTION,
   CONTACT_SLOP,
@@ -465,6 +466,29 @@ function resolveBallPlayerContacts(
       p.vx -= nx * playerDv
       p.vy -= ny * playerDv
       p.vz -= nz * playerDv
+
+      // Coulomb friction: damp tangential slip, clamped to mu * normal impulse.
+      // This is what makes dribbles grip and brush contacts feel meaty.
+      const rvx2 = ball.vx - p.vx
+      const rvy2 = ball.vy - p.vy
+      const rvz2 = ball.vz - p.vz
+      const rn2 = rvx2 * nx + rvy2 * ny + rvz2 * nz
+      const tx = rvx2 - nx * rn2
+      const ty = rvy2 - ny * rn2
+      const tz = rvz2 - nz * rn2
+      const tMag = Math.hypot(tx, ty, tz)
+      if (tMag > 1e-4) {
+        const jt = Math.min(tMag / INV_MASS_SUM, BODY_FRICTION_MU * j)
+        const ux = tx / tMag
+        const uy = ty / tMag
+        const uz = tz / tMag
+        ball.vx -= ux * jt * INV_BALL_MASS
+        ball.vy -= uy * jt * INV_BALL_MASS
+        ball.vz -= uz * jt * INV_BALL_MASS
+        p.vx += ux * jt * INV_PLAYER_MASS
+        p.vy += uy * jt * INV_PLAYER_MASS
+        p.vz += uz * jt * INV_PLAYER_MASS
+      }
 
       // clamp launches so they stay readable
       const pSpeed = Math.hypot(p.vx, p.vy, p.vz)

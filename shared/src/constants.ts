@@ -77,6 +77,7 @@ export const HEADER_COOLDOWN_S = 0.35
 export const BALL_MASS = 5 // vs player mass 1: the ball wins exchanges naturally
 export const PLAYER_MASS = 1
 export const BODY_RESTITUTION = 0.2 // body contact is a thud, not a bounce
+export const BODY_FRICTION_MU = 0.25 // Coulomb clamp: grip on brush contacts, dribbles
 export const CONTACT_SLOP = 0.02 // allowed overlap — kills micro-jitter
 export const CONTACT_CORRECTION = 0.8 // Baumgarte: fraction of penetration fixed/step
 export const BALL_SUBSTEP_TRAVEL = 0.3 // max ball travel per substep (anti-tunnel)

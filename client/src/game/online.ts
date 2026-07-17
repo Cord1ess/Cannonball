@@ -3,6 +3,7 @@ import {
   BALL_RADIUS,
   FIXED_DELTA,
   INTERP_DELAY_MS,
+  PATCH_HZ,
   SPRINT_SPEED,
   STAMINA_MAX,
   TICK_SECONDS_PER_SURVIVOR,
@@ -41,6 +42,7 @@ import { SEAT_COLORS } from './sandbox.ts'
 
 const SEATS = 6
 const SNAP_ERROR = 3 // beyond this, stop blending and teleport
+const SERVER_BALL_LOOKAHEAD_S = 0.7 / PATCH_HZ // sample staleness compensation
 
 interface RemoteSnap {
   t: number
@@ -219,9 +221,17 @@ export function createOnlineGame(
     serverBall.vx = state.ball.vx
     serverBall.vy = state.ball.vy
     serverBall.vz = state.ball.vz
-    const errX = serverBall.x - ball.x
-    const errY = serverBall.y - ball.y
-    const errZ = serverBall.z - ball.z
+    // the sample is ~half a patch interval stale by the time we compare —
+    // extrapolate it along its own velocity so corrections never drag a fast
+    // ball backward down its path (reads as rubber-banding at speed)
+    const srvSpeed = Math.hypot(serverBall.vx, serverBall.vy, serverBall.vz)
+    const lookahead = srvSpeed > 0.5 ? SERVER_BALL_LOOKAHEAD_S : 0
+    const sx = serverBall.x + serverBall.vx * lookahead
+    const sy = Math.max(BALL_RADIUS, serverBall.y + serverBall.vy * lookahead)
+    const sz = serverBall.z + serverBall.vz * lookahead
+    const errX = sx - ball.x
+    const errY = sy - ball.y
+    const errZ = sz - ball.z
     const err = Math.hypot(errX, errY, errZ)
     if (err > SNAP_ERROR) {
       ball.x = serverBall.x
