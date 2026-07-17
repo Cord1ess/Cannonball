@@ -32,7 +32,8 @@
 - **One ball** in play at baseline. (Extra balls, if they ever exist, would be a card or escalation effect — decided in later sections.)
 - The ball is a lively physics object: it rolls, bounces, and gets pushed around by wind, platforms, and players.
 - **Body contact = weak nudge.** Running into or touching the ball moves it a little. You can herd it, but slowly.
-- **Jumped header = the signature move.** Jumping and meeting the ball in the air (Fall Guys-style) delivers a **much stronger push**, directed roughly along your facing/movement at the moment of impact. Timing and positioning aerial headers is the core skill of the game — and keeps every player dangerous regardless of what they drafted.
+- **The dive-header = the signature move** (revised in playtesting): jump, then press the dive key to lunge forward Fall Guys-style — connecting with the ball mid-dive rockets it along your facing. The dive is a full commitment (near-zero air control, a short stumble on landing), so timing and aim are the core skill — and every player stays dangerous regardless of what they drafted.
+- **Diving into another player** delivers a major shove; simply running into each other is a slight push (see Players & Movement).
 
 ### Zones, Ball-Time & the Danger Meter
 
