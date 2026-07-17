@@ -27,6 +27,11 @@ export const PILLAR_COUNT = 4
 export const TICK_SECONDS_PER_SURVIVOR = 10 // interval = survivors x 10s — longer rounds for playtesting
 export const TIE_EPSILON_S = 0.05 // meters within this = tied -> overtime
 export const DUEL_METER_CAPACITY_S = 30 // sudden kickoff cumulative meter (longer duel)
+// grace so a ball that just grazes your zone in the final moment can't doom
+// you: the ball must DWELL in your zone this long before it accrues meter, and
+// accrual freezes this long before the tick fires (a "final whistle" lock-in)
+export const ZONE_DWELL_GRACE_S = 0.6 // ball must sit in a zone this long before it counts
+export const TICK_LOCKIN_S = 1.0 // meters freeze this long before the tick resolves
 
 // --- match flow pauses -------------------------------------------------------
 export const DRAFT_SECONDS = 25

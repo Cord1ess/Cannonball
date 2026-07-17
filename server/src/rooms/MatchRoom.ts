@@ -14,8 +14,10 @@ import {
   PATCH_HZ,
   PLAYERS_MAX,
   RESTART_PAUSE_S,
+  TICK_LOCKIN_S,
   TIE_EPSILON_S,
   WALL_HEIGHT,
+  ZONE_DWELL_GRACE_S,
   WIND_BASE_STRENGTH,
   WIND_ENABLED,
   WIND_STEP_PER_ELIMINATION,
@@ -115,6 +117,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   /** active restart cards per seat — expire at the next restart (idea.md §2) */
   #activeCards: string[][] = Array.from({ length: MAX_SEATS }, () => [])
   #freeSaves: number[] = new Array(MAX_SEATS).fill(0)
+  /** how long the ball has continuously dwelt in each seat's zone (grace) */
+  #zoneDwell: number[] = new Array(MAX_SEATS).fill(0)
 
   #scale(t: number): number {
     return this.#fast ? t * 0.15 : t
@@ -626,6 +630,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #beginLaunch(): void {
     resetBall(this.#ball)
     this.#meters.fill(0)
+    this.#zoneDwell.fill(0)
     for (const session of this.#sessions.values()) {
       const sim = session.sim
       if (!this.#alive[sim.seat]) continue
@@ -882,27 +887,37 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     const zone = footprintZoneWidths(this.#arena, this.#ball.x, this.#ball.z, widths)
 
     if (this.#phase === Phase.Arena) {
-      if (zone >= 0) {
-        const seat = this.#zoneSeat[zone]
-        if (seat !== undefined && this.#alive[seat]) {
-          // Free Save / Bodyguard: auto-punt the FIRST ball entering your wedge
-          if ((this.#meters[seat] ?? 0) === 0 && (this.#freeSaves[seat] ?? 0) > 0) {
-            this.#freeSaves[seat] = 0
-            const d = Math.hypot(this.#ball.x, this.#ball.z)
-            if (d > 0.5) {
-              this.#ball.vx = (-this.#ball.x / d) * 15
-              this.#ball.vz = (-this.#ball.z / d) * 15
-              this.#ball.vy = Math.max(this.#ball.vy, 6)
-            }
-            this.broadcast('save', { seat })
-          } else {
-            let rate = 1
-            for (const session of this.#sessions.values()) {
-              if (session.sim.seat === seat) rate = session.sim.mods.meterRate
-            }
-            this.#meters[seat] = (this.#meters[seat] ?? 0) + dt * rate
-            this.#cumulative[seat] = (this.#cumulative[seat] ?? 0) + dt
+      // per-seat DWELL grace: grow the owner's dwell, decay everyone else's,
+      // so a ball only starts counting after it's SETTLED in a zone
+      const ownerSeat = zone >= 0 ? this.#zoneSeat[zone] : undefined
+      for (let s = 0; s < MAX_SEATS; s++) {
+        if (s === ownerSeat) this.#zoneDwell[s] = Math.min(2, (this.#zoneDwell[s] ?? 0) + dt)
+        else this.#zoneDwell[s] = Math.max(0, (this.#zoneDwell[s] ?? 0) - dt * 2)
+      }
+      // FINAL-WHISTLE lock-in: freeze accrual in the last second so what you
+      // see with 1s left is what resolves (no last-instant flip you can't react to)
+      const lockedIn = this.#tickRemaining <= this.#scale(TICK_LOCKIN_S)
+
+      if (ownerSeat !== undefined && this.#alive[ownerSeat] && !lockedIn) {
+        const seat = ownerSeat
+        // Free Save / Bodyguard: auto-punt the FIRST ball entering your wedge
+        if ((this.#meters[seat] ?? 0) === 0 && (this.#freeSaves[seat] ?? 0) > 0) {
+          this.#freeSaves[seat] = 0
+          const d = Math.hypot(this.#ball.x, this.#ball.z)
+          if (d > 0.5) {
+            this.#ball.vx = (-this.#ball.x / d) * 15
+            this.#ball.vz = (-this.#ball.z / d) * 15
+            this.#ball.vy = Math.max(this.#ball.vy, 6)
           }
+          this.broadcast('save', { seat })
+        } else if ((this.#zoneDwell[seat] ?? 0) >= this.#scale(ZONE_DWELL_GRACE_S)) {
+          // only accrue once the ball has DWELT past the grace window
+          let rate = 1
+          for (const session of this.#sessions.values()) {
+            if (session.sim.seat === seat) rate = session.sim.mods.meterRate
+          }
+          this.#meters[seat] = (this.#meters[seat] ?? 0) + dt * rate
+          this.#cumulative[seat] = (this.#cumulative[seat] ?? 0) + dt
         }
       }
       this.#tickRemaining -= dt

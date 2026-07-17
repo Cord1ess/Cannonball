@@ -93,38 +93,42 @@ const VERT = /* glsl */ `
     p.x += s * curl * t * t;
     p.z += c * curl * t * t;
 
-    // --- wind = livelier AMBIENT breeze + FEATHERED travelling gust cells ---
-    // 1) ambient sway — bigger now so the idle field visibly breathes; two
-    //    slow waves + per-blade random phase keep it from reading as one sine
-    float amb = uTime * 0.9 + root.x * 0.15 + root.y * 0.11;
-    float ambSway = (sin(amb) * 0.5 + sin(amb * 0.43 + 1.7) * 0.35);
-    float jitter = sin(uTime * 5.0 + aSeed.x * 25.13) * 0.5 + sin(uTime * 3.1 + aSeed.x * 11.7) * 0.3;
-    p.xz += uWindDir * (0.09 + ambSway * 0.14 + jitter * 0.05) * t * t;
+    // --- wind = BREATHING ambient sway + swirling FEATHERED gust cells ------
+    // 1) ambient sway — a slow rolling BREATH: a low-frequency envelope makes
+    //    the whole field surge and ease so it never sits static, plus two
+    //    layered waves + per-blade jitter so it isn't one clean sine
+    float breath = 0.5 + 0.5 * sin(uTime * 0.35 + root.x * 0.03); // 0..1 slow swell
+    float amb = uTime * 1.05 + root.x * 0.14 + root.y * 0.1;
+    float ambSway = sin(amb) * 0.55 + sin(amb * 0.41 + 1.7) * 0.4 + sin(amb * 1.9 + 0.6) * 0.18;
+    float jitter = sin(uTime * 5.0 + aSeed.x * 25.13) * 0.5 + sin(uTime * 3.1 + aSeed.x * 11.7) * 0.35;
+    float ambAmt = (0.12 + breath * 0.14) + ambSway * (0.16 + breath * 0.12) + jitter * 0.06;
+    p.xz += uWindDir * ambAmt * t * t;
 
-    // 2) GUST CELLS: each is a moving disc; where it overlaps THIS blade it
-    //    bends it downwind. FEATHERED — a long soft falloff so the leading and
-    //    trailing edges of the gust zone smooth out (no sharp ring). DELAYED —
-    //    the bend responds behind the cell center, as if the wind is pushing
-    //    the grass over rather than teleporting it.
+    // 2) GUST CELLS as swirling VORTICES: the bend curls tangentially AROUND
+    //    the cell center (not straight downwind), so a passing gust twists the
+    //    grass into circular / S-shaped patterns. Feathered edges + delay.
     for (int gi = 0; gi < ${MAX_GUSTS}; gi++) {
       if (gi >= uGustCount) break;
       vec2 gc = uGusts[gi].xy;
       float grad = uGusts[gi].z;
       float gstr = uGusts[gi].w;
-      // sample the cell's influence a bit UPWIND of the blade so the push
-      // trails the gust front (delay): shift the compare point backwards
-      vec2 delayed = root - uWindDir * grad * 0.28;
-      float gd = distance(delayed, gc);
-      // long feathered falloff: full only deep inside, fading way out to 1.15*r
-      float infl = (1.0 - smoothstep(grad * 0.15, grad * 1.15, gd)) * gstr;
-      // extra smooth shoulder (smoothstep of smoothstep) softens both edges
+      // delay: compare a bit upwind so the push trails the gust front
+      vec2 delayed = root - uWindDir * grad * 0.3;
+      vec2 toCell = delayed - gc;
+      float gd = length(toCell);
+      // long feathered falloff, softened on both edges
+      float infl = (1.0 - smoothstep(grad * 0.12, grad * 1.2, gd)) * gstr;
       infl = infl * infl * (3.0 - 2.0 * infl);
-      if (infl > 0.0) {
-        float swirl = sin(gd * 1.1 - uTime * 4.0 + aSeed.x * 6.2831) * 0.35;
-        vec2 gdir = normalize(uWindDir + vec2(-uWindDir.y, uWindDir.x) * swirl);
-        float bend = infl * 1.15 * t * t;
+      if (infl > 0.0 && gd > 0.001) {
+        vec2 radial = toCell / gd;
+        vec2 tangent = vec2(-radial.y, radial.x); // perpendicular = swirl around center
+        // blend inward-push (downwind feel) with a strong tangential swirl,
+        // and let the swirl sign flip along the radius for an S-shape
+        float sCurve = sin(gd * (2.2 / grad) * 3.14159 - uTime * 2.5);
+        vec2 gdir = normalize(uWindDir * 0.5 + tangent * sCurve * 1.2 - radial * 0.25);
+        float bend = infl * 1.2 * t * t;
         p.xz += gdir * bend;
-        p.y *= 1.0 - infl * 0.16 * t; // bows over as it's hit
+        p.y *= 1.0 - infl * 0.16 * t;
       }
     }
 

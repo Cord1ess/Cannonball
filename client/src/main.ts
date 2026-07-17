@@ -28,12 +28,27 @@ renderer.autoClear = false
 document.body.appendChild(renderer.domElement)
 
 const camera3 = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 600)
+// picture-in-picture "selfie" camera pointed at the local bean's face
+const pipCam = new THREE.PerspectiveCamera(42, 1, 0.1, 200)
 
 window.addEventListener('resize', () => {
   camera3.aspect = window.innerWidth / window.innerHeight
   camera3.updateProjectionMatrix()
   renderer.setSize(window.innerWidth, window.innerHeight)
 })
+
+// a framed border + label for the PIP, top-right, over the canvas
+const pipFrame = document.createElement('div')
+pipFrame.style.cssText =
+  'position:fixed;top:16px;right:16px;border:3px solid #4a443c;border-radius:12px;' +
+  'box-shadow:0 3px 10px #0004;pointer-events:none;z-index:14;display:none;overflow:hidden;'
+const pipTab = document.createElement('div')
+pipTab.textContent = 'YOU'
+pipTab.style.cssText =
+  'position:absolute;top:0;left:0;background:#4a443c;color:#fbf6e8;font:700 10px system-ui;' +
+  'padding:2px 8px;border-bottom-right-radius:8px;letter-spacing:1px;'
+pipFrame.appendChild(pipTab)
+document.body.appendChild(pipFrame)
 
 // --- scene ------------------------------------------------------------------------
 
@@ -177,6 +192,40 @@ function frame(nowMs: number): void {
 
   renderer.clear()
   renderer.render(scene, camera3)
+
+  // PICTURE-IN-PICTURE selfie cam: a second view framed on the local bean's
+  // face, top-right, so you see your character's expressions + motion live.
+  if ('selfView' in game && game.selfView) {
+    const sv = game.selfView()
+    if (sv.visible) {
+      const fx = Math.sin(sv.yaw)
+      const fz = Math.cos(sv.yaw)
+      // stand in FRONT of the bean looking back at its face, slightly above
+      pipCam.position.set(sv.x + fx * 3.2, sv.y + 1.7, sv.z + fz * 3.2)
+      pipCam.lookAt(sv.x, sv.y + 1.05, sv.z)
+
+      const W = window.innerWidth
+      const H = window.innerHeight
+      const pw = Math.round(Math.min(230, W * 0.2))
+      const ph = Math.round(pw * 1.1)
+      const px = W - pw - 16
+      const py = H - ph - 16 // gl viewport origin is bottom-left → top-right
+      renderer.setViewport(px, py, pw, ph)
+      renderer.setScissor(px, py, pw, ph)
+      renderer.setScissorTest(true)
+      pipCam.aspect = pw / ph
+      pipCam.updateProjectionMatrix()
+      renderer.render(scene, pipCam)
+      renderer.setScissorTest(false)
+      renderer.setViewport(0, 0, W, H)
+      pipFrame.style.display = 'block'
+      pipFrame.style.width = `${pw}px`
+      pipFrame.style.height = `${ph}px`
+    } else {
+      pipFrame.style.display = 'none'
+    }
+  }
+
   grain.render(renderer)
 }
 

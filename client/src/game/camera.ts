@@ -20,9 +20,10 @@ export class ChaseCamera {
     this.#camera = camera
   }
 
-  /** the interior radius the camera must stay inside (a bit past the wall) */
+  /** the interior radius the camera must stay inside — INSIDE the wall so the
+   *  camera stays over the pitch and never clips into the stadium structure */
   setArenaRadius(r: number): void {
-    this.#boundR = r + 3.5
+    this.#boundR = r - 1.5
   }
 
   addMouse(dx: number, dy: number): void {
@@ -51,45 +52,45 @@ export class ChaseCamera {
   }
 
   update(dt: number, tx: number, ty: number, tz: number): void {
-    // pulled back and raised, angled down at the player (M1 feedback)
     const dist = 10.5
-    const height = 4.4 + this.pitch * 5
     const fx = this.forwardX
     const fz = this.forwardZ
 
+    // desired boom position behind the player
     let wantX = tx - fx * dist
-    const wantY = ty + height
+    let wantY = ty + 4.4 + this.pitch * 5
     let wantZ = tz - fz * dist
 
-    // WALL GUARD: if the desired camera spot is outside the arena bound, pull
-    // it in along the player->camera direction so it never enters the wall —
-    // the camera simply sits closer to the player at the edges.
-    const wantR = Math.hypot(wantX, wantZ)
-    if (wantR > this.#boundR) {
-      // shorten the boom until the camera is back inside the bound. Solve for
-      // the largest d' <= dist such that |target - forward*d'| <= boundR.
-      const px = tx
-      const pz = tz
-      // quadratic in d: |(px,pz) - (fx,fz)*d|^2 = boundR^2
-      const bDot = px * fx + pz * fz
-      const c = px * px + pz * pz - this.#boundR * this.#boundR
-      const disc = bDot * bDot - c
-      if (disc > 0) {
-        const dClamp = Math.max(1.5, Math.min(dist, bDot - Math.sqrt(disc)))
-        wantX = tx - fx * dClamp
-        wantZ = tz - fz * dClamp
-      } else {
-        // target itself near the edge — just clamp radially
-        const s = this.#boundR / wantR
-        wantX *= s
-        wantZ *= s
-      }
+    // ROBUST WALL GUARD (two stages):
+    // (a) shorten the boom so the *ideal* spot is inside — camera sits closer.
+    let boom = dist
+    const bDot = tx * fx + tz * fz
+    const cc = tx * tx + tz * tz - this.#boundR * this.#boundR
+    const disc = bDot * bDot - cc
+    if (cc < 0 && disc > 0) {
+      // player inside the bound: the boom may exit it — cap boom at the exit
+      const dExit = bDot + Math.sqrt(disc)
+      if (dExit < boom) boom = Math.max(2.0, dExit)
     }
+    wantX = tx - fx * boom
+    wantZ = tz - fz * boom
+    // (b) as the boom shrinks, RAISE the camera so it looks down over the wall
+    const shrink = 1 - boom / dist // 0 normal .. 1 fully pulled in
+    wantY += shrink * 5.5
 
     const k = 1 - Math.exp(-14 * dt)
     this.#pos.x += (wantX - this.#pos.x) * k
     this.#pos.y += (wantY - this.#pos.y) * k
     this.#pos.z += (wantZ - this.#pos.z) * k
+
+    // (c) HARD CLAMP the smoothed position's radius every frame — a guarantee
+    // that the camera can NEVER be outside the bound, even mid-smoothing.
+    const posR = Math.hypot(this.#pos.x, this.#pos.z)
+    if (posR > this.#boundR) {
+      const s = this.#boundR / posR
+      this.#pos.x *= s
+      this.#pos.z *= s
+    }
 
     this.#shake = Math.max(0, this.#shake - dt * 3.5)
     const s = this.#shake * this.#shake * 0.18

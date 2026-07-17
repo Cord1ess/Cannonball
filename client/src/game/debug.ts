@@ -79,85 +79,108 @@ export function createDebugPanel(
   let panelOn = false
   let ghostsOn = false
 
-  // --- DOM panel -------------------------------------------------------------------
+  // --- DOM panel: ACCORDION (one group open at a time, no vertical scroll) --------
   const panel = document.createElement('div')
   panel.style.cssText =
-    'position:fixed;top:10px;left:10px;width:270px;max-height:94vh;overflow-y:auto;' +
-    'background:#1c1a18f0;color:#f2eddc;font:11px/1.5 ui-monospace,monospace;padding:10px;' +
-    'border-radius:8px;display:none;pointer-events:auto;z-index:50;user-select:none;'
+    'position:fixed;top:10px;left:10px;width:250px;background:#1c1a18f0;color:#f2eddc;' +
+    'font:11px/1.4 ui-monospace,monospace;padding:8px;border-radius:8px;display:none;' +
+    'pointer-events:auto;z-index:50;user-select:none;'
   document.body.appendChild(panel)
 
   const title = document.createElement('div')
-  title.textContent = `DEBUG — ${hooks.label} (Esc to unlock mouse)`
-  title.style.cssText = 'font-weight:700;margin-bottom:6px;color:#f2c078;'
+  title.textContent = `DEBUG — ${hooks.label}`
+  title.style.cssText = 'font-weight:700;margin-bottom:6px;color:#f2c078;font-size:10px;'
   panel.appendChild(title)
 
-  // grouped buttons; toggles keep an on/off state + a click flash for feedback
   const toggleState = new Map<string, boolean>()
-  const toggleButtons = new Map<string, HTMLButtonElement>()
   const paintToggle = (btn: HTMLButtonElement, on: boolean): void => {
     btn.style.background = on ? '#4fa3d8' : '#4a443c'
     btn.style.color = on ? '#08121a' : '#f2eddc'
   }
-  for (const group of GROUPS) {
-    const gLabel = document.createElement('div')
-    gLabel.textContent = group.title
-    gLabel.style.cssText = 'color:#9b948a;margin:6px 0 2px;font-size:9px;letter-spacing:1px;text-transform:uppercase;'
-    panel.appendChild(gLabel)
-    const row = document.createElement('div')
-    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;'
-    panel.appendChild(row)
-    for (const b of group.btns) {
-      const button = document.createElement('button')
-      button.textContent = b.label
-      button.style.cssText =
-        'font:10px ui-monospace,monospace;background:#4a443c;color:#f2eddc;border:0;' +
-        'border-radius:4px;padding:4px 8px;cursor:pointer;transition:background 90ms;'
-      if (b.toggle) {
-        toggleState.set(b.cmd, false)
-        toggleButtons.set(b.cmd, button)
+  const makeBtn = (label: string, cmd: string, toggle: boolean): HTMLButtonElement => {
+    const button = document.createElement('button')
+    button.textContent = label
+    button.style.cssText =
+      'font:10px ui-monospace,monospace;background:#4a443c;color:#f2eddc;border:0;' +
+      'border-radius:4px;padding:4px 7px;cursor:pointer;transition:background 90ms;'
+    if (toggle) toggleState.set(cmd, false)
+    button.addEventListener('click', (e) => {
+      e.stopPropagation()
+      hooks.send(cmd)
+      if (toggle) {
+        const next = !toggleState.get(cmd)
+        toggleState.set(cmd, next)
+        paintToggle(button, next)
+      } else {
+        button.style.background = '#f2c078'
+        button.style.color = '#1c1a18'
+        setTimeout(() => {
+          button.style.background = '#4a443c'
+          button.style.color = '#f2eddc'
+        }, 130)
       }
-      button.addEventListener('click', () => {
-        hooks.send(b.cmd)
-        if (b.toggle) {
-          const next = !toggleState.get(b.cmd)
-          toggleState.set(b.cmd, next)
-          paintToggle(button, next)
-        } else {
-          // click flash so momentary actions give feedback
-          button.style.background = '#f2c078'
-          button.style.color = '#1c1a18'
-          setTimeout(() => {
-            button.style.background = '#4a443c'
-            button.style.color = '#f2eddc'
-          }, 130)
-        }
-      })
-      row.appendChild(button)
-    }
+    })
+    return button
   }
-  const roomLabel = document.createElement('div')
-  roomLabel.textContent = 'room'
-  roomLabel.style.cssText = 'color:#9b948a;margin:6px 0 2px;font-size:9px;letter-spacing:1px;text-transform:uppercase;'
-  panel.appendChild(roomLabel)
-  const freshButton = document.createElement('button')
-  freshButton.textContent = 'new room'
-  freshButton.style.cssText =
-    'font:10px ui-monospace,monospace;background:#d96c6c;color:#fff;border:0;border-radius:4px;padding:4px 8px;cursor:pointer;margin-bottom:6px;'
-  freshButton.addEventListener('click', () => {
-    sessionStorage.removeItem('cannonball:reconnection')
-    location.href = `${location.pathname}?fresh`
+
+  // build one accordion section per group + a room section
+  const bodies: HTMLDivElement[] = []
+  const carets: HTMLSpanElement[] = []
+  const openSection = (idx: number): void => {
+    bodies.forEach((b, i) => {
+      const open = i === idx
+      b.style.display = open ? 'flex' : 'none'
+      carets[i]!.textContent = open ? '▾' : '▸'
+    })
+  }
+  const sections: Array<{ title: string; build: (row: HTMLDivElement) => void }> = GROUPS.map((g) => ({
+    title: g.title,
+    build: (row) => {
+      for (const b of g.btns) row.appendChild(makeBtn(b.label, b.cmd, b.toggle ?? false))
+    },
+  }))
+  sections.push({
+    title: 'room',
+    build: (row) => {
+      const fresh = makeBtn('new room', '__fresh', false)
+      fresh.style.background = '#d96c6c'
+      fresh.style.color = '#fff'
+      fresh.addEventListener('click', () => {
+        sessionStorage.removeItem('cannonball:reconnection')
+        location.href = `${location.pathname}?fresh`
+      })
+      row.appendChild(fresh)
+    },
   })
-  panel.appendChild(freshButton)
+  sections.forEach((sec, idx) => {
+    const header = document.createElement('div')
+    header.style.cssText =
+      'display:flex;justify-content:space-between;align-items:center;cursor:pointer;' +
+      'padding:4px 6px;margin-top:3px;background:#00000030;border-radius:4px;color:#d8cdb8;' +
+      'font-size:9px;letter-spacing:1px;text-transform:uppercase;'
+    const caret = document.createElement('span')
+    caret.textContent = '▸'
+    header.append(sec.title, caret)
+    const body = document.createElement('div')
+    body.style.cssText = 'display:none;flex-wrap:wrap;gap:4px;padding:5px 2px;'
+    sec.build(body)
+    bodies.push(body)
+    carets.push(caret)
+    header.addEventListener('click', () => {
+      const isOpen = body.style.display !== 'none'
+      openSection(isOpen ? -1 : idx)
+    })
+    panel.append(header, body)
+  })
+  openSection(0) // start with the first group open
 
   const stats = document.createElement('pre')
-  stats.style.cssText = 'margin:0;white-space:pre-wrap;'
+  stats.style.cssText = 'margin:6px 0 0;white-space:pre-wrap;font-size:10px;'
   panel.appendChild(stats)
 
   const help = document.createElement('div')
-  help.textContent =
-    '` panel · G ghosts · ?dev (reload = instant live arena) · ?fast (0.15x timers) · ?lag=100 · ?offline · ?fresh'
-  help.style.cssText = 'margin-top:6px;color:#9b948a;'
+  help.textContent = '` panel · G ghosts · ?dev · ?fast · ?fresh'
+  help.style.cssText = 'margin-top:6px;color:#9b948a;font-size:9px;'
   panel.appendChild(help)
 
   // --- ghost overlay (vendored debug-draw over one LineSegments) ---------------------

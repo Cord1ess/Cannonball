@@ -160,6 +160,15 @@ export interface MatchClient {
   onEvent(cb: (event: MatchEvent) => void): void
 }
 
+/** where the local bean is + facing, for the picture-in-picture selfie cam */
+export interface SelfView {
+  x: number
+  y: number
+  z: number
+  yaw: number
+  visible: boolean
+}
+
 export interface OnlineGame {
   fixedStep(input: PlayerInputFrame): void
   frameUpdate(dt: number, alpha: number, lean: number): void
@@ -171,6 +180,8 @@ export interface OnlineGame {
   staminaFrac(): number
   abilityInfo(): { id: string; cdFrac: number } | null
   spectating(): boolean
+  /** local bean pose for the PIP selfie cam (null in sandbox) */
+  selfView?(): SelfView
   readonly match: MatchClient
   readonly debug: DebugHooks
 }
@@ -231,6 +242,7 @@ export function createOnlineGame(
   // the wind this frame, exposed for HUD/streak/direction-line consumers
   const currentWind: WindState = { x: 1, z: 0, gust: 0, force: 0 }
   let alarmPulse = 0 // >0 when the ball is in MY zone (drives the blink + prompt)
+  const selfPose = { x: 0, y: 0, z: 0, yaw: 0, visible: false } // for the PIP cam
   // pooled grass bodies — reused each frame so the hot path never allocates
   // grass bodies: pooled + per-key wobble state so blades spring back after a
   // body passes. wobble ramps up with movement speed and decays each frame.
@@ -696,6 +708,10 @@ export function createOnlineGame(
       return (state.phase ?? 0) !== Phase.Lobby && mySeat >= 0 && !aliveOf(mySeat)
     },
 
+    selfView(): SelfView {
+      return { ...selfPose }
+    },
+
     fixedStep(input: PlayerInputFrame): void {
       ensureLocal()
       if (!localSim) return
@@ -872,11 +888,15 @@ export function createOnlineGame(
         }
         const selfVisible = aliveOf(mySeat) || (state.phase ?? 0) === Phase.Lobby
         myBean.group.visible = selfVisible
-        // my own tag: helpful in the lobby, hidden once the match is live so
-        // it doesn't block my own view (I know who I am)
-        const showMine = selfVisible && (state.phase ?? 0) === Phase.Lobby
-        myTag.setVisible(showMine)
-        if (showMine) myTag.place(selfX, selfY, selfZ)
+        // my own name tag floats over my head too (lobby AND in-match)
+        myTag.setVisible(selfVisible)
+        if (selfVisible) myTag.place(selfX, selfY, selfZ)
+        // record pose for the PIP selfie cam
+        selfPose.x = selfX
+        selfPose.y = selfY
+        selfPose.z = selfZ
+        selfPose.yaw = localSim.yaw
+        selfPose.visible = selfVisible
       }
 
       // remotes
