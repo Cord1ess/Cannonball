@@ -128,8 +128,8 @@ export function createArenaView(radius = 28): ArenaView {
   }
   const groundTex = new THREE.CanvasTexture(groundCanvas)
   groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping
-  // raw values in, raw values out — same pipeline as the blade shader
-  groundTex.colorSpace = THREE.NoColorSpace
+  groundTex.repeat.set(10, 10)
+  groundTex.colorSpace = THREE.SRGBColorSpace
   groundTex.anisotropy = 4
   {
     const img = new Image()
@@ -164,34 +164,9 @@ export function createArenaView(radius = 28): ArenaView {
     }
     img.src = '/textures/pitch_grass.jpg'
   }
-  // dual-scale sampling: a MACRO tile (strokes sized like the 3D blades, reads
-  // right from afar) blended with a rotated FINE tile (keeps the ground crisp
-  // underfoot) — one texture, never flat at any camera distance
-  const floorTopMat = new THREE.ShaderMaterial({
-    uniforms: { uMap: { value: groundTex } },
-    vertexShader: /* glsl */ `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform sampler2D uMap;
-      varying vec2 vUv;
-      void main() {
-        vec3 macro = texture2D(uMap, vUv * 5.0).rgb;
-        vec3 detail = texture2D(uMap, vec2(vUv.y, 1.0 - vUv.x) * 13.0).rgb;
-        // detail MODULATES the macro tone instead of averaging with it —
-        // full-contrast strokes underfoot, no washing out (mean stays ~1)
-        float mod2 = clamp(0.92 * pow(detail.g / 0.78, 2.0), 0.55, 1.3);
-        gl_FragColor = vec4(macro * mod2, 1.0);
-      }
-    `,
-  })
   const floor = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.6, SEGMENTS), [
     makeToonMaterial(PALETTE.warmGray), // side
-    floorTopMat, // top: unlit dual-scale grass, like the blades
+    new THREE.MeshBasicMaterial({ map: groundTex }), // top: unlit, like the blades
     makeToonMaterial(PALETTE.warmGray), // bottom
   ])
   floor.position.y = -0.3
