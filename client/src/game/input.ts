@@ -6,11 +6,13 @@ export function createGameInput(): Input {
   const input = createInput({
     actions: {
       jump: ['Space'],
+      dive: ['KeyE'], // airborne: dive/header
       restart: ['KeyR'],
     },
     axes: {
       moveX: { negative: ['KeyA'], positive: ['KeyD'] },
       moveZ: { negative: ['KeyS'], positive: ['KeyW'] },
+      lean: { negative: ['KeyQ'], positive: ['KeyE'] }, // grounded: Q/E lean
     },
   })
   createInputCapture(window, (message) => input.inject(message))

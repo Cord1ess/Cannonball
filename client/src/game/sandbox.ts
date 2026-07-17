@@ -9,17 +9,20 @@ import {
 import { footprintZone, makeArena, yawTowardCenter, zoneAnchor, type Arena } from '@shared/sim/arena.ts'
 import { accrueBallTime, tickLosers } from '@shared/sim/meters.ts'
 import {
+  clearEvents,
+  collidePlayers,
   interactBallPlayers,
   makeBall,
+  makeEvents,
   makePlayer,
   makeWind,
   resetBall,
   stepBall,
   stepPlayer,
   stepWind,
+  ZERO_INPUT,
   type PlayerInputFrame,
   type PlayerSim,
-  type SimEvents,
 } from '@shared/sim/physics.ts'
 import { Random } from '@vendor/scheduler/random.ts'
 import { createArenaView, type ArenaView } from '../render/arenaView.ts'
@@ -30,9 +33,9 @@ import type { ChaseCamera } from './camera.ts'
 import type { Hud, HudZone } from './hud.ts'
 
 /**
- * M1 offline sandbox: seat 0 is the player, seats 1-5 are standing dummies.
- * Full local match loop — meters, ticks, eliminations, morphs — to fun-test
- * the header before netcode exists. Replaced by the server room in M2.
+ * M1 offline sandbox: seat 0 is the player, seats 1-5 are dummies (they get
+ * pushed around but never act). Full local match loop — meters, ticks,
+ * eliminations, morphs — to fun-test the dive-header before netcode exists.
  */
 
 export const SEAT_COLORS = [
@@ -55,7 +58,7 @@ interface Snapshot {
 export interface Sandbox {
   fixedStep(input: PlayerInputFrame): void
   /** render-frame update; alpha interpolates between the last two fixed steps */
-  frameUpdate(dt: number, alpha: number): void
+  frameUpdate(dt: number, alpha: number, lean: number): void
   reset(): void
   readonly player: PlayerSim
   readonly gameOver: boolean
@@ -90,10 +93,23 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
   scene.add(ballView.group)
 
   const wind = makeWind()
-  const events: SimEvents = { headers: [], bounces: 0 }
+  const events = makeEvents()
 
   const prevBall: Snapshot = { x: 0, y: 0, z: 0 }
   const prevPlayer: Snapshot = { x: 0, y: 0, z: 0 }
+
+  /** eye-look toward the ball, local to a bean's facing */
+  function lookAtBall(p: PlayerSim): { x: number; y: number } {
+    const dx = ball.x - p.x
+    const dz = ball.z - p.z
+    const angleTo = Math.atan2(dx, dz)
+    let diff = angleTo - p.yaw
+    while (diff > Math.PI) diff -= Math.PI * 2
+    while (diff < -Math.PI) diff += Math.PI * 2
+    const dist = Math.max(1, Math.hypot(dx, dz))
+    const lookY = Math.max(-1, Math.min(1, (ball.y - (p.y + 1)) / dist))
+    return { x: Math.max(-1, Math.min(1, Math.sin(diff) * 1.4)), y: lookY }
+  }
 
   const sandbox: Sandbox = {
     player: players[0]!,
@@ -126,22 +142,27 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
       prevBall.z = ball.z
 
       stepPlayer(players[0]!, input, arena, dt)
-      // dummies just face the ball (visual only, they never move)
+      // dummies: no input, but full physics so shoves send them flying
       for (let seat = 1; seat < SEATS; seat++) {
+        if (!alive[seat]) continue
         const dummy = players[seat]!
-        if (alive[seat]) dummy.yaw = Math.atan2(ball.x - dummy.x, ball.z - dummy.z)
+        stepPlayer(dummy, ZERO_INPUT, arena, dt)
+        dummy.yaw = Math.atan2(ball.x - dummy.x, ball.z - dummy.z)
       }
 
       stepWind(wind, rng, WIND_BASE_STRENGTH + eliminations * WIND_STEP_PER_ELIMINATION, ball, dt)
       stepBall(ball, arena, dt, events)
+      collidePlayers(players, alive, events)
       interactBallPlayers(ball, players, alive, dt, events)
 
       for (const header of events.headers) {
         beans[header.seat]?.header()
-        if (header.seat === 0) camera.kick(0.6)
+        if (header.seat === 0) camera.kick(0.7)
       }
-      events.headers.length = 0
-      events.bounces = 0
+      for (const shove of events.shoves) {
+        if (shove.major && (shove.fromSeat === 0 || shove.toSeat === 0)) camera.kick(0.35)
+      }
+      clearEvents(events)
 
       accrueBallTime(meters, zoneSeat, footprintZone(arena, ball.x, ball.z), dt)
 
@@ -149,19 +170,45 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
       if (sandbox.tickRemaining <= 0) resolveTick()
     },
 
-    frameUpdate(dt: number, alpha: number): void {
+    frameUpdate(dt: number, alpha: number, lean: number): void {
       const p = players[0]!
       const px = prevPlayer.x + (p.x - prevPlayer.x) * alpha
       const py = prevPlayer.y + (p.y - prevPlayer.y) * alpha
       const pz = prevPlayer.z + (p.z - prevPlayer.z) * alpha
       const run = Math.min(1, Math.hypot(p.vx, p.vz) / MOVE_SPEED)
-      beans[0]!.update(dt, { x: px, y: py, z: pz, yaw: p.yaw, run, grounded: p.grounded })
+      const playerLook = lookAtBall(p)
+      beans[0]!.update(dt, {
+        x: px,
+        y: py,
+        z: pz,
+        yaw: p.yaw,
+        run,
+        grounded: p.grounded,
+        diving: p.diving,
+        lean: p.grounded ? lean : 0,
+        lookX: playerLook.x,
+        lookY: playerLook.y,
+      })
       beans[0]!.group.visible = alive[0] ?? false
 
       for (let seat = 1; seat < SEATS; seat++) {
         const dummy = players[seat]!
         beans[seat]!.group.visible = alive[seat] ?? false
-        beans[seat]!.update(dt, { x: dummy.x, y: dummy.y, z: dummy.z, yaw: dummy.yaw, run: 0, grounded: true })
+        if (!alive[seat]) continue
+        const dummyLook = lookAtBall(dummy)
+        const dummyRun = Math.min(1, Math.hypot(dummy.vx, dummy.vz) / MOVE_SPEED)
+        beans[seat]!.update(dt, {
+          x: dummy.x,
+          y: dummy.y,
+          z: dummy.z,
+          yaw: dummy.yaw,
+          run: dummyRun,
+          grounded: dummy.grounded,
+          diving: dummy.diving,
+          lean: 0,
+          lookX: dummyLook.x,
+          lookY: dummyLook.y,
+        })
       }
 
       const bx = prevBall.x + (ball.x - prevBall.x) * alpha
@@ -216,6 +263,8 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
       player.y = 0
       player.vx = player.vy = player.vz = 0
       player.grounded = true
+      player.diving = false
+      player.recoverCd = 0
       player.yaw = yawTowardCenter(anchor.x, anchor.z)
       if (seat === 0) camera.yaw = player.yaw
     }

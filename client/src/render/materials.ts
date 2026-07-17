@@ -25,9 +25,18 @@ export function toonRamp(): THREE.DataTexture {
 }
 
 let gouache: THREE.Texture | null = null
-function sharedGouache(): THREE.Texture {
+const gouacheVariants = new Map<number, THREE.Texture>()
+function sharedGouache(repeat = 2): THREE.Texture {
   gouache ??= gouacheTexture()
-  return gouache
+  if (repeat === 2) return gouache
+  let variant = gouacheVariants.get(repeat)
+  if (!variant) {
+    variant = gouache.clone() // shares the image, independent repeat
+    variant.repeat.set(repeat, repeat)
+    variant.needsUpdate = true
+    gouacheVariants.set(repeat, variant)
+  }
+  return variant
 }
 
 let stroke: THREE.Texture | null = null
@@ -38,12 +47,13 @@ function sharedStroke(): THREE.Texture {
 
 // --- toon fills ----------------------------------------------------------------
 
-/** Gouache-modulated toon fill — the only surface material in the game. */
-export function makeToonMaterial(color: number): THREE.MeshToonMaterial {
+/** Gouache-modulated toon fill — the only surface material in the game.
+ *  `gouacheRepeat` scales the paint tile for big surfaces (arena floor). */
+export function makeToonMaterial(color: number, gouacheRepeat = 2): THREE.MeshToonMaterial {
   return new THREE.MeshToonMaterial({
     color,
     gradientMap: toonRamp(),
-    map: sharedGouache(),
+    map: sharedGouache(gouacheRepeat),
   })
 }
 

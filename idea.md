@@ -16,7 +16,7 @@
 - **Each survivor owns one wall.** Your zone (called your **wedge**) is the sector from the neutral center out to your wall side, and your cannon is mounted on your own wall. The morph at each restart is also the zone redraw.
 - Neither players nor the ball can ever leave the arena — no falling, no out-of-bounds, no respawn system. Walls are part of play: banking the ball off them is a legitimate technique.
 - At the exact center is a **neutral disc** that belongs to nobody. Ball-time spent over it counts for no one. The ball always resets here, so every kickoff starts fair and meters only move once the ball is genuinely pushed into someone's territory. (Disc size is a tuning value, not a design decision — start around 15% of arena radius.)
-- **Setting:** the arena is a floating island drifting in a soft painted sky, ringed by slow clouds — a dreamlike festival pitch above the world (full visual spec in `art_direction.md`). Eliminated players watch from small spectator clouds circling the arena (Section 5).
+- **Setting:** the arena is a floating colosseum drifting in a soft painted sky — seamless ring walls with tiered audience seating on the crown, cannons mounted on the wall tops (full visual spec in `art_direction.md`). Eliminated players watch from the colosseum stands (Section 5).
 - **Interior:** wind gusts, 2–3 moving platforms, and a handful of static bumpers/pillars keep the ball live and unpredictable. Each polygon shape has its own preset arrangement of these. Escalation behavior is defined in Section 4.
 
 ### Players & Movement
@@ -74,7 +74,7 @@ A match flows: **Lobby → Draft → Opening Kickoff → Arena/Tick loop (with a
 
 ### Cannon Launch (opening and every restart)
 
-- Every kickoff, survivors are fired from cannons mounted on their own wall of the polygon. The cannon volley IS the kickoff spectacle and the game's namesake.
+- Every kickoff, survivors are fired from cannons mounted on the colosseum wall crown above their own wedge. The cannon volley IS the kickoff spectacle and the game's namesake.
 - **Aim within an arc.** During the countdown, each player steers their cannon's angle within a limited arc to choose roughly where they land. Launch strength is fixed — no power charging, no trajectory preview.
 - Landing is harmless (no fall damage, no landing lag worth exploiting).
 
@@ -174,10 +174,10 @@ Last player standing wins. Short victory ceremony (winner celebration, final sta
 - **2–6 players.** A 6-player match runs the full arc (hexagon → duel). Smaller lobbies enter the polygon/tempo curve at their player count — a 4-player match starts on the square at 20s ticks.
 - **A 2-player match is the duel, straight up:** lobby → draft → circle arena → Sudden Kickoff rules. No ticks, no restarts, no handouts — a coherent quick mode for free. *(default — flag if you disagree)*
 
-### Eliminated players: the clouds
+### Eliminated players: the stands
 
-- On elimination (after performing their advantage/curse handout), players float up onto a small **spectator cloud** that slowly circles the arena.
-- From their cloud they have **emotes/cheer reactions**, visible to everyone in the arena. No gameplay impact — matches are short (~5 minutes), so spectating never gets long, and the handout moment already gave them their dramatic exit.
+- On elimination (after performing their advantage/curse handout), players take a seat in the **colosseum audience tiers** on the arena's wall crown.
+- From their seat they have **emotes/cheer reactions**, visible to everyone in the arena. No gameplay impact — matches are short (~5 minutes), so spectating never gets long, and the handout moment already gave them their dramatic exit.
 
 ### Disconnects: grace period
 

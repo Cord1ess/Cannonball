@@ -46,7 +46,7 @@ export function createHud(): Hud {
   const hint = document.createElement('div')
   hint.style.cssText =
     'position:absolute;bottom:26px;left:50%;transform:translateX(-50%);font-size:16px;color:#4a443c;background:#fffdf5cc;padding:6px 14px;border-radius:8px;'
-  hint.textContent = 'click to grab the mouse — WASD move, Space jump, jump into the ball to header it'
+  hint.textContent = 'click to grab the mouse — WASD run, Space jump, E mid-air to DIVE into the ball, Q/E lean'
   root.appendChild(hint)
 
   const end = document.createElement('div')

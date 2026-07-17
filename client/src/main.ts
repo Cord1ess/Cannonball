@@ -54,6 +54,7 @@ renderer.domElement.addEventListener('click', () => {
 })
 
 let jumpQueued = false
+let diveQueued = false
 
 function frame(nowMs: number): void {
   requestAnimationFrame(frame)
@@ -63,6 +64,7 @@ function frame(nowMs: number): void {
   const locked = isPointerLocked(document)
   if (locked) chase.addMouse(input.pointerDeltaX, input.pointerDeltaY)
   if (input.justPressed('jump')) jumpQueued = true
+  if (input.justPressed('dive')) diveQueued = true
   if (input.justPressed('restart') && sandbox.gameOver) sandbox.reset()
 
   const steps = time.consumeFixedSteps()
@@ -82,11 +84,12 @@ function frame(nowMs: number): void {
       dirZ /= len
     }
 
-    sandbox.fixedStep({ dirX, dirZ, jump: jumpQueued, yaw: chase.yaw })
+    sandbox.fixedStep({ dirX, dirZ, jump: jumpQueued, dive: diveQueued })
     jumpQueued = false
+    diveQueued = false
   }
 
-  sandbox.frameUpdate(time.unscaledDelta, time.alpha)
+  sandbox.frameUpdate(time.unscaledDelta, time.alpha, input.axis('lean'))
 
   hud.update({
     tickRemaining: sandbox.tickRemaining,
@@ -102,4 +105,4 @@ function frame(nowMs: number): void {
 
 requestAnimationFrame(frame)
 
-console.log('[cannonball] M1 sandbox — WASD + mouse, Space to jump, jump into the ball to header it')
+console.log('[cannonball] M1 sandbox — WASD run, Space jump, E in the air = DIVE (header), Q/E lean, R restart')

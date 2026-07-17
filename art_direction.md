@@ -67,8 +67,9 @@ Warm cream with **ink-drawn patch linework** (canvas texture, sketchy strokes), 
 
 ## 6. Environment: the floating dream arena
 
-- **A floating island** in the painted sky: muted pitch on top (cream/sage, scattered with tick marks and pebble decals, big art-directed shadow shapes), chunky hand-hewn rock underside, low festival fencing as the polygon walls with **bunting flags and hand-painted banners** — banner lettering uses **fake-glyph blocks** (canvas-drawn Japanese-ish letterforms, an Abeto signature). *(default — flag if you disagree)*
-- **Spectator clouds:** eliminated players drift onto small clouds slowly circling the arena, seated and emoting. *(default — flag if you disagree)*
+- **A floating colosseum** in the painted sky (user direction, M1 feedback): muted pitch on top (cream/sage, tick marks and pebble decals, art-directed shadow shapes), chunky hand-hewn rock underside, and **tall seamless ring walls — no seams, no gaps — with tiered audience seating on the crown**. Bunting flags and hand-painted banners dress the tiers; banner lettering uses **fake-glyph blocks** (canvas-drawn Japanese-ish letterforms, an Abeto signature).
+- **Cannons sit on top of the colosseum wall edges**, one above each player's wedge — they fire the survivors in at every kickoff.
+- **Audience slots:** eliminated players take seats in the colosseum tiers (replaces the earlier spectator-cloud idea), emoting from the stands.
 - **Interior props, themed:** platforms as cloud puffs / floating earth chunks; wooden festival poles with bunting; round painted bumper posts. All get seam linework, contact-darkening, and a saturated accent detail or two (a red flag, a yellow stripe) in the rationed-color spirit.
 - **Cannons:** stubby festival-mortar shapes — more fireworks-launcher than artillery.
 - A few tiny distant islands as flat painted silhouettes. Nothing else — minimalist by mandate.

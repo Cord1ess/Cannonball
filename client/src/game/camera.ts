@@ -35,8 +35,9 @@ export class ChaseCamera {
   }
 
   update(dt: number, tx: number, ty: number, tz: number): void {
-    const dist = 6.5
-    const height = 1.8 + this.pitch * 4.5
+    // pulled back and raised, angled down at the player (M1 feedback)
+    const dist = 10.5
+    const height = 4.4 + this.pitch * 5
     const fx = this.forwardX
     const fz = this.forwardZ
 
@@ -56,7 +57,7 @@ export class ChaseCamera {
       this.#pos.z + (Math.random() - 0.5) * s,
     )
 
-    this.#look.set(tx + fx * 2.2, ty + 1.1, tz + fz * 2.2)
+    this.#look.set(tx + fx * 0.6, ty + 0.9, tz + fz * 0.6)
     this.#camera.lookAt(this.#look)
   }
 }
