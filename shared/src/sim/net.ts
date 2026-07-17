@@ -18,6 +18,7 @@ export interface NetInput {
 export interface NetPlayerRead {
   sessionId: string
   seat: number
+  name: string
   x: number
   y: number
   z: number

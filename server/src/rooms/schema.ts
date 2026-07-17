@@ -11,6 +11,7 @@ export const PlayerState = schema(
   {
     sessionId: { type: 'string', default: '' },
     seat: { type: 'uint8', default: 0 },
+    name: { type: 'string', default: '' },
     x: { type: 'float32', default: 0 },
     y: { type: 'float32', default: 0 },
     z: { type: 'float32', default: 0 },

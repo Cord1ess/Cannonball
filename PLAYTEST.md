@@ -64,7 +64,9 @@ Cloudflare's quick tunnel is free and needs no account.
    ```
    (The client auto-converts `https://` → `wss://` for you.)
 
-**Friends:** open that one link. Straight into the lobby.
+**Friends:** open that one link. Straight into the lobby, where everyone shows
+up as a chip. **Set your name** in the lobby's name box — it shows on your chip
+and floats over your bean's head in-match so everyone can tell who's who.
 
 > ngrok works too (`ngrok http 2567` and `ngrok http 5173`) — same idea, paste
 > both URLs into the share link.

@@ -3,7 +3,17 @@
 > Session handoff document. Updated at every milestone. Read top-to-bottom to
 > resume: DONE tells you what exists, NEXT tells you what to build.
 
-## STATUS: M0–M4b + M5a (colosseum redo) complete · NEXT UP: M5b (light arc, banners, HUD skin)
+## STATUS: M0–M4b + M5a + friend-playtest ready · NEXT UP: M5b (light arc, banners, HUD skin)
+
+### Friend playtest + player names (works over LAN/tunnel, no deploy)
+See PLAYTEST.md. Client resolves server from `?server=` (saved to localStorage, https→wss auto);
+Vite binds all hosts. **Player names**: `name` field on PlayerState, lobby name input (persisted
+in save-data, auto-applied on join), server sanitizes+caps at 16 chars, defaults `Player N`/`Bot
+N`. Names show on lobby chips, in ALL match banners (elim/save/emote/handout/winner via
+matchUi `nameOf(seat)`), and as **floating billboard tags over each bean's head**
+(`render/nameTag.ts` — canvas sprite, own tag hidden in-match, remote tags always on). VERIFIED
+with two-browser same-room test: both names propagate, tags render over heads (screenshotted).
+Gameplay time DOUBLED for playtesting (tick 10s×survivors, duel 30s).
 
 ---
 

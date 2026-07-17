@@ -198,6 +198,17 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       this.#resolveKits()
     })
 
+    this.onMessage('name', (client, message: { name?: string }) => {
+      const ps = this.state.players.get(client.sessionId)
+      const raw = message?.name
+      if (!ps || typeof raw !== 'string') return
+      // keep only printable chars (code >= 32), collapse spaces, cap at 16
+      let clean = ''
+      for (const ch of raw) if (ch.charCodeAt(0) >= 32) clean += ch
+      clean = clean.replace(/\s+/g, ' ').trim().slice(0, 16)
+      if (clean) ps.name = clean
+    })
+
     this.onMessage('emote', (client, message: { id?: number }) => {
       const session = this.#sessions.get(client.sessionId)
       const id = message?.id
@@ -292,6 +303,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     const ps = new PlayerState()
     ps.sessionId = client.sessionId
     ps.seat = seat
+    ps.name = `Player ${seat + 1}` // a default until they set one in the lobby
     this.state.players.set(client.sessionId, ps)
     if (!this.state.hostSessionId) this.state.hostSessionId = client.sessionId
     this.#resolveKits()
@@ -368,6 +380,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     ps.sessionId = id
     ps.seat = seat
     ps.bot = true
+    ps.name = `Bot ${seat + 1}`
     this.state.players.set(id, ps)
     this.#resolveKits()
     console.log(`[room ${this.roomId}] bot -> seat ${seat}`)

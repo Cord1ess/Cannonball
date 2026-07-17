@@ -39,6 +39,7 @@ import type { GrassBody } from '../render/grass.ts'
 import type { WindMark } from '../render/windMarks.ts'
 import { createBallView, type BallView } from '../render/ballView.ts'
 import { createBean, type Bean } from '../render/bean.ts'
+import { createNameTag, type NameTag } from '../render/nameTag.ts'
 import { PALETTE } from '../render/palette.ts'
 import type { ChaseCamera } from './camera.ts'
 import type { DebugHooks } from './debug.ts'
@@ -78,6 +79,7 @@ interface RemoteEntity {
   stub: PlayerSim
   seat: number
   kitKey: string
+  tag: NameTag
 }
 
 export interface MatchEvent {
@@ -91,6 +93,7 @@ export interface MatchEvent {
 export interface MatchPlayerInfo {
   sessionId: string
   seat: number
+  name: string
   alive: boolean
   connected: boolean
   bot: boolean
@@ -127,6 +130,8 @@ export interface MatchClient {
   setKit(id: string): void
   myKitId(): string
   myKitAway(): boolean
+  setName(name: string): void
+  myName(): string
   /** identity color for a seat as '#rrggbb' (kit primary, SEAT_COLORS fallback) */
   seatColorHex(seat: number): string
   onEvent(cb: (event: MatchEvent) => void): void
@@ -168,6 +173,8 @@ export function createOnlineGame(
   let mySeat = -1
   let localSim: PlayerSim | null = null
   let myBean: Bean | null = null
+  const myTag: NameTag = createNameTag()
+  scene.add(myTag.sprite)
   const selfSnaps: Snap[] = []
   const inputBuffer: NetInput[] = []
   let seq = 0
@@ -261,6 +268,16 @@ export function createOnlineGame(
       // re-apply the saved kit on join, unless the user already picked one
       if (!kitChosenThisSession && typeof stored === 'string' && kitColors(stored, false)) {
         conn.send('kit', { id: stored })
+      }
+    })
+    .catch(() => {})
+  // same for the display name — re-apply the saved one on join
+  let nameChosenThisSession = false
+  void saveStore
+    .get('playerName')
+    .then((stored) => {
+      if (!nameChosenThisSession && typeof stored === 'string' && stored.trim()) {
+        conn.send('name', { name: stored })
       }
     })
     .catch(() => {})
@@ -397,12 +414,15 @@ export function createOnlineGame(
       if (!remote) {
         const bean = createBean(kitOf(p))
         scene.add(bean.group)
+        const tag = createNameTag()
+        scene.add(tag.sprite)
         remote = {
           bean,
           snaps: [],
           stub: makePlayer(p.seat, p.x, p.z, p.yaw),
           seat: p.seat,
           kitKey: kitKeyOf(p),
+          tag,
         }
         remotes.set(id, remote)
       } else if (remote.kitKey !== kitKeyOf(p)) {
@@ -412,6 +432,7 @@ export function createOnlineGame(
         remote.bean = createBean(kitOf(p))
         scene.add(remote.bean.group)
       }
+      remote.tag.set(p.name || `Player ${p.seat + 1}`, toHex(kitOf(p).primary))
       pushSnap(remote.snaps, p)
       remote.stub.diving = p.diving
     })
@@ -419,9 +440,14 @@ export function createOnlineGame(
       if (!state.players.get(id)) {
         scene.remove(remote.bean.group)
         remote.bean.dispose()
+        scene.remove(remote.tag.sprite)
+        remote.tag.dispose()
         remotes.delete(id)
       }
     }
+    // keep my own tag text current
+    const meName = state.players.get(conn.sessionId)
+    if (meName) myTag.set(meName.name || `Player ${meName.seat + 1}`, toHex(kitOf(meName).primary))
 
     // ball truth
     serverBall.x = state.ball.x
@@ -519,6 +545,7 @@ export function createOnlineGame(
         list.push({
           sessionId,
           seat: p.seat,
+          name: p.name || `Player ${p.seat + 1}`,
           alive: p.alive,
           connected: p.connected,
           bot: p.bot,
@@ -560,6 +587,13 @@ export function createOnlineGame(
     },
     myKitId: () => state.players.get(conn.sessionId)?.kitId ?? '',
     myKitAway: () => state.players.get(conn.sessionId)?.kitAway ?? false,
+    setName(name: string): void {
+      nameChosenThisSession = true
+      const clean = name.slice(0, 16)
+      conn.send('name', { name: clean })
+      void saveStore.set('playerName', clean).catch(() => {})
+    },
+    myName: () => state.players.get(conn.sessionId)?.name ?? '',
     seatColorHex: (seat: number) => toHex(seatColors[seat] ?? SEAT_COLORS[seat] ?? 0x888888),
     onEvent: (cb) => eventListeners.push(cb),
   }
@@ -742,13 +776,21 @@ export function createOnlineGame(
             myBean.update(dt, { ...pose, lean, lookX: look.x, lookY: look.y })
           }
         }
-        myBean.group.visible = aliveOf(mySeat) || (state.phase ?? 0) === Phase.Lobby
+        const selfVisible = aliveOf(mySeat) || (state.phase ?? 0) === Phase.Lobby
+        myBean.group.visible = selfVisible
+        // my own tag: helpful in the lobby, hidden once the match is live so
+        // it doesn't block my own view (I know who I am)
+        const showMine = selfVisible && (state.phase ?? 0) === Phase.Lobby
+        myTag.setVisible(showMine)
+        if (showMine) myTag.place(selfX, selfY, selfZ)
       }
 
       // remotes
       for (const remote of remotes.values()) {
         const remoteAlive = aliveOf(remote.seat)
-        remote.bean.group.visible = remoteAlive || (state.phase ?? 0) === Phase.Lobby
+        const vis = remoteAlive || (state.phase ?? 0) === Phase.Lobby
+        remote.bean.group.visible = vis
+        remote.tag.setVisible(vis)
         if (!remoteAlive) continue
         const pose = sampleSnaps(remote.snaps, renderTime)
         if (!pose) continue
@@ -758,6 +800,7 @@ export function createOnlineGame(
         remote.stub.yaw = pose.yaw
         const look = lookToward(remote.stub, ball.x, ball.y, ball.z)
         remote.bean.update(dt, { ...pose, lean: 0, lookX: look.x, lookY: look.y })
+        remote.tag.place(pose.x, pose.y, pose.z)
       }
 
       const bx = prevBall.x + (ball.x - prevBall.x) * alpha

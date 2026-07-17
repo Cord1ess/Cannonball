@@ -35,6 +35,9 @@ const kitSwatchCss = (kit: KitColors | null, fallback: string): string => {
 
 export function createMatchUi(client: MatchClient): MatchUi {
   const seatColor = (seat: number): string => client.seatColorHex(seat)
+  // display name for a seat (falls back to "P{n}" if not found yet)
+  const nameOf = (seat: number): string =>
+    client.players().find((p) => p.seat === seat)?.name ?? `P${seat + 1}`
   const root = document.createElement('div')
   root.style.cssText =
     'position:fixed;inset:0;pointer-events:none;font-family:system-ui,sans-serif;user-select:none;z-index:20;'
@@ -67,17 +70,17 @@ export function createMatchUi(client: MatchClient): MatchUi {
 
   client.onEvent((event) => {
     if (event.type === 'elim' && event.seat !== undefined) {
-      showBanner(`${event.seat === client.mySeat() ? 'YOU ARE' : `PLAYER ${event.seat + 1}`} ELIMINATED`)
+      showBanner(`${event.seat === client.mySeat() ? 'YOU ARE' : nameOf(event.seat)} ELIMINATED`)
     } else if (event.type === 'overtime') {
       showBanner('OVERTIME — first touch of ball-time loses!', 4)
     } else if (event.type === 'volley') {
       showBanner('KICKOFF!', 1.2)
     } else if (event.type === 'save' && event.seat !== undefined) {
-      showBanner(`P${event.seat + 1} FREE SAVE!`, 1.5)
+      showBanner(`${nameOf(event.seat)} FREE SAVE!`, 1.5)
     } else if (event.type === 'emote' && event.seat !== undefined && event.id !== undefined) {
       const line = document.createElement('div')
       line.style.cssText = `background:#fffdf5cc;border-radius:8px;padding:2px 10px;border-left:6px solid ${seatColor(event.seat)};`
-      line.textContent = `P${event.seat + 1} ${EMOTES[event.id] ?? ''}`
+      line.textContent = `${nameOf(event.seat)} ${EMOTES[event.id] ?? ''}`
       emoteFeed.appendChild(line)
       setTimeout(() => line.remove(), 3000)
     }
@@ -96,11 +99,11 @@ export function createMatchUi(client: MatchClient): MatchUi {
     const handout = client.handout()
 
     // key: only rebuild DOM when the situation changes (timers redraw cheap parts)
-    const kitSig = client
+    const rosterSig = client
       .players()
-      .map((p) => `${p.kitId}${p.kitAway ? 'a' : ''}`)
+      .map((p) => `${p.name}${p.kitId}${p.kitAway ? 'a' : ''}${p.connected ? '' : 'x'}`)
       .join(',')
-    const key = `${phase}:${handout?.revealed}:${handout?.elimSeat}:${client.players().length}:${client.draftOffers() !== null}:${advChoice}:${curseChoice}:${client.winnerSeat()}:${kitSig}`
+    const key = `${phase}:${handout?.revealed}:${handout?.elimSeat}:${client.players().length}:${client.draftOffers() !== null}:${advChoice}:${curseChoice}:${client.winnerSeat()}:${rosterSig}`
     const timerText = remaining > 0.05 ? ` — ${Math.ceil(remaining)}s` : ''
 
     if (phase === Phase.Lobby) {
@@ -120,10 +123,37 @@ export function createMatchUi(client: MatchClient): MatchUi {
           chip.style.cssText =
             `${kitSwatchCss(kit, seatColor(p.seat))}color:#fffdf5;text-shadow:0 1px 2px rgba(30,26,20,0.75);` +
             `border-radius:8px;padding:6px 12px;font-weight:700;${p.connected ? '' : 'opacity:0.4;'}`
-          chip.textContent = `${p.bot ? '🤖 ' : ''}P${p.seat + 1}${p.seat === client.mySeat() ? ' (you)' : ''}`
+          chip.textContent = `${p.bot ? '🤖 ' : ''}${p.name}${p.seat === client.mySeat() ? ' (you)' : ''}`
           list.appendChild(chip)
         }
         panel.appendChild(list)
+
+        // name field: your display name, shown on your chip + over your head
+        const nameRow = document.createElement('div')
+        nameRow.style.cssText = 'display:flex;gap:8px;justify-content:center;align-items:center;margin-bottom:12px;'
+        const nameLabel = document.createElement('span')
+        nameLabel.textContent = 'name:'
+        nameLabel.style.cssText = 'font-weight:700;color:#6b655c;'
+        const nameInput = document.createElement('input')
+        nameInput.maxLength = 16
+        nameInput.placeholder = 'your name'
+        nameInput.value = client.myName()
+        nameInput.style.cssText =
+          'font:600 14px system-ui;padding:5px 10px;border-radius:8px;border:2px solid #4a443c;min-width:160px;'
+        const commitName = (): void => {
+          const v = nameInput.value.trim()
+          if (v) client.setName(v)
+        }
+        nameInput.addEventListener('change', commitName)
+        nameInput.addEventListener('blur', commitName)
+        nameInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            commitName()
+            nameInput.blur()
+          }
+        })
+        nameRow.append(nameLabel, nameInput)
+        panel.appendChild(nameRow)
 
         // jersey picker: cycle the fallback kit set (real teams = later content pass)
         const kitRow = document.createElement('div')
@@ -280,7 +310,7 @@ export function createMatchUi(client: MatchClient): MatchUi {
                 const chosen = (kind === 'advantage' ? advChoice : curseChoice) === p.seat
                 const btn = document.createElement('button')
                 btn.style.cssText = `background:${seatColor(p.seat)};color:#fff;border:3px solid ${chosen ? '#4a443c' : 'transparent'};border-radius:8px;padding:6px 12px;font-weight:800;cursor:pointer;`
-                btn.textContent = `P${p.seat + 1}`
+                btn.textContent = nameOf(p.seat)
                 btn.addEventListener('click', () => {
                   if (kind === 'advantage') advChoice = p.seat
                   else curseChoice = p.seat
@@ -303,13 +333,13 @@ export function createMatchUi(client: MatchClient): MatchUi {
           } else if (!handout.revealed) {
             const wait = document.createElement('div')
             wait.style.cssText = 'font-size:18px;font-weight:700;'
-            wait.textContent = `P${handout.elimSeat + 1} is choosing who gets the advantage… and the curse`
+            wait.textContent = `${nameOf(handout.elimSeat)} is choosing who gets the advantage… and the curse`
             panel.appendChild(wait)
           } else {
             const reveal = document.createElement('div')
             reveal.innerHTML = `<div style="font-size:20px;font-weight:800;margin-bottom:8px;">THE HANDOUT</div>
-              <div style="color:#58ae7c;font-weight:800;">${cardName(handout.advCardId)} → P${handout.advTo + 1}</div>
-              <div style="color:#d96c6c;font-weight:800;">${cardName(handout.curseCardId)} → P${handout.curseTo + 1}</div>`
+              <div style="color:#58ae7c;font-weight:800;">${cardName(handout.advCardId)} → ${nameOf(handout.advTo)}</div>
+              <div style="color:#d96c6c;font-weight:800;">${cardName(handout.curseCardId)} → ${nameOf(handout.curseTo)}</div>`
             panel.appendChild(reveal)
           }
         }
@@ -324,7 +354,7 @@ export function createMatchUi(client: MatchClient): MatchUi {
         panel.replaceChildren()
         const winner = client.winnerSeat()
         const h = document.createElement('div')
-        h.innerHTML = `<div style="font-size:30px;font-weight:800;color:${seatColor(winner)};">P${winner + 1} WINS!</div>
+        h.innerHTML = `<div style="font-size:30px;font-weight:800;color:${seatColor(winner)};">${nameOf(winner)} WINS!</div>
           <div style="margin:6px 0 16px;">${winner === client.mySeat() ? 'last bean standing 🏆' : 'better luck next kickoff'}</div>`
         panel.appendChild(h)
         if (client.isHost()) {
