@@ -30,16 +30,17 @@ import {
 } from '../../../shared/src/sim/arena.ts'
 import { accrueBallTime, tickLosers } from '../../../shared/src/sim/meters.ts'
 import {
+  applyWindToBall,
+  applyWindToPlayer,
   clearEvents,
   collidePlayers,
   makeBall,
   makeEvents,
   makePlayer,
-  makeWind,
   resetBall,
+  sampleWind,
   stepBallWithPlayers,
   stepPlayer,
-  stepWind,
   ZERO_INPUT,
   type PlayerInputFrame,
   type PlayerSim,
@@ -91,7 +92,6 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #rng = new Random('cannonball-server')
   #arena: Arena = makeArena(MAX_SEATS)
   #ball = makeBall()
-  #wind = makeWind()
   #windOn = WIND_ENABLED
   #events = makeEvents()
   #sessions = new Map<string, Session>()
@@ -764,6 +764,10 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       })
     }
 
+    // ONE deterministic wind sample this frame (function of the server clock)
+    const strength = WIND_BASE_STRENGTH + this.#eliminations * WIND_STEP_PER_ELIMINATION
+    const wind = sampleWind(this.#time.fixedElapsed, strength)
+
     const sims: PlayerSim[] = []
     for (const session of this.#sessions.values()) {
       if (session.isBot) {
@@ -780,11 +784,12 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       // the eliminated don't play (they emote from the stands)
       const input = this.#alive[session.sim.seat] ? session.lastInput : ZERO_INPUT
       stepPlayer(session.sim, input, this.#arena, dt)
+      // wind catches airborne beans (jumping/diving) — gusts shove harder
+      if (this.#windOn && this.#alive[session.sim.seat]) applyWindToPlayer(session.sim, wind, dt)
       sims.push(session.sim)
     }
 
-    const strength = WIND_BASE_STRENGTH + this.#eliminations * WIND_STEP_PER_ELIMINATION
-    if (this.#windOn) stepWind(this.#wind, this.#rng, strength, this.#ball, dt)
+    if (this.#windOn) applyWindToBall(this.#ball, wind, dt)
     // Magnet Curse: the ball drifts toward the cursed bean's wedge
     for (const session of this.#sessions.values()) {
       const seat = session.sim.seat
@@ -1043,12 +1048,14 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     ball.vy = this.#ball.vy
     ball.vz = this.#ball.vz
 
-    const windLive = this.#windOn && this.#wind.timeLeft > 0
-    this.state.windX = windLive ? this.#wind.x : 0
-    this.state.windZ = windLive ? this.#wind.z : 0
-    this.state.windStrength = windLive
+    // wind is deterministic from serverTime — replicate only the scalar
+    // strength (0 = off) so the client samples the identical field itself
+    this.state.windStrength = this.#windOn
       ? WIND_BASE_STRENGTH + this.#eliminations * WIND_STEP_PER_ELIMINATION
       : 0
+    // windX/windZ kept for wire-compat but unused; client derives from time
+    this.state.windX = 0
+    this.state.windZ = 0
     this.state.survivors = this.#survivors
     for (let seat = 0; seat < MAX_SEATS; seat++) this.state.meters[seat] = this.#meters[seat] ?? 0
   }

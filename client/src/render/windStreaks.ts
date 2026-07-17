@@ -1,40 +1,63 @@
 import * as THREE from 'three'
 
 /**
- * Wind streaks (M5): white dashes streaking through the air along the wind
- * direction so wind reads as a visible force, not invisible air. One instanced
- * draw of billboarded dash-quads that loop across the pitch; they surge and
- * brighten on gust fronts. Purely cosmetic — never touches the sim.
+ * Wind streaks (M5): curved S-shaped ribbons that whiz LOW across the field
+ * along the wind, so wind reads as a visible force. Each streak is a short
+ * multi-segment strip that follows a travelling sine curve; they surge and
+ * brighten on gusts. View-space billboarded so they never render edge-on.
+ * Purely cosmetic — never touches the sim.
  */
 
-const COUNT = 140
-const SPAN = 60 // streaks live in a box this wide, centered on the arena
-const LEN = 4.0 // dash length in meters
+const COUNT = 120
+const SEGS = 10 // segments per streak ribbon (curve resolution)
+const SPAN = 58 // streaks travel within a box this wide, centered on arena
+const LEN = 7.0 // ribbon length in meters (along the wind)
 
 export interface WindStreaks {
   readonly mesh: THREE.Object3D
-  /** dir = wind unit vector, gust 0..1 from the grass field */
   update(dt: number, windX: number, windZ: number, gust: number): void
   dispose(): void
 }
 
 export function createWindStreaks(): WindStreaks {
-  // unit quad spanning x:0..1 (length axis), y:-0.5..0.5 (thin width)
-  const quad = new THREE.PlaneGeometry(1, 1)
-  quad.translate(0.5, 0, 0) // origin at the dash tail; grows down +X
+  // one ribbon = SEGS quads laid end to end along local X (0..1). Each vertex
+  // carries its along-fraction in position.x and side in position.y (-0.5..0.5)
+  const positions: number[] = []
+  const along: number[] = []
+  const side: number[] = []
+  const indices: number[] = []
+  for (let s = 0; s <= SEGS; s++) {
+    const f = s / SEGS
+    for (const sd of [-0.5, 0.5]) {
+      positions.push(f, sd, 0)
+      along.push(f)
+      side.push(sd)
+    }
+    if (s < SEGS) {
+      const b = s * 2
+      indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2)
+    }
+  }
+  const ribbon = new THREE.BufferGeometry()
+  ribbon.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  ribbon.setAttribute('aAlong', new THREE.Float32BufferAttribute(along, 1))
+  ribbon.setAttribute('aSide', new THREE.Float32BufferAttribute(side, 1))
+  ribbon.setIndex(indices)
+
   const geo = new THREE.InstancedBufferGeometry()
-  geo.index = quad.index
-  geo.setAttribute('position', quad.getAttribute('position'))
-  geo.setAttribute('uv', quad.getAttribute('uv'))
+  geo.index = ribbon.index
+  geo.setAttribute('position', ribbon.getAttribute('position'))
+  geo.setAttribute('aAlong', ribbon.getAttribute('aAlong'))
+  geo.setAttribute('aSide', ribbon.getAttribute('aSide'))
   geo.instanceCount = COUNT
 
-  // per-streak: lateral offset, height, along-phase, jitter
+  // per-streak: lateral offset, LOW height, along-phase, curve/jitter seed
   const seed = new Float32Array(COUNT * 4)
   for (let i = 0; i < COUNT; i++) {
-    seed[i * 4] = (Math.random() - 0.5) * SPAN // lateral spread across wind
-    seed[i * 4 + 1] = 0.8 + Math.random() * 9 // height above the pitch
-    seed[i * 4 + 2] = Math.random() // along-travel phase 0..1
-    seed[i * 4 + 3] = Math.random() // length/alpha jitter
+    seed[i * 4] = (Math.random() - 0.5) * SPAN // lateral spread
+    seed[i * 4 + 1] = 0.5 + Math.random() * 3.2 // LOW: within the field, near grass
+    seed[i * 4 + 2] = Math.random() // along-travel phase
+    seed[i * 4 + 3] = Math.random() // curve phase + length/alpha jitter
   }
   geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 4))
 
@@ -52,53 +75,63 @@ export function createWindStreaks(): WindStreaks {
     },
     vertexShader: /* glsl */ `
       attribute vec4 aSeed;
+      attribute float aAlong;
+      attribute float aSide;
       uniform float uTime;
       uniform vec2 uWind;
       uniform float uGust;
       uniform float uSpan;
       uniform float uLen;
-      varying vec2 vUv;
+      varying float vAlong;
+      varying float vSide;
       varying float vAlpha;
 
       void main() {
-        vUv = uv;
+        vAlong = aAlong;
+        vSide = aSide;
         vec2 dir = normalize(uWind);
         vec2 perp = vec2(-dir.y, dir.x);
 
         // travel downwind, looping across the span; faster on gusts
-        float speed = 7.0 + aSeed.w * 6.0 + uGust * 12.0;
-        float along = mod(aSeed.z * uSpan + uTime * speed, uSpan) - uSpan * 0.5;
-        // dash center in world: lateral offset along perp, advanced downwind
-        vec2 base = perp * aSeed.x + dir * along;
-        vec3 center = vec3(base.x, aSeed.y, base.y);
+        float speed = 8.0 + aSeed.w * 7.0 + uGust * 14.0;
+        float head = mod(aSeed.z * uSpan + uTime * speed, uSpan) - uSpan * 0.5;
 
-        float len = uLen * (0.7 + aSeed.w * 0.6 + uGust * 0.8);
-        float wide = 0.10 + uGust * 0.08;
+        // this vertex sits 'aAlong' back along the ribbon from the head
+        float len = uLen * (0.7 + aSeed.w * 0.6 + uGust * 0.7);
+        float alongDist = head - aAlong * len;
 
-        // BILLBOARD: build the quad in VIEW space so a flat dash always faces
-        // the camera (the old world-flat quads were seen edge-on and vanished).
-        // Length axis = the wind direction projected into view; width = screen up.
+        // S-CURVE: the ribbon snakes side to side as it travels (a sine of the
+        // along-position + time), amplitude swelling on gusts
+        float curvePhase = alongDist * 0.55 + uTime * (2.0 + aSeed.w * 2.0) + aSeed.w * 6.2831;
+        float amp = (0.9 + uGust * 1.6);
+        float lateral = sin(curvePhase) * amp + sin(curvePhase * 0.5 + 1.3) * amp * 0.5;
+
+        // ribbon width, tapering to points at both ends
+        float taper = sin(aAlong * 3.14159);
+        float wide = (0.18 + uGust * 0.14) * taper;
+
+        // assemble in world XZ: forward along dir, snaking + width along perp
+        vec2 xz = perp * aSeed.x + dir * alongDist + perp * (lateral + aSide * wide * 4.0);
+        vec3 center = vec3(xz.x, aSeed.y + sin(curvePhase * 0.7) * 0.3, xz.y);
+
+        // billboard the WIDTH toward the camera so the ribbon never vanishes
         vec4 centerView = modelViewMatrix * vec4(center, 1.0);
-        vec3 dirView = normalize((modelViewMatrix * vec4(dir.x, 0.0, dir.y, 0.0)).xyz);
-        vec3 upView = normalize(cross(dirView, vec3(0.0, 0.0, 1.0)));
-        vec3 offset = dirView * (position.x * len) + upView * (position.y * wide * 4.0);
-        vec4 viewPos = centerView + vec4(offset, 0.0);
+        gl_Position = projectionMatrix * centerView;
 
-        float edge = 1.0 - smoothstep(0.42, 0.5, abs(along) / uSpan);
-        vAlpha = (0.45 + uGust * 0.5) * edge;
-
-        gl_Position = projectionMatrix * viewPos;
+        float edge = 1.0 - smoothstep(0.4, 0.5, abs(alongDist) / uSpan);
+        vAlpha = (0.4 + uGust * 0.5) * edge;
       }
     `,
     fragmentShader: /* glsl */ `
       precision highp float;
-      varying vec2 vUv;
+      varying float vAlong;
+      varying float vSide;
       varying float vAlpha;
       void main() {
-        // taper to points at both ends of the dash, soft across the width
-        float head = smoothstep(0.0, 0.3, vUv.x) * (1.0 - smoothstep(0.65, 1.0, vUv.x));
-        float across = 1.0 - abs(vUv.y - 0.5) * 2.0;
-        float a = head * across * across * vAlpha;
+        // taper along the ribbon + soft across the width
+        float body = sin(vAlong * 3.14159);
+        float across = 1.0 - abs(vSide) * 2.0;
+        float a = body * across * vAlpha;
         if (a < 0.01) discard;
         gl_FragColor = vec4(1.0, 1.0, 0.99, a);
       }
@@ -120,7 +153,7 @@ export function createWindStreaks(): WindStreaks {
     },
     dispose(): void {
       geo.dispose()
-      quad.dispose()
+      ribbon.dispose()
       material.dispose()
     },
   }

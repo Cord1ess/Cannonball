@@ -12,16 +12,17 @@ import {
 import { footprintZone, makeArena, yawTowardCenter, zoneAnchor, type Arena } from '@shared/sim/arena.ts'
 import { accrueBallTime, tickLosers } from '@shared/sim/meters.ts'
 import {
+  applyWindToBall,
+  applyWindToPlayer,
   clearEvents,
   collidePlayers,
   makeBall,
   makeEvents,
   makePlayer,
-  makeWind,
   resetBall,
+  sampleWind,
   stepBallWithPlayers,
   stepPlayer,
-  stepWind,
   ZERO_INPUT,
   type PlayerInputFrame,
   type PlayerSim,
@@ -100,7 +101,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
   const ballView: BallView = createBallView()
   scene.add(ballView.group)
 
-  const wind = makeWind()
+  let windTime = 0 // deterministic wind clock for the sandbox
   const events = makeEvents()
 
   const prevBall: Snapshot = { x: 0, y: 0, z: 0 }
@@ -149,16 +150,22 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
       prevBall.y = ball.y
       prevBall.z = ball.z
 
+      windTime += dt
+      const windStrength = windOn ? WIND_BASE_STRENGTH + eliminations * WIND_STEP_PER_ELIMINATION : 0
+      const wind = sampleWind(windTime, windStrength)
+
       stepPlayer(players[0]!, input, arena, dt)
+      if (windOn) applyWindToPlayer(players[0]!, wind, dt)
       // dummies: no input, but full physics so shoves send them flying
       for (let seat = 1; seat < SEATS; seat++) {
         if (!alive[seat]) continue
         const dummy = players[seat]!
         stepPlayer(dummy, ZERO_INPUT, arena, dt)
+        if (windOn) applyWindToPlayer(dummy, wind, dt)
         dummy.yaw = Math.atan2(ball.x - dummy.x, ball.z - dummy.z)
       }
 
-      if (windOn) stepWind(wind, rng, WIND_BASE_STRENGTH + eliminations * WIND_STEP_PER_ELIMINATION, ball, dt)
+      if (windOn) applyWindToBall(ball, wind, dt)
       collidePlayers(players, alive, events)
       stepBallWithPlayers(ball, players, alive, arena, dt, events)
 
@@ -181,7 +188,8 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
     },
 
     frameUpdate(dt: number, alpha: number, lean: number): void {
-      arenaView.update(dt)
+      const vw = sampleWind(windTime, (windOn ? WIND_BASE_STRENGTH : 0) + 1.4)
+      arenaView.update(dt, vw.x, vw.z, vw.gust)
       const p = players[0]!
       const px = prevPlayer.x + (p.x - prevPlayer.x) * alpha
       const py = prevPlayer.y + (p.y - prevPlayer.y) * alpha

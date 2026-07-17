@@ -38,8 +38,6 @@ import {
   STAMINA_REGEN,
   DIVE_COST,
   TURN_RATE,
-  WIND_GUST_DURATION_S,
-  WIND_GUST_PERIOD_S,
 } from '../constants.ts'
 import type { Arena } from './arena.ts'
 import { ABILITIES, DEFAULT_MODS, type PlayerMods } from '../cards/effects.ts'
@@ -107,13 +105,6 @@ export const ZERO_INPUT: PlayerInputFrame = {
   dive: false,
   sprint: false,
   ability: false,
-}
-
-export interface Wind {
-  x: number
-  z: number
-  timeLeft: number
-  cooldown: number
 }
 
 export interface HeaderEvent {
@@ -188,9 +179,6 @@ export function makePlayer(seat: number, x: number, z: number, yaw: number): Pla
   }
 }
 
-export function makeWind(): Wind {
-  return { x: 0, z: 0, timeLeft: 0, cooldown: WIND_GUST_PERIOD_S }
-}
 
 export function resetBall(ball: BallSim): void {
   ball.x = 0
@@ -336,27 +324,66 @@ export function stepPlayer(p: PlayerSim, input: PlayerInputFrame, arena: Arena, 
   if (p.abilityActiveT > 0) p.abilityActiveT -= dt
 }
 
-// --- wind (the only escalating force, idea.md §4) -----------------------------------
+// --- wind: ONE deterministic field, function of time only ---------------------------
+//
+// Wind is a pure function of the server clock, so the server sim, the client's
+// ball prediction, and the client's grass/streak visuals all compute the SAME
+// wind with zero replication and no start/stop popping. There is ALWAYS a light
+// breeze; gusts are a low-frequency envelope on top. `strength` scales the whole
+// thing (grows with eliminations).
 
-export interface WindRng {
-  next(): number
+export interface WindState {
+  /** unit-ish direction (may be slightly under 1 near calm) */
+  x: number
+  z: number
+  /** 0 = only the base breeze .. 1 = peak gust */
+  gust: number
+  /** signed force magnitude already ×strength, for applying to bodies */
+  force: number
 }
 
-export function stepWind(wind: Wind, rng: WindRng, strength: number, ball: BallSim, dt: number): void {
-  if (wind.timeLeft > 0) {
-    wind.timeLeft -= dt
-    ball.vx += wind.x * strength * dt
-    ball.vz += wind.z * strength * dt
-  } else {
-    wind.cooldown -= dt
-    if (wind.cooldown <= 0) {
-      const angle = rng.next() * Math.PI * 2
-      wind.x = Math.cos(angle)
-      wind.z = Math.sin(angle)
-      wind.timeLeft = WIND_GUST_DURATION_S * (0.7 + rng.next() * 0.6)
-      wind.cooldown = WIND_GUST_PERIOD_S * (0.6 + rng.next() * 0.8)
-    }
-  }
+// two smooth pseudo-noise waves (cheap, deterministic, seamless)
+function windNoise(t: number, seed: number): number {
+  return (
+    Math.sin(t * 0.37 + seed) * 0.6 +
+    Math.sin(t * 0.19 + seed * 2.1) * 0.4 +
+    Math.sin(t * 0.83 + seed * 4.7) * 0.18
+  )
+}
+
+/**
+ * Sample the wind at absolute time `t` (seconds). `strength` is the base
+ * breeze force; gusts multiply it up to ~3×. Deterministic — same t → same
+ * wind, everywhere.
+ */
+export function sampleWind(t: number, strength: number): WindState {
+  // direction rotates slowly and continuously — never snaps or reverses hard
+  const ang = t * 0.11 + windNoise(t, 3) * 0.7
+  const dirX = Math.cos(ang)
+  const dirZ = Math.sin(ang)
+  // gust envelope: mostly low, occasional swells to 1 (smooth, low frequency)
+  const g = windNoise(t * 0.5, 7) // -~1.4 .. ~1.4
+  const gust = Math.max(0, Math.min(1, g * 0.8 - 0.15))
+  // force = base breeze + gust swell, all ×strength
+  const force = strength * (0.35 + gust * 1.7)
+  return { x: dirX, z: dirZ, gust, force }
+}
+
+/** Apply the sampled wind to the ball (full effect). */
+export function applyWindToBall(ball: BallSim, wind: WindState, dt: number): void {
+  ball.vx += wind.x * wind.force * dt
+  ball.vz += wind.z * wind.force * dt
+}
+
+/**
+ * Apply wind to a player — only while AIRBORNE (jumping/diving), and gusts
+ * shove harder. On the ground the bean has traction and ignores it.
+ */
+export function applyWindToPlayer(p: PlayerSim, wind: WindState, dt: number): void {
+  if (p.grounded) return
+  const airFactor = 0.55 + wind.gust * 0.9 // gusts really catch you mid-air
+  p.vx += wind.x * wind.force * airFactor * dt
+  p.vz += wind.z * wind.force * airFactor * dt
 }
 
 // --- ball --------------------------------------------------------------------------

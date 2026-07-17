@@ -38,8 +38,8 @@ export interface GrassField {
   setDanger(fracs: readonly number[]): void
   /** feed the bodies that flatten grass this frame (players + ball) */
   setBodies(bodies: readonly GrassBody[]): void
-  /** advance wind time + expose the current wind direction (for streaks) */
-  update(time: number): { windX: number; windZ: number; gust: number }
+  /** advance the grass; drive it with the real wind (dir + gust 0..1) */
+  update(time: number, windX: number, windZ: number, gust: number): void
   dispose(): void
 }
 
@@ -49,6 +49,7 @@ const VERT = /* glsl */ `
 
   uniform float uTime;
   uniform vec2 uWindDir;
+  uniform float uGust; // 0 = only base breeze .. 1 = peak gust
   uniform vec4 uBodies[${MAX_BODIES}]; // x,y = xz pos · z = radius · w = wobble 0..1
   uniform int uBodyCount;
 
@@ -78,19 +79,18 @@ const VERT = /* glsl */ `
     p.x += s * curl * t * t;
     p.z += c * curl * t * t;
 
-    // --- LAYERED non-uniform wind ------------------------------------------
-    // 1) slow base sway, coherent across the field
+    // --- LAYERED wind (always breathing, never fully still) ----------------
+    // 1) CONSTANT base sway — this alone keeps the field alive at all times
     float base = dot(root, uWindDir) * 0.05 + uTime * 0.7;
     float baseSway = sin(base) * 0.5 + sin(base * 0.37 + 1.1) * 0.3;
-    // 2) big rolling GUST FRONTS: a low-frequency wave sweeping along the wind,
-    //    so patches of the field surge together then calm — never uniform
+    // 2) GUST SURGE driven by the real wind envelope (uGust 0..1): rolling
+    //    fronts sweep along the wind so patches bend together on a gust
     float gp = dot(root, uWindDir) * 0.09 - uTime * 1.1;
-    float gustFront = smoothstep(0.2, 1.0, sin(gp) * 0.5 + 0.5); // 0..1 pulses
-    float gustSway = sin(gp * 2.3 + root.x * 0.3) * gustFront;
-    // 3) per-blade flutter (high freq, individual)
-    float flutter = sin(uTime * 7.0 + aSeed.x * 6.2831) * 0.16;
+    float gustSway = (sin(gp) * 0.6 + sin(gp * 2.3 + root.x * 0.3) * 0.4) * uGust;
+    // 3) per-blade flutter (high freq, individual), a touch stronger on gusts
+    float flutter = sin(uTime * 7.0 + aSeed.x * 6.2831) * (0.12 + uGust * 0.14);
 
-    float sway = (baseSway * 0.13 + gustSway * 0.22 + flutter * 0.05) * t * t;
+    float sway = (baseSway * 0.11 + gustSway * 0.3 + flutter * 0.05) * t * t;
     p.xz += uWindDir * sway;
 
     // --- INTERACTIVE displacement (walking THROUGH grass) ------------------
@@ -247,6 +247,7 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
     uniforms: {
       uTime: { value: 0 },
       uWindDir: { value: windDir },
+      uGust: { value: 0 },
       uBase: { value: new THREE.Color(PALETTE.grassBase) },
       uTip: { value: new THREE.Color(PALETTE.grassTip) },
       uChalk: { value: new THREE.Color(PALETTE.chalk) },
@@ -283,12 +284,10 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
       }
       material.uniforms.uBodyCount!.value = n
     },
-    update(time: number): { windX: number; windZ: number; gust: number } {
+    update(time: number, windX: number, windZ: number, gust: number): void {
       material.uniforms.uTime!.value = time
-      // report the gust envelope at the field center so streaks pulse with it
-      const gp = -time * 1.1
-      const gust = Math.max(0, Math.sin(gp) * 0.5 + 0.5)
-      return { windX: windDir.x, windZ: windDir.y, gust }
+      windDir.set(windX, windZ)
+      material.uniforms.uGust!.value = gust
     },
     dispose(): void {
       geo.dispose()

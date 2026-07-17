@@ -116,6 +116,22 @@ dashes drifting on the wind, brighten on gusts). GOTCHA: streaks MUST be view-sp
 GOTCHA: never name a GLSL local `flat` (reserved keyword → shader won't compile → grass vanishes).
 Perf: fill-bound not geometry-bound, ~5x headroom at 1080p, all of this measured free (~2ms/frame).
 
+**WIND is now a REAL unified system (user request "make wind an actually working part, not a
+gimmick").** `shared/src/sim/physics.ts`: `sampleWind(t, strength)` — ONE deterministic wind field,
+pure function of time (always-on light breeze + smooth low-freq gust envelope + slowly rotating
+dir). Old rng-based `makeWind`/`stepWind`/`Wind` DELETED. `applyWindToBall` (full) + `applyWindTo
+Player` (airborne ONLY, gusts shove harder). WIND_ENABLED now TRUE. Server samples from
+`fixedElapsed` and applies to ball + airborne beans; replicates only scalar `windStrength` (grows
+with elims) — client derives dir/gust itself so PREDICTION MATCHES with zero back-and-forth. Client
+(online.ts) mirrors the server clock in `simTime`, applies wind to predicted ball + airborne self,
+exposes `currentWind`. Grass shader: constant base sway (never stops) + `uGust`-driven rolling
+fronts + flutter, all following the real wind dir. `render/windStreaks.ts` rewritten as LOW curved
+S-shaped ribbons (10-seg strips snaking on a travelling sine) that whiz across the field one
+direction (fixed the back-and-forth). NEW `render/windMarks.ts`: direction-line streaklets beside
+bodies the wind is catching (airborne beans + airborne ball), fed from online.ts. Sandbox wind
+unified too. GOTCHA carried: streaks/marks MUST billboard (view-space) or vanish edge-on. 56 tests
++ smoke pass with wind live; perf ~3.6ms/frame uncapped (still ~4x headroom).
+
 Feedback pass 4: the tile's luminance is remapped
 onto the EXACT blade palette at load (grassBase→grassTip, unlit MeshBasicMaterial like the
 blades) so ground/blade color can never drift; ground chalk LINES removed (they doubled the

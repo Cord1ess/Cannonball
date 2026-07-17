@@ -12,14 +12,18 @@ import {
 import { footprintZone, makeArena, type Arena } from '@shared/sim/arena.ts'
 import type { NetHandoutRead, NetInput, NetPlayerRead, NetStateRead } from '@shared/sim/net.ts'
 import {
+  applyWindToBall,
+  applyWindToPlayer,
   clearEvents,
   makeBall,
   makeEvents,
   makePlayer,
+  sampleWind,
   stepBallWithPlayers,
   stepPlayer,
   type PlayerInputFrame,
   type PlayerSim,
+  type WindState,
 } from '@shared/sim/physics.ts'
 import { isPlayPhase, Phase, tickInterval } from '@shared/match/phases.ts'
 import { ABILITIES, computeMods } from '@shared/cards/effects.ts'
@@ -32,6 +36,7 @@ import {
 } from '@vendor/platform/save-data.ts'
 import { createArenaView, type ArenaView } from '../render/arenaView.ts'
 import type { GrassBody } from '../render/grass.ts'
+import type { WindMark } from '../render/windMarks.ts'
 import { createBallView, type BallView } from '../render/ballView.ts'
 import { createBean, type Bean } from '../render/bean.ts'
 import { PALETTE } from '../render/palette.ts'
@@ -52,6 +57,8 @@ import { SEAT_COLORS } from './sandbox.ts'
 
 const SNAP_ERROR = 3
 const SERVER_BALL_LOOKAHEAD_S = 0.7 / PATCH_HZ
+// a gentle breeze for the grass visual even if physical wind strength is 0
+const WIND_VISUAL_STRENGTH = 1.4
 
 const toHex = (c: number): string => `#${c.toString(16).padStart(6, '0')}`
 
@@ -182,6 +189,11 @@ export function createOnlineGame(
   let timeOffset: number | null = null
   let lastPatchAt = 0
   const serverMe = { x: 0, y: 0, z: 0, has: false }
+  // local mirror of the server clock, advanced per fixed step + resynced on
+  // each patch, so wind sampling matches the server deterministically
+  let simTime = 0
+  // the wind this frame, exposed for HUD/streak/direction-line consumers
+  const currentWind: WindState = { x: 1, z: 0, gust: 0, force: 0 }
   // pooled grass bodies — reused each frame so the hot path never allocates
   // grass bodies: pooled + per-key wobble state so blades spring back after a
   // body passes. wobble ramps up with movement speed and decays each frame.
@@ -189,6 +201,7 @@ export function createOnlineGame(
   const grassBodies: GrassBody[] = []
   const grassState = new Map<string, { px: number; pz: number; wobble: number; seen: boolean }>()
   const grassSeen = new Set<string>()
+  const windMarks: WindMark[] = [] // rebuilt each frame (small, bounded)
   const pushBody = (key: string, x: number, z: number, radius: number, dt: number): void => {
     const b = grassBodyPool[grassBodies.length]
     if (!b) return
@@ -333,6 +346,7 @@ export function createOnlineGame(
     }
     rebuildArenaIfNeeded()
     lastPatchAt = performance.now()
+    simTime = state.serverTime ?? simTime // resync wind clock to the server
 
     const nowS = performance.now() / 1000
     const measured = state.serverTime - nowS
@@ -645,13 +659,22 @@ export function createOnlineGame(
 
       seq++
       const net: NetInput = { seq, ...input }
+      // wind: sample the SAME deterministic field the server uses, from the
+      // local mirror of the server clock. Catches the airborne self + ball.
+      simTime += dt
+      const wind = sampleWind(simTime, state.windStrength ?? 0)
+      currentWind.x = wind.x
+      currentWind.z = wind.z
+      currentWind.gust = wind.gust
+      currentWind.force = wind.force
+
       stepPlayer(localSim, net, arena, dt)
+      applyWindToPlayer(localSim, wind, dt)
       inputBuffer.push(net)
       if (inputBuffer.length > 120) inputBuffer.splice(0, inputBuffer.length - 120)
       conn.send('input', net)
 
-      ball.vx += (state.windX ?? 0) * (state.windStrength ?? 0) * dt
-      ball.vz += (state.windZ ?? 0) * (state.windStrength ?? 0) * dt
+      applyWindToBall(ball, wind, dt)
       const bodies: PlayerSim[] = [localSim]
       const bodiesAlive: boolean[] = new Array(8).fill(true)
       for (const remote of remotes.values()) bodies.push(remote.stub)
@@ -667,7 +690,12 @@ export function createOnlineGame(
     },
 
     frameUpdate(dt: number, alpha: number, lean: number): void {
-      arenaView.update(dt)
+      // wind visual runs every phase (grass breathes in the lobby too): sample
+      // the deterministic field at render time so it never stalls between steps
+      const renderTimeS = timeOffset === null ? simTime : performance.now() / 1000 + timeOffset
+      // grass always breathes: use the real strength, or a gentle visual breeze
+      const vw = sampleWind(renderTimeS, (state.windStrength || 0) + WIND_VISUAL_STRENGTH)
+      arenaView.update(dt, vw.x, vw.z, vw.gust)
       const decay = Math.exp(-10 * dt)
       renderOffset.x *= decay
       renderOffset.y *= decay
@@ -767,6 +795,26 @@ export function createOnlineGame(
         if (st.wobble < 0.02) grassState.delete(key)
       }
       arenaView.setGrassBodies(grassBodies)
+
+      // wind marks: direction lines beside bodies the wind is catching —
+      // airborne beans (jump/dive) and the ball while it's off the ground.
+      windMarks.length = 0
+      const gustLevel = currentWind.gust
+      const airborne = localSim && aliveOf(mySeat) && selfY > 0.6
+      if ((airborne || gustLevel > 0.25) && localSim && aliveOf(mySeat)) {
+        const s = airborne ? 0.6 + gustLevel * 0.4 : gustLevel * 0.5
+        if (s > 0.15) windMarks.push({ x: selfX, y: selfY + 0.7, z: selfZ, strength: s })
+      }
+      for (const remote of remotes.values()) {
+        if (aliveOf(remote.seat) && remote.stub.y > 0.6) {
+          windMarks.push({ x: remote.stub.x, y: remote.stub.y + 0.7, z: remote.stub.z, strength: 0.6 + gustLevel * 0.4 })
+        }
+      }
+      // the ball catches wind whenever it's airborne, harder on a gust
+      if (by > BALL_RADIUS + 0.4) {
+        windMarks.push({ x: bx, y: by, z: bz, strength: 0.5 + gustLevel * 0.5 })
+      }
+      arenaView.setWindMarks(windMarks, currentWind.x, currentWind.z)
 
       const fracs: number[] = []
       const capacity =

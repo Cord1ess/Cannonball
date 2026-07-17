@@ -6,6 +6,7 @@ import { yawTowardCenter } from '@shared/sim/arena.ts'
 import { KITS } from '@shared/cosmetics/jerseys.ts'
 import { createGrassField, type GrassBody, type GrassField } from './grass.ts'
 import { createWindStreaks, type WindStreaks } from './windStreaks.ts'
+import { createWindMarks, type WindMark, type WindMarks } from './windMarks.ts'
 import { addInkOutline, disposeHierarchy, INK_WEIGHT, makeToonMaterial } from './materials.ts'
 import { PALETTE } from './palette.ts'
 
@@ -25,8 +26,10 @@ export interface ArenaView {
   setDanger(fracs: readonly number[]): void
   /** bodies (players + ball) that flatten/part the grass this frame */
   setGrassBodies(bodies: readonly GrassBody[]): void
-  /** advances the grass wind + wind streaks */
-  update(dt: number): void
+  /** advance grass + streaks, driven by the real wind (dir + gust 0..1) */
+  update(dt: number, windX: number, windZ: number, gust: number): void
+  /** direction lines beside bodies the wind is currently pushing */
+  setWindMarks(marks: readonly WindMark[], windX: number, windZ: number): void
   dispose(): void
 }
 
@@ -240,6 +243,9 @@ export function createArenaView(radius = 28): ArenaView {
   // wind made visible: white streaks drifting on the wind, pulsing with gusts
   const streaks: WindStreaks = createWindStreaks()
   group.add(streaks.mesh)
+  // direction lines that appear beside bodies the wind is pushing
+  const marks: WindMarks = createWindMarks()
+  group.add(marks.mesh)
 
   // seamless ring wall the players bounce off
   const wall = new THREE.Mesh(ringGeometry(radius, radius + 1.8, WALL_HEIGHT), makeToonMaterial(PALETTE.warmGray))
@@ -434,15 +440,20 @@ export function createArenaView(radius = 28): ArenaView {
       grass.setBodies(list)
     },
 
-    update(dt: number): void {
+    update(dt: number, windX: number, windZ: number, gust: number): void {
       elapsed += dt
-      const wind = grass.update(elapsed)
-      streaks.update(dt, wind.windX, wind.windZ, wind.gust)
+      grass.update(elapsed, windX, windZ, gust)
+      streaks.update(dt, windX, windZ, gust)
+    },
+
+    setWindMarks(list: readonly WindMark[], windX: number, windZ: number): void {
+      marks.set(list, windX, windZ, elapsed)
     },
 
     dispose(): void {
       grass.dispose()
       streaks.dispose()
+      marks.dispose()
       disposeHierarchy(group)
     },
   }

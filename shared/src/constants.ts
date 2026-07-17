@@ -89,12 +89,10 @@ export const PLAYER_MAX_KNOCK_SPEED = 14 // clamp so launches stay readable
 export const BALL_KNOCK_POP = 3.5 // upward pop on a knock
 export const KNOCK_STUN_S = 0.6 // flailing, no control
 
-// --- wind (only escalating force, idea.md §4) --------------------------------
-export const WIND_ENABLED = false // OFF until the ball itself feels right
-export const WIND_BASE_STRENGTH = 2.0
-export const WIND_STEP_PER_ELIMINATION = 1.0
-export const WIND_GUST_PERIOD_S = 7 // average seconds between gusts
-export const WIND_GUST_DURATION_S = 2.2
+// --- wind (a real, always-on force — deterministic sampleWind(t)) ------------
+export const WIND_ENABLED = true // a constant breeze + gusts, on by default
+export const WIND_BASE_STRENGTH = 2.0 // base breeze force; gusts multiply up
+export const WIND_STEP_PER_ELIMINATION = 0.7 // grows as the field thins
 
 // --- cannon launch ------------------------------------------------------------
 export const LAUNCH_AIM_ARC_DEG = 50 // aimable arc, centered on wedge inward normal
