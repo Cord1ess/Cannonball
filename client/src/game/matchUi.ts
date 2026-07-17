@@ -1,6 +1,6 @@
 import { CARD_BY_ID, type CardPool } from '@shared/cards/definitions.ts'
+import { KIT_BY_ID, KITS, kitColors, type KitColors } from '@shared/cosmetics/jerseys.ts'
 import { Phase } from '@shared/match/phases.ts'
-import { SEAT_COLORS } from './sandbox.ts'
 import type { MatchClient } from './online.ts'
 
 /**
@@ -21,9 +21,20 @@ export interface MatchUi {
   update(): void
 }
 
-const seatColor = (seat: number): string => `#${(SEAT_COLORS[seat] ?? 0x888888).toString(16).padStart(6, '0')}`
+const cssHex = (c: number): string => `#${c.toString(16).padStart(6, '0')}`
+
+/** chip/swatch background showing the kit's actual pattern */
+const kitSwatchCss = (kit: KitColors | null, fallback: string): string => {
+  if (!kit) return `background:${fallback};`
+  const p = cssHex(kit.primary)
+  const s = cssHex(kit.secondary)
+  if (kit.pattern === 'stripes') return `background:repeating-linear-gradient(90deg, ${p} 0 7px, ${s} 7px 11px);`
+  if (kit.pattern === 'hoops') return `background:repeating-linear-gradient(180deg, ${p} 0 7px, ${s} 7px 11px);`
+  return `background:${p};`
+}
 
 export function createMatchUi(client: MatchClient): MatchUi {
+  const seatColor = (seat: number): string => client.seatColorHex(seat)
   const root = document.createElement('div')
   root.style.cssText =
     'position:fixed;inset:0;pointer-events:none;font-family:system-ui,sans-serif;user-select:none;z-index:20;'
@@ -85,7 +96,11 @@ export function createMatchUi(client: MatchClient): MatchUi {
     const handout = client.handout()
 
     // key: only rebuild DOM when the situation changes (timers redraw cheap parts)
-    const key = `${phase}:${handout?.revealed}:${handout?.elimSeat}:${client.players().length}:${client.draftOffers() !== null}:${advChoice}:${curseChoice}:${client.winnerSeat()}`
+    const kitSig = client
+      .players()
+      .map((p) => `${p.kitId}${p.kitAway ? 'a' : ''}`)
+      .join(',')
+    const key = `${phase}:${handout?.revealed}:${handout?.elimSeat}:${client.players().length}:${client.draftOffers() !== null}:${advChoice}:${curseChoice}:${client.winnerSeat()}:${kitSig}`
     const timerText = remaining > 0.05 ? ` — ${Math.ceil(remaining)}s` : ''
 
     if (phase === Phase.Lobby) {
@@ -98,14 +113,47 @@ export function createMatchUi(client: MatchClient): MatchUi {
           <div style="margin:4px 0 14px;">room code: <b style="font-size:20px;letter-spacing:1px;">${client.roomId}</b></div>`
         panel.appendChild(h)
         const list = document.createElement('div')
-        list.style.cssText = 'display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:16px;'
+        list.style.cssText = 'display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:14px;'
         for (const p of client.players()) {
           const chip = document.createElement('div')
-          chip.style.cssText = `background:${seatColor(p.seat)};color:#fffdf5;border-radius:8px;padding:6px 12px;font-weight:700;${p.connected ? '' : 'opacity:0.4;'}`
+          const kit = kitColors(p.kitId, p.kitAway)
+          chip.style.cssText =
+            `${kitSwatchCss(kit, seatColor(p.seat))}color:#fffdf5;text-shadow:0 1px 2px rgba(30,26,20,0.75);` +
+            `border-radius:8px;padding:6px 12px;font-weight:700;${p.connected ? '' : 'opacity:0.4;'}`
           chip.textContent = `${p.bot ? '🤖 ' : ''}P${p.seat + 1}${p.seat === client.mySeat() ? ' (you)' : ''}`
           list.appendChild(chip)
         }
         panel.appendChild(list)
+
+        // jersey picker: cycle the fallback kit set (real teams = later content pass)
+        const kitRow = document.createElement('div')
+        kitRow.style.cssText =
+          'display:flex;gap:8px;justify-content:center;align-items:center;margin-bottom:14px;font-weight:800;'
+        const myKitId = client.myKitId()
+        const myKit = kitColors(myKitId, client.myKitAway())
+        const kitIndex = KITS.findIndex((k) => k.id === myKitId)
+        const arrow = (label: string, dir: number): HTMLButtonElement => {
+          const btn = document.createElement('button')
+          btn.textContent = label
+          btn.style.cssText =
+            'font-size:16px;font-weight:800;background:#4a443c;color:#fffdf5;border:0;border-radius:8px;' +
+            'padding:4px 12px;cursor:pointer;'
+          btn.addEventListener('click', () => {
+            const next = KITS[(Math.max(kitIndex, 0) + dir + KITS.length) % KITS.length]!
+            client.setKit(next.id)
+          })
+          return btn
+        }
+        const swatch = document.createElement('div')
+        swatch.style.cssText = `${kitSwatchCss(myKit, seatColor(client.mySeat()))}width:26px;height:20px;border:2px solid #4a443c;border-radius:5px;`
+        const kitName = document.createElement('span')
+        kitName.style.cssText = 'min-width:170px;font-size:14px;'
+        kitName.textContent = `${KIT_BY_ID.get(myKitId)?.name ?? 'your team'}${client.myKitAway() ? ' · away kit' : ''}`
+        kitRow.appendChild(arrow('‹', -1))
+        kitRow.appendChild(swatch)
+        kitRow.appendChild(kitName)
+        kitRow.appendChild(arrow('›', 1))
+        panel.appendChild(kitRow)
         if (client.isHost()) {
           const botRow = document.createElement('div')
           botRow.style.cssText = 'display:flex;gap:8px;justify-content:center;margin-bottom:12px;'

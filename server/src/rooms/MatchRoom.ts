@@ -47,6 +47,7 @@ import {
 import type { NetInput } from '../../../shared/src/sim/net.ts'
 import { rollDraftOffer, rollRestartPair, type CardPool } from '../../../shared/src/cards/definitions.ts'
 import { computeMods, hasFreeSave, hasMagnetCurse } from '../../../shared/src/cards/effects.ts'
+import { DEFAULT_KIT_IDS, KIT_BY_ID, resolveKitClashes } from '../../../shared/src/cosmetics/jerseys.ts'
 import { isHalftimeAt, Phase, tickInterval, type PhaseId } from '../../../shared/src/match/phases.ts'
 import { Time } from '../../../vendor/arc/scheduler/time.ts'
 import { Random } from '../../../vendor/arc/scheduler/random.ts'
@@ -76,6 +77,7 @@ interface Session {
   aim: number // launch aim offset, radians
   picks: Partial<Record<CardPool, string>>
   offers: Record<CardPool, string[]> | null
+  kitId: string
   isBot: boolean
   bot?: { wanderX: number; wanderZ: number; wanderT: number }
 }
@@ -186,6 +188,15 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       this.#applyHandout(advTo, curseTo)
     })
 
+    this.onMessage('kit', (client, message: { id?: string }) => {
+      if (this.#phase !== Phase.Lobby) return // kits lock at match start
+      const session = this.#sessions.get(client.sessionId)
+      const id = message?.id
+      if (!session || typeof id !== 'string' || !KIT_BY_ID.has(id)) return
+      session.kitId = id
+      this.#resolveKits()
+    })
+
     this.onMessage('emote', (client, message: { id?: number }) => {
       const session = this.#sessions.get(client.sessionId)
       const id = message?.id
@@ -258,6 +269,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       aim: 0,
       picks: {},
       offers: null,
+      kitId: DEFAULT_KIT_IDS[seat] ?? DEFAULT_KIT_IDS[0]!,
       isBot: false,
     })
 
@@ -266,6 +278,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     ps.seat = seat
     this.state.players.set(client.sessionId, ps)
     if (!this.state.hostSessionId) this.state.hostSessionId = client.sessionId
+    this.#resolveKits()
     console.log(`[room ${this.roomId}] ${client.sessionId} -> seat ${seat}`)
   }
 
@@ -290,10 +303,25 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     if (client.sessionId === this.state.hostSessionId) {
       this.state.hostSessionId = this.#sessions.keys().next().value ?? ''
     }
+    // a freed seat may release a kit clash (kits only move while in the lobby)
+    if (this.#phase === Phase.Lobby) this.#resolveKits()
     // a permanent leave mid-match is an elimination (idea.md §5)
     if (session && this.#phase !== Phase.Lobby && this.#phase !== Phase.End && this.#alive[session.sim.seat]) {
       this.#eliminate(session.sim.seat)
     }
+  }
+
+  /** clash rule: seat order = priority; the state carries the resolved kit */
+  #resolveKits(): void {
+    const entries = [...this.#sessions.entries()].sort((a, b) => a[1].sim.seat - b[1].sim.seat)
+    const away = resolveKitClashes(entries.map(([, session]) => session.kitId))
+    entries.forEach(([id, session], index) => {
+      const ps = this.state.players.get(id)
+      if (ps) {
+        ps.kitId = session.kitId
+        ps.kitAway = away[index] ?? false
+      }
+    })
   }
 
   #freeSeat(): number {
@@ -316,6 +344,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       aim: 0,
       picks: {},
       offers: null,
+      kitId: DEFAULT_KIT_IDS[seat] ?? DEFAULT_KIT_IDS[0]!,
       isBot: true,
       bot: { wanderX: 0, wanderZ: 0, wanderT: 0 },
     })
@@ -324,6 +353,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     ps.seat = seat
     ps.bot = true
     this.state.players.set(id, ps)
+    this.#resolveKits()
     console.log(`[room ${this.roomId}] bot -> seat ${seat}`)
     return true
   }

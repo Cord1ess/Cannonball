@@ -35,6 +35,9 @@ export const PlayerState = schema(
     activeAdv: { type: 'string', default: '' },
     activeCurse: { type: 'string', default: '' },
     abilityCd: { type: 'float32', default: 0 },
+    // jersey: chosen kit + clash-resolved away flag (server decides both)
+    kitId: { type: 'string', default: '' },
+    kitAway: { type: 'boolean', default: false },
   },
   'PlayerState',
 )

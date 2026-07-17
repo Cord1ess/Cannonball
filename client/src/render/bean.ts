@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import { addInkOutline, disposeHierarchy, INK_WEIGHT, makeToonMaterial } from './materials.ts'
+import type { KitColors } from '@shared/cosmetics/jerseys.ts'
+import { jerseyTexture } from './jerseyPainter.ts'
+import { addInkOutline, disposeHierarchy, INK_WEIGHT, makeToonMaterial, toonRamp } from './materials.ts'
 import { PALETTE } from './palette.ts'
 
 /**
@@ -61,7 +63,26 @@ function stackGeometry(rows: ReadonlyArray<readonly [number, number]>, y0: numbe
 const spring = (current: number, target: number, rate: number, dt: number): number =>
   current + (target - current) * (1 - Math.exp(-rate * dt))
 
-export function createBean(teamColor: number, shortsColor: number = PALETTE.offWhite): Bean {
+/** project the merged body stack's UVs flat along Z so a jersey texture wraps it */
+function planarUvs(geo: THREE.BufferGeometry): void {
+  geo.computeBoundingBox()
+  const bb = geo.boundingBox!
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  const uv = geo.getAttribute('uv') as THREE.BufferAttribute
+  const spanX = Math.max(1e-6, bb.max.x - bb.min.x)
+  const spanY = Math.max(1e-6, bb.max.y - bb.min.y)
+  for (let i = 0; i < pos.count; i++) {
+    uv.setXY(i, (pos.getX(i) - bb.min.x) / spanX, (pos.getY(i) - bb.min.y) / spanY)
+  }
+  uv.needsUpdate = true
+}
+
+/** plain color = sandbox path; a KitColors = jersey-textured torso (M4b) */
+export function createBean(appearance: number | KitColors): Bean {
+  const kit = typeof appearance === 'number' ? null : appearance
+  const teamColor = kit ? kit.primary : (appearance as number)
+  const shortsColor = kit ? kit.shorts : PALETTE.offWhite
+
   const group = new THREE.Group()
   group.rotation.order = 'YXZ' // yaw first, THEN pitch/roll — keeps lean/tilt axes local
 
@@ -79,17 +100,21 @@ export function createBean(teamColor: number, shortsColor: number = PALETTE.offW
     ),
     makeToonMaterial(shortsColor),
   )
+  const bodyGeo = stackGeometry(
+    [
+      [0.88, 0.22],
+      [0.86, 0.26],
+      [0.76, 0.26],
+      [0.58, 0.2],
+    ],
+    0.46,
+  )
+  if (kit) planarUvs(bodyGeo)
   const body = new THREE.Mesh(
-    stackGeometry(
-      [
-        [0.88, 0.22],
-        [0.86, 0.26],
-        [0.76, 0.26],
-        [0.58, 0.2],
-      ],
-      0.46,
-    ),
-    makeToonMaterial(teamColor),
+    bodyGeo,
+    kit
+      ? new THREE.MeshToonMaterial({ gradientMap: toonRamp(), map: jerseyTexture(kit) })
+      : makeToonMaterial(teamColor),
   )
   addInkOutline(shorts, INK_WEIGHT.character)
   addInkOutline(body, INK_WEIGHT.character)

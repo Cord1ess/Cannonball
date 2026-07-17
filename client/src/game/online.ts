@@ -24,6 +24,12 @@ import {
 import { isPlayPhase, Phase, tickInterval } from '@shared/match/phases.ts'
 import { ABILITIES, computeMods } from '@shared/cards/effects.ts'
 import type { CardPool } from '@shared/cards/definitions.ts'
+import { kitColors, type KitColors } from '@shared/cosmetics/jerseys.ts'
+import {
+  createIndexedDbSaveStore,
+  createMemorySaveStore,
+  type SaveStore,
+} from '@vendor/platform/save-data.ts'
 import { createArenaView, type ArenaView } from '../render/arenaView.ts'
 import { createBallView, type BallView } from '../render/ballView.ts'
 import { createBean, type Bean } from '../render/bean.ts'
@@ -46,6 +52,8 @@ import { SEAT_COLORS } from './sandbox.ts'
 const SNAP_ERROR = 3
 const SERVER_BALL_LOOKAHEAD_S = 0.7 / PATCH_HZ
 
+const toHex = (c: number): string => `#${c.toString(16).padStart(6, '0')}`
+
 interface Snap {
   t: number
   x: number
@@ -63,6 +71,7 @@ interface RemoteEntity {
   snaps: Snap[]
   stub: PlayerSim
   seat: number
+  kitKey: string
 }
 
 export interface MatchEvent {
@@ -80,6 +89,10 @@ export interface MatchPlayerInfo {
   connected: boolean
   bot: boolean
   cards: string[]
+  kitId: string
+  kitAway: boolean
+  /** '#rrggbb' identity color = effective kit primary */
+  color: string
 }
 
 export interface MatchClient {
@@ -105,6 +118,11 @@ export interface MatchClient {
   assign(advTo: number, curseTo: number): void
   rematch(): void
   emote(id: number): void
+  setKit(id: string): void
+  myKitId(): string
+  myKitAway(): boolean
+  /** identity color for a seat as '#rrggbb' (kit primary, SEAT_COLORS fallback) */
+  seatColorHex(seat: number): string
   onEvent(cb: (event: MatchEvent) => void): void
 }
 
@@ -170,6 +188,41 @@ export function createOnlineGame(
     for (const listener of eventListeners) listener(event)
   }
 
+  // --- jerseys (M4b) ------------------------------------------------------------------
+  // the server resolves kit + clash; we paint what the state says and keep a
+  // seat -> identity-color map for everything that used to read SEAT_COLORS
+  const seatColors: number[] = [...SEAT_COLORS]
+  let myKitKey = ''
+
+  function kitOf(p: NetPlayerRead): KitColors {
+    return (
+      kitColors(p.kitId, p.kitAway) ?? {
+        primary: SEAT_COLORS[p.seat] ?? PALETTE.teamRed,
+        secondary: PALETTE.offWhite,
+        pattern: 'solid',
+        shorts: PALETTE.offWhite,
+      }
+    )
+  }
+  const kitKeyOf = (p: NetPlayerRead): string => `${p.kitId}|${p.kitAway}`
+
+  let saveStore: SaveStore
+  try {
+    saveStore = createIndexedDbSaveStore('cannonball')
+  } catch {
+    saveStore = createMemorySaveStore()
+  }
+  let kitChosenThisSession = false
+  void saveStore
+    .get('kitId')
+    .then((stored) => {
+      // re-apply the saved kit on join, unless the user already picked one
+      if (!kitChosenThisSession && typeof stored === 'string' && kitColors(stored, false)) {
+        conn.send('kit', { id: stored })
+      }
+    })
+    .catch(() => {})
+
   const predicting = (): boolean => isPlayPhase(state.phase ?? 0) && aliveOf(mySeat) && localSim !== null
 
   function aliveOf(seat: number): boolean {
@@ -187,7 +240,8 @@ export function createOnlineGame(
     mySeat = me.seat
     localSim = makePlayer(me.seat, me.x, me.z, me.yaw)
     localSim.y = me.y
-    myBean = createBean(SEAT_COLORS[me.seat] ?? PALETTE.teamRed)
+    myKitKey = kitKeyOf(me)
+    myBean = createBean(kitOf(me))
     scene.add(myBean.group)
     camera.yaw = me.yaw
   }
@@ -197,7 +251,8 @@ export function createOnlineGame(
     if (!zoneSeat || zoneSeat.length === 0) return
     const seats: number[] = []
     for (let i = 0; i < zoneSeat.length; i++) seats.push(zoneSeat[i] ?? 0)
-    const key = seats.join(',')
+    const colors = seats.map((seat) => seatColors[seat] ?? PALETTE.warmGray)
+    const key = `${seats.join(',')}#${colors.join(',')}`
     if (key === arenaKey) return
     arenaKey = key
     arena = makeArena(Math.max(seats.length, seats.length === 2 ? 2 : 3))
@@ -205,10 +260,7 @@ export function createOnlineGame(
       scene.remove(arenaView.group)
       arenaView.dispose()
     }
-    arenaView = createArenaView(
-      arena,
-      seats.map((seat) => SEAT_COLORS[seat] ?? PALETTE.warmGray),
-    )
+    arenaView = createArenaView(arena, colors)
     scene.add(arenaView.group)
   }
 
@@ -228,7 +280,20 @@ export function createOnlineGame(
   }
 
   conn.room.onStateChange(() => {
+    // identity colors first — the arena/bean paths below read them
+    state.players.forEach((p: NetPlayerRead) => {
+      seatColors[p.seat] = kitOf(p).primary
+    })
     ensureLocal()
+    // kit changed in the lobby? rebuild my bean in the new jersey
+    const meKit = state.players.get(conn.sessionId)
+    if (meKit && myBean && kitKeyOf(meKit) !== myKitKey) {
+      myKitKey = kitKeyOf(meKit)
+      scene.remove(myBean.group)
+      myBean.dispose()
+      myBean = createBean(kitOf(meKit))
+      scene.add(myBean.group)
+    }
     rebuildArenaIfNeeded()
     lastPatchAt = performance.now()
 
@@ -281,10 +346,22 @@ export function createOnlineGame(
       if (id === conn.sessionId) return
       let remote = remotes.get(id)
       if (!remote) {
-        const bean = createBean(SEAT_COLORS[p.seat] ?? PALETTE.teamBlue)
+        const bean = createBean(kitOf(p))
         scene.add(bean.group)
-        remote = { bean, snaps: [], stub: makePlayer(p.seat, p.x, p.z, p.yaw), seat: p.seat }
+        remote = {
+          bean,
+          snaps: [],
+          stub: makePlayer(p.seat, p.x, p.z, p.yaw),
+          seat: p.seat,
+          kitKey: kitKeyOf(p),
+        }
         remotes.set(id, remote)
+      } else if (remote.kitKey !== kitKeyOf(p)) {
+        remote.kitKey = kitKeyOf(p)
+        scene.remove(remote.bean.group)
+        remote.bean.dispose()
+        remote.bean = createBean(kitOf(p))
+        scene.add(remote.bean.group)
       }
       pushSnap(remote.snaps, p)
       remote.stub.diving = p.diving
@@ -397,6 +474,9 @@ export function createOnlineGame(
           connected: p.connected,
           bot: p.bot,
           cards: [p.cardAbility, p.cardEquipment, p.cardAdvantage].filter(Boolean),
+          kitId: p.kitId,
+          kitAway: p.kitAway,
+          color: toHex(kitOf(p).primary),
         })
       })
       return list.sort((a, b) => a.seat - b.seat)
@@ -424,6 +504,14 @@ export function createOnlineGame(
     assign: (advTo: number, curseTo: number) => conn.send('assign', { advTo, curseTo }),
     rematch: () => conn.send('rematch'),
     emote: (id: number) => conn.send('emote', { id }),
+    setKit(id: string): void {
+      kitChosenThisSession = true
+      conn.send('kit', { id })
+      void saveStore.set('kitId', id).catch(() => {})
+    },
+    myKitId: () => state.players.get(conn.sessionId)?.kitId ?? '',
+    myKitAway: () => state.players.get(conn.sessionId)?.kitAway ?? false,
+    seatColorHex: (seat: number) => toHex(seatColors[seat] ?? SEAT_COLORS[seat] ?? 0x888888),
     onEvent: (cb) => eventListeners.push(cb),
   }
 
@@ -612,7 +700,7 @@ export function createOnlineGame(
       const zone = footprintZone(arena, bx, bz)
       const zoneSeatArr = state.zoneSeat
       const zoneOwner = zone >= 0 && zoneSeatArr ? zoneSeatArr[zone] : undefined
-      ballView.update(bx, by, bz, zoneOwner !== undefined ? (SEAT_COLORS[zoneOwner] ?? null) : null)
+      ballView.update(bx, by, bz, zoneOwner !== undefined ? (seatColors[zoneOwner] ?? null) : null)
 
       const fracs: number[] = []
       const capacity =
@@ -639,7 +727,7 @@ export function createOnlineGame(
       for (let i = 0; i < (zoneSeatArr?.length ?? 0); i++) {
         const seat = zoneSeatArr[i] ?? 0
         zones.push({
-          color: `#${(SEAT_COLORS[seat] ?? 0).toString(16).padStart(6, '0')}`,
+          color: toHex(seatColors[seat] ?? 0),
           frac: (state.meters?.[seat] ?? 0) / Math.max(1, capacity),
           isPlayer: seat === mySeat,
         })

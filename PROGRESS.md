@@ -3,7 +3,7 @@
 > Session handoff document. Updated at every milestone. Read top-to-bottom to
 > resume: DONE tells you what exists, NEXT tells you what to build.
 
-## STATUS: M0–M4a complete · NEXT UP: M4b (jersey system)
+## STATUS: M0–M4b complete · NEXT UP: M5 (art & world)
 
 ---
 
@@ -60,30 +60,27 @@ expire at next restart (persist through duel by design). freesave/bodyguard auto
 judgment geometry (`footprintZoneWidths` in arena.ts: narrow→neutral edge strips, wide neighbor
 claims them). Schema: activeAdv/activeCurse/abilityCd replicated. 47 tests green.
 
-**NOT yet verified by the user in-browser (they compacted right after M4a commit) — first thing
-next session may be feedback on card feel.**
+### M4b — jersey system
+`shared/src/cosmetics/jerseys.ts`: 8 fallback kits { id, name, home/away × { primary, secondary,
+pattern solid|stripes|hoops, shorts } }, `DEFAULT_KIT_IDS` per seat (old SEAT_COLORS order),
+`resolveKitClashes` (seat order = priority; primaries closer than KIT_CLASH_DISTANCE=45 rgb →
+later seat wears away). Server: lobby-only 'kit' message, defaults on join/addBot, re-resolve on
+lobby leave, kitId+kitAway replicated on PlayerState, locked after start. Client:
+`render/jerseyPainter.ts` (canvas jersey — wobbly painted bands + baked gouache, cached per
+colorway), bean torso takes planar UVs + jersey texture when given a KitColors (`createBean(number
+| KitColors)` — number = old sandbox path), beans rebuilt on kit change, seat→color map feeds
+wedge tints/HUD meters/ball blob/matchUi chips (SEAT_COLORS now sandbox-only + fallback). Lobby:
+kit-patterned chips, ‹ swatch+name › picker, "· away kit" marker; choice persists in the vendored
+IndexedDB save store and auto-applies on join. Real team research = later user-driven content
+pass; crests NEVER (trademark). Verified: 56 tests, smoke-kits.ts (defaults/clash/re-pick/
+invalid-id/bot kits/lock), smoke+smoke-bots regressions, playwright lobby+launch+arena shots.
+
+**M4a AND M4b are NOT yet user-playtested in-browser — first thing next session may be feedback
+on card feel or jersey look.**
 
 ---
 
-## NEXT: M4b — jersey system (second half of M4)
-
-Design (idea.md §5 Team skins + architecture.md): players pick real football national teams/clubs
-in the LOBBY; bean wears that kit. Plan:
-1. `shared/src/cosmetics/jerseys.ts` — kit data: { id, name, primary, secondary, pattern:
-   'solid'|'stripes'|'hoops', shorts, away:{...} }. Fallback set of ~8 kits (current SEAT_COLORS
-   hues as defaults for bots/quick play). Server clash rule: too-close primary → assign away kit.
-2. Server: 'kit' message (lobby only) → store kitId on PlayerState (add schema field); bots get
-   default kits by seat.
-3. Client: `jerseyPainter` (canvas kit texture, once per player at lobby); bean body cluster gets
-   planar-UV texture instead of flat color (bean.ts takes a kit param — keep old color path for
-   sandbox). Identity color = kit.primary everywhere SEAT_COLORS is used for a seat
-   (wedge tints, HUD meters, matchUi chips, ball blob) — build a seat→color map from state.
-4. Lobby UI: kit picker (cycle/dropdown on your chip) + persist chosen kit in the vendored
-   save-data store, auto-apply on join.
-5. Real team list = content pass later (user does research); system ships with fallback kits.
-Cut lines: patterns beyond solid/stripes/hoops; crests NEVER (trademark).
-
-## THEN (see implementation_plan.md for full detail)
+## NEXT (see implementation_plan.md for full detail)
 
 - **M5 art & world:** floating COLOSSEUM (user direction: seamless ring walls, audience tiers on
   the crown where eliminated players sit, cannons on wall top), day→sunset→dusk light arc +

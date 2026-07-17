@@ -40,6 +40,8 @@ export interface NetPlayerRead {
   activeAdv: string
   activeCurse: string
   abilityCd: number
+  kitId: string
+  kitAway: boolean
 }
 
 export interface NetHandoutRead {
