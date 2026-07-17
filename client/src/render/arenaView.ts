@@ -114,7 +114,8 @@ export function createArenaView(radius = 28): ArenaView {
   }
   const groundTex = new THREE.CanvasTexture(groundCanvas)
   groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping
-  groundTex.repeat.set(10, 10)
+  // ~11m per tile: the painted strokes then match the 3D blades' size
+  groundTex.repeat.set(5, 5)
   groundTex.colorSpace = THREE.SRGBColorSpace
   groundTex.anisotropy = 4
   {
