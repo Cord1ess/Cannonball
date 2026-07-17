@@ -24,6 +24,8 @@ export interface BeanPose {
   run: number
   grounded: boolean
   diving: boolean
+  /** ball hit you: tumbling, flailing, no control */
+  knocked: boolean
   /** true while shift-sprinting: blends run arms -> T-pose glide */
   sprinting: boolean
   /** -1 (Q, left) .. +1 (E, right); works grounded AND in the air */
@@ -196,7 +198,16 @@ export function createBean(teamColor: number, shortsColor: number = PALETTE.offW
       let rigZ = leanRoll
       let rigY = 0
 
-      if (pose.diving) {
+      if (pose.knocked) {
+        // oof: thrown back, limbs flailing
+        const wobble = Math.sin(t * 22)
+        armX = [-2.2 + wobble * 0.5, -2.2 - wobble * 0.5]
+        armSpread = 0.9
+        footX = [0.8 + wobble * 0.3, 0.8 - wobble * 0.3]
+        rigX = -0.75
+        rigZ = leanRoll + wobble * 0.15
+        rigY = 0.1
+      } else if (pose.diving) {
         // superman: horizontal body, arms swept forward-out, feet trailing
         armX = [-2.9, -2.9]
         armSpread = 0.7

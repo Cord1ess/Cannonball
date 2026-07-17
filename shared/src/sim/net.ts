@@ -26,6 +26,7 @@ export interface NetPlayerRead {
   yaw: number
   grounded: boolean
   diving: boolean
+  knocked: boolean
   sprinting: boolean
   stamina: number
   alive: boolean

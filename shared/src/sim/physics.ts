@@ -1,8 +1,12 @@
 import {
   ACCEL_AIR,
   ACCEL_GROUND,
+  BALL_DEFLECT_RESTITUTION,
   BALL_DRAG,
   BALL_GRAVITY,
+  BALL_KNOCK_FORCE,
+  BALL_KNOCK_MIN_SPEED,
+  BALL_KNOCK_POP,
   BALL_MAX_SPEED,
   BALL_RADIUS,
   BALL_RESTITUTION,
@@ -17,6 +21,7 @@ import {
   HEADER_POWER,
   HEADER_UP_BIAS,
   JUMP_SPEED,
+  KNOCK_STUN_S,
   PLAYER_PUSH,
   PLAYER_RADIUS,
   RUN_SPEED,
@@ -26,6 +31,7 @@ import {
   STAMINA_REGEN,
   DIVE_COST,
   TURN_RATE,
+  WIND_ENABLED,
   WIND_GUST_DURATION_S,
   WIND_GUST_PERIOD_S,
 } from '../constants.ts'
@@ -65,6 +71,7 @@ export interface PlayerSim {
   stamina: number
   recoverCd: number
   headerCd: number
+  knockedCd: number
 }
 
 export interface PlayerInputFrame {
@@ -98,19 +105,26 @@ export interface ShoveEvent {
   major: boolean
 }
 
+export interface KnockEvent {
+  seat: number
+  speed: number
+}
+
 export interface SimEvents {
   headers: HeaderEvent[]
   shoves: ShoveEvent[]
+  knocks: KnockEvent[]
   bounces: number // wall/floor impacts this step (for SFX later)
 }
 
 export function makeEvents(): SimEvents {
-  return { headers: [], shoves: [], bounces: 0 }
+  return { headers: [], shoves: [], knocks: [], bounces: 0 }
 }
 
 export function clearEvents(events: SimEvents): void {
   events.headers.length = 0
   events.shoves.length = 0
+  events.knocks.length = 0
   events.bounces = 0
 }
 
@@ -134,6 +148,7 @@ export function makePlayer(seat: number, x: number, z: number, yaw: number): Pla
     stamina: STAMINA_MAX,
     recoverCd: 0,
     headerCd: 0,
+    knockedCd: 0,
   }
 }
 
@@ -195,10 +210,11 @@ function shortestAngle(from: number, to: number): number {
 
 export function stepPlayer(p: PlayerSim, input: PlayerInputFrame, arena: Arena, dt: number): void {
   const moving = input.dirX !== 0 || input.dirZ !== 0
+  const knocked = p.knockedCd > 0
   const recovering = p.recoverCd > 0
 
   // beans face where they run (turned smoothly, never snapped)
-  if (moving && !p.diving) {
+  if (moving && !p.diving && !knocked) {
     const targetYaw = Math.atan2(input.dirX, input.dirZ)
     p.yaw += shortestAngle(p.yaw, targetYaw) * (1 - Math.exp(-TURN_RATE * dt))
   }
@@ -215,19 +231,20 @@ export function stepPlayer(p: PlayerSim, input: PlayerInputFrame, arena: Arena, 
   // horizontal: framerate-independent blend toward target velocity.
   // Diving commits — near-zero air control. Recovery stumbles.
   let accel = p.grounded ? ACCEL_GROUND : ACCEL_AIR
-  if (p.diving) accel = ACCEL_AIR * 0.12
+  if (knocked) accel = ACCEL_AIR * 0.05 // you are luggage while knocked
+  else if (p.diving) accel = ACCEL_AIR * 0.12
   else if (recovering) accel = ACCEL_GROUND * 0.25
   const k = 1 - Math.exp(-accel * dt)
   p.vx += (input.dirX * targetSpeed - p.vx) * k
   p.vz += (input.dirZ * targetSpeed - p.vz) * k
 
-  if (input.jump && p.grounded && !recovering) {
+  if (input.jump && p.grounded && !recovering && !knocked) {
     p.vy = JUMP_SPEED
     p.grounded = false
   }
 
   // DIVE: full-commit forward lunge along facing — costs stamina
-  if (input.dive && !p.grounded && !p.diving && p.stamina >= DIVE_COST) {
+  if (input.dive && !p.grounded && !p.diving && !knocked && p.stamina >= DIVE_COST) {
     p.stamina -= DIVE_COST
     const fx = Math.sin(p.yaw)
     const fz = Math.cos(p.yaw)
@@ -266,6 +283,7 @@ export function stepPlayer(p: PlayerSim, input: PlayerInputFrame, arena: Arena, 
 
   if (p.headerCd > 0) p.headerCd -= dt
   if (p.recoverCd > 0) p.recoverCd -= dt
+  if (p.knockedCd > 0) p.knockedCd -= dt
 }
 
 // --- wind (the only escalating force, idea.md §4) -----------------------------------
@@ -275,6 +293,7 @@ export interface WindRng {
 }
 
 export function stepWind(wind: Wind, rng: WindRng, strength: number, ball: BallSim, dt: number): void {
+  if (!WIND_ENABLED) return
   if (wind.timeLeft > 0) {
     wind.timeLeft -= dt
     ball.vx += wind.x * strength * dt
@@ -339,8 +358,12 @@ export function stepBall(ball: BallSim, arena: Arena, dt: number, events: SimEve
 // --- ball <-> players -----------------------------------------------------------------
 
 /**
- * DIVING contact = HEADER (the signature move): the ball rockets along the
- * diver's facing. Any other contact — grounded or airborne — is a weak nudge.
+ * The ball is the boss (playtest feedback):
+ * - DIVING contact = HEADER: the ball rockets along the diver's facing.
+ * - FAST ball hits you = YOU get knocked flying (stunned, flailing); the
+ *   ball deflects off your body keeping most of its energy.
+ * - Slow ball = a heavy object: walking into it barely nudges it and
+ *   noticeably slows YOU.
  */
 export function interactBallPlayers(
   ball: BallSim,
@@ -372,25 +395,59 @@ export function interactBallPlayers(
       continue
     }
 
-    if (dist < contact && dist > 1e-4) {
-      // separate + guarantee a minimum outward roll
-      const hx = dx / dist
-      const hz = dz / dist
-      const horiz = Math.hypot(hx, hz)
-      if (horiz > 1e-4) {
-        const px = hx / horiz
-        const pz = hz / horiz
-        ball.x = p.x + px * contact
-        ball.z = p.z + pz * contact
-        const outward = ball.vx * px + ball.vz * pz
-        const minOut = 2.5
-        if (outward < minOut) {
-          ball.vx += px * (minOut - outward)
-          ball.vz += pz * (minOut - outward)
-        }
-        ball.vx += px * BODY_NUDGE_FORCE * dt
-        ball.vz += pz * BODY_NUDGE_FORCE * dt
+    if (dist >= contact || dist < 1e-4) continue
+
+    // contact normal, player -> ball, horizontal
+    const nh = Math.hypot(dx, dz)
+    if (nh < 1e-4) continue
+    const cnx = dx / nh
+    const cnz = dz / nh
+
+    const ballSpeed = Math.hypot(ball.vx, ball.vz) + Math.max(0, -ball.vy) * 0.3
+
+    if (ballSpeed > BALL_KNOCK_MIN_SPEED && p.knockedCd <= 0) {
+      // BALL WINS: launch the player along the ball's travel direction
+      const vh = Math.hypot(ball.vx, ball.vz)
+      const kx = vh > 1e-4 ? ball.vx / vh : -cnx
+      const kz = vh > 1e-4 ? ball.vz / vh : -cnz
+      const power = BALL_KNOCK_FORCE * Math.min(1.6, ballSpeed / BALL_KNOCK_MIN_SPEED)
+      p.vx = kx * power
+      p.vz = kz * power
+      p.vy = Math.max(p.vy, BALL_KNOCK_POP)
+      p.grounded = false
+      p.diving = false
+      p.knockedCd = KNOCK_STUN_S
+      events.knocks.push({ seat: p.seat, speed: ballSpeed })
+
+      // ball deflects off the body, keeping most of its energy
+      const into = ball.vx * -cnx + ball.vz * -cnz
+      if (into > 0) {
+        ball.vx += cnx * into * (1 + BALL_DEFLECT_RESTITUTION)
+        ball.vz += cnz * into * (1 + BALL_DEFLECT_RESTITUTION)
       }
+      ball.vx *= 0.85
+      ball.vz *= 0.85
+      ball.x = p.x + cnx * contact
+      ball.z = p.z + cnz * contact
+      continue
+    }
+
+    // SLOW BALL: heavy — separate, tiny nudge, and it blocks the player
+    ball.x = p.x + cnx * contact
+    ball.z = p.z + cnz * contact
+    const outward = ball.vx * cnx + ball.vz * cnz
+    const minOut = 1.2
+    if (outward < minOut) {
+      ball.vx += cnx * (minOut - outward) * 0.5
+      ball.vz += cnz * (minOut - outward) * 0.5
+    }
+    ball.vx += cnx * BODY_NUDGE_FORCE * dt
+    ball.vz += cnz * BODY_NUDGE_FORCE * dt
+    // pushing two tons of ball slows you down
+    const pInto = p.vx * cnx + p.vz * cnz
+    if (pInto > 0) {
+      p.vx -= cnx * pInto * 0.6
+      p.vz -= cnz * pInto * 0.6
     }
   }
 }

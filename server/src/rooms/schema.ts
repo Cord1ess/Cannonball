@@ -20,6 +20,7 @@ export const PlayerState = schema(
     yaw: { type: 'float32', default: 0 },
     grounded: { type: 'boolean', default: true },
     diving: { type: 'boolean', default: false },
+    knocked: { type: 'boolean', default: false },
     sprinting: { type: 'boolean', default: false },
     stamina: { type: 'float32', default: 100 },
     alive: { type: 'boolean', default: true },

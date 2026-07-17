@@ -12,8 +12,8 @@ export const GRACE_SECONDS = 20 // disconnect reconnection window (idea.md §5)
 // --- simulation / networking ----------------------------------------------
 export const SIM_HZ = 60
 export const FIXED_DELTA = 1 / SIM_HZ
-export const PATCH_HZ = 20
-export const INTERP_DELAY_MS = 120 // remote entity render delay
+export const PATCH_HZ = 30 // positions matter: ball + players patch at 30Hz
+export const INTERP_DELAY_MS = 100 // remote entity render delay
 export const RECONCILE_SMOOTH_S = 0.1 // residual error smoothing after replay
 
 // --- arena -----------------------------------------------------------------
@@ -63,17 +63,25 @@ export const DIVE_PUSH = 9 // diving into someone: major shove
 
 // --- ball & header (tune in M1 fun-test) -------------------------------------
 export const BALL_RADIUS = 2.0 // ~3x the bean: a giant, satisfying target
-export const BALL_RESTITUTION = 0.72
-export const BALL_GRAVITY = 10 // floaty — big balls hang
-export const BALL_MAX_SPEED = 26
-export const BALL_DRAG = 0.35 // per-second rolling drag while grounded
-export const BODY_NUDGE_FORCE = 4
-export const HEADER_POWER = 18
+export const BALL_RESTITUTION = 0.75
+export const BALL_GRAVITY = 15 // heavy, not a balloon — but still hangs a little
+export const BALL_MAX_SPEED = 30
+export const BALL_DRAG = 0.5 // heavy ball settles into its roll
+export const BODY_NUDGE_FORCE = 2 // walking into the ball barely moves it now
+export const HEADER_POWER = 22
 export const HEADER_UP_BIAS = 0.35 // fraction of header impulse aimed upward
 export const HEADER_MARGIN = 0.5 // extra reach beyond ball+player radii while diving
 export const HEADER_COOLDOWN_S = 0.35
 
+// --- ball knocks players, not the other way around ----------------------------
+export const BALL_KNOCK_MIN_SPEED = 7 // above this the ball wins the exchange
+export const BALL_KNOCK_FORCE = 10 // base knockback (scales with ball speed)
+export const BALL_KNOCK_POP = 3.5 // upward pop on a knock
+export const KNOCK_STUN_S = 0.6 // flailing, no control
+export const BALL_DEFLECT_RESTITUTION = 0.4 // ball bounces off the body it knocked
+
 // --- wind (only escalating force, idea.md §4) --------------------------------
+export const WIND_ENABLED = false // OFF until the ball itself feels right
 export const WIND_BASE_STRENGTH = 2.0
 export const WIND_STEP_PER_ELIMINATION = 1.0
 export const WIND_GUST_PERIOD_S = 7 // average seconds between gusts

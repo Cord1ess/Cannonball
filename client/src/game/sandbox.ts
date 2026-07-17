@@ -164,6 +164,9 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
       for (const shove of events.shoves) {
         if (shove.major && (shove.fromSeat === 0 || shove.toSeat === 0)) camera.kick(0.35)
       }
+      for (const knock of events.knocks) {
+        if (knock.seat === 0) camera.kick(0.9)
+      }
       clearEvents(events)
 
       accrueBallTime(meters, zoneSeat, footprintZone(arena, ball.x, ball.z), dt)
@@ -187,6 +190,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
         run,
         grounded: p.grounded,
         diving: p.diving,
+        knocked: p.knockedCd > 0,
         sprinting: p.sprinting,
         lean, // ground AND air tilt
         lookX: playerLook.x,
@@ -208,6 +212,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
           run: dummyRun,
           grounded: dummy.grounded,
           diving: dummy.diving,
+          knocked: dummy.knockedCd > 0,
           sprinting: dummy.sprinting,
           lean: 0,
           lookX: dummyLook.x,

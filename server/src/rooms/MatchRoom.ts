@@ -2,6 +2,7 @@ import { Room, type Client } from 'colyseus'
 import {
   FIXED_DELTA,
   GRACE_SECONDS,
+  PATCH_HZ,
   PLAYERS_MAX,
   TICK_SECONDS_PER_SURVIVOR,
   WIND_BASE_STRENGTH,
@@ -69,6 +70,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.state.ball = new BallState()
     for (let seat = 0; seat < SEATS; seat++) this.state.meters.push(0)
     this.state.tickRemaining = this.#tickRemaining
+    this.setPatchRate(1000 / PATCH_HZ) // ball & player positions matter: 30Hz
 
     this.onMessage('input', (client, message: NetInput) => {
       const session = this.#sessions.get(client.sessionId)
@@ -164,6 +166,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     interactBallPlayers(this.#ball, sims, this.#alive, dt, this.#events)
 
     for (const header of this.#events.headers) this.broadcast('header', { seat: header.seat })
+    for (const knock of this.#events.knocks) this.broadcast('knock', { seat: knock.seat })
     clearEvents(this.#events)
 
     // 3. judgment — server ball only (architecture.md §2)
@@ -227,6 +230,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       ps.yaw = sim.yaw
       ps.grounded = sim.grounded
       ps.diving = sim.diving
+      ps.knocked = sim.knockedCd > 0
       ps.sprinting = sim.sprinting
       ps.stamina = sim.stamina
       ps.alive = this.#alive[sim.seat] ?? true

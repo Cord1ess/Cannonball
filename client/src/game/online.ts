@@ -50,6 +50,7 @@ interface RemoteSnap {
   yaw: number
   grounded: boolean
   diving: boolean
+  knocked: boolean
   sprinting: boolean
 }
 
@@ -104,6 +105,9 @@ export function createOnlineGame(
   const ball = makeBall()
   const prevBall = { x: 0, y: 0, z: 0 }
   const serverBall = { x: 0, y: BALL_RADIUS, z: 0, vx: 0, vy: 0, vz: 0 }
+  // correction budget measured at patch time, paid out over ~100ms of steps —
+  // no continuous pull toward a stale sample, so the rest state never jitters
+  const ballCorr = { x: 0, y: 0, z: 0 }
   const events = makeEvents()
 
   // --- server time estimate ---------------------------------------------------------
@@ -145,6 +149,7 @@ export function createOnlineGame(
       localSim.grounded = me.grounded
       localSim.diving = me.diving
       localSim.stamina = me.stamina
+      if (me.knocked) localSim.knockedCd = Math.max(localSim.knockedCd, 0.1)
 
       // drop acked inputs, replay the rest through the SAME shared sim
       let i = 0
@@ -182,6 +187,7 @@ export function createOnlineGame(
         yaw: p.yaw,
         grounded: p.grounded,
         diving: p.diving,
+        knocked: p.knocked,
         sprinting: p.sprinting,
       })
       if (remote.snaps.length > 40) remote.snaps.splice(0, remote.snaps.length - 40)
@@ -203,7 +209,10 @@ export function createOnlineGame(
     serverBall.vx = state.ball.vx
     serverBall.vy = state.ball.vy
     serverBall.vz = state.ball.vz
-    const err = Math.hypot(ball.x - serverBall.x, ball.y - serverBall.y, ball.z - serverBall.z)
+    const errX = serverBall.x - ball.x
+    const errY = serverBall.y - ball.y
+    const errZ = serverBall.z - ball.z
+    const err = Math.hypot(errX, errY, errZ)
     if (err > SNAP_ERROR) {
       ball.x = serverBall.x
       ball.y = serverBall.y
@@ -211,6 +220,18 @@ export function createOnlineGame(
       ball.vx = serverBall.vx
       ball.vy = serverBall.vy
       ball.vz = serverBall.vz
+      ballCorr.x = ballCorr.y = ballCorr.z = 0
+    } else if (err > 0.06) {
+      // measure once per patch; pay out smoothly in fixedStep
+      ballCorr.x = errX
+      ballCorr.y = errY
+      ballCorr.z = errZ
+      // velocity converges at patch time only
+      ball.vx += (serverBall.vx - ball.vx) * 0.5
+      ball.vy += (serverBall.vy - ball.vy) * 0.35
+      ball.vz += (serverBall.vz - ball.vz) * 0.5
+    } else {
+      ballCorr.x = ballCorr.y = ballCorr.z = 0
     }
   })
 
@@ -220,24 +241,23 @@ export function createOnlineGame(
       if (remote.stub.seat === seat) remote.bean.header()
     }
   })
+  conn.room.onMessage('knock', ({ seat }: { seat: number }) => {
+    if (seat === mySeat) camera.kick(0.9)
+  })
   conn.room.onMessage('elim', () => {})
   conn.room.onMessage('round', () => {})
 
-  /** per-step ball correction: rate scales with error size (architecture.md §2) */
+  /** pay out the patch-time correction budget over ~100ms of fixed steps */
   function blendBallToServer(dt: number): void {
-    const ex = serverBall.x - ball.x
-    const ey = serverBall.y - ball.y
-    const ez = serverBall.z - ball.z
-    const err = Math.hypot(ex, ey, ez)
-    if (err < 0.01) return
-    const rate = err > 1 ? 14 : 6 // firm when wrong, gentle when close
-    const k = 1 - Math.exp(-rate * dt)
-    ball.x += ex * k
-    ball.y += ey * k
-    ball.z += ez * k
-    ball.vx += (serverBall.vx - ball.vx) * k
-    ball.vz += (serverBall.vz - ball.vz) * k
-    ball.vy += (serverBall.vy - ball.vy) * k * 0.5
+    const remaining = Math.hypot(ballCorr.x, ballCorr.y, ballCorr.z)
+    if (remaining < 1e-4) return
+    const k = Math.min(1, dt / 0.1)
+    ball.x += ballCorr.x * k
+    ball.y += ballCorr.y * k
+    ball.z += ballCorr.z * k
+    ballCorr.x *= 1 - k
+    ballCorr.y *= 1 - k
+    ballCorr.z *= 1 - k
   }
 
   const aliveOf = (seat: number): boolean => {
@@ -318,6 +338,7 @@ export function createOnlineGame(
           run,
           grounded: localSim.grounded,
           diving: localSim.diving,
+          knocked: localSim.knockedCd > 0,
           sprinting: localSim.sprinting,
           lean,
           lookX: look.x,
@@ -345,6 +366,7 @@ export function createOnlineGame(
           run: pose.run,
           grounded: pose.grounded,
           diving: pose.diving,
+          knocked: pose.knocked,
           sprinting: pose.sprinting,
           lean: 0,
           lookX: look.x,
@@ -411,6 +433,7 @@ interface SampledPose {
   run: number
   grounded: boolean
   diving: boolean
+  knocked: boolean
   sprinting: boolean
 }
 
@@ -444,6 +467,7 @@ function sampleSnaps(snaps: RemoteSnap[], renderTime: number | null): SampledPos
     run: Math.min(1, speed / SPRINT_SPEED),
     grounded: b.grounded,
     diving: b.diving,
+    knocked: b.knocked,
     sprinting: b.sprinting,
   }
 }

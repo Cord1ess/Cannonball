@@ -33,14 +33,17 @@ const read = (room: Room): StateRead => room.state as unknown as StateRead
 
 const clientA = new Client(endpoint)
 const clientB = new Client(endpoint)
-const roomA = await clientA.joinOrCreate('match')
+// create() (not joinOrCreate) — a FRESH room, immune to ghost sessions still
+// in their reconnection grace window from earlier crashed runs
+const roomA = await clientA.create('match')
 const roomB = await clientB.joinById(roomA.roomId)
 console.log(`[smoke] A=${roomA.sessionId} B=${roomB.sessionId} in room ${roomA.roomId}`)
 
-// wait for both players to replicate
+// wait for BOTH session ids to replicate
 await new Promise<void>((resolve) => {
   const check = (): void => {
-    if (read(roomA).players?.size === 2) resolve()
+    const players = read(roomA).players
+    if (players?.get(roomA.sessionId) && players?.get(roomB.sessionId)) resolve()
     else setTimeout(check, 50)
   }
   check()
