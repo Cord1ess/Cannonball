@@ -99,8 +99,10 @@ Feedback pass 3 (top-down gaps): the floor under the blades now wears the user's
 grass_02 tile, preprocessed ONCE offline (playwright canvas: white-clover flowers masked by
 blue/green ratio > 0.62 — probed, grass tops out ~0.45 — dilated, onion-peel inpainted, then
 pastelized to palette) → `client/public/textures/pitch_grass.png` (the ONLY authored asset;
-source folder `grass_02_1k/` gitignored). Chalk markings ALSO baked onto a ground overlay disc
-(canvas, redrawn per morph) so lines stay crisp in blade gaps from above.
+source folder `grass_02_1k/` gitignored). Feedback pass 4: the tile's luminance is remapped
+onto the EXACT blade palette at load (grassBase→grassTip, unlit MeshBasicMaterial like the
+blades) so ground/blade color can never drift; ground chalk LINES removed (they doubled the
+blade-shader lines) — ground keeps only the pale neutral wash + faint mow bands.
 Wedge tint planes/strip lines/decals/disc meshes deleted (grass replaced them). Crowd: cubes →
 instanced BEAN spectators (torso+arms merged geometry + baked face plates, 2 draws, ~900), FIVE
 tiers + parapets + pennant flags; `recolorCrowd` at every morph dresses each wedge's stands
