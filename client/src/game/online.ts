@@ -627,6 +627,7 @@ export function createOnlineGame(
     },
 
     frameUpdate(dt: number, alpha: number, lean: number): void {
+      arenaView.update(dt)
       const decay = Math.exp(-10 * dt)
       renderOffset.x *= decay
       renderOffset.y *= decay

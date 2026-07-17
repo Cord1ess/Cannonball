@@ -181,6 +181,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
     },
 
     frameUpdate(dt: number, alpha: number, lean: number): void {
+      arenaView.update(dt)
       const p = players[0]!
       const px = prevPlayer.x + (p.x - prevPlayer.x) * alpha
       const py = prevPlayer.y + (p.y - prevPlayer.y) * alpha

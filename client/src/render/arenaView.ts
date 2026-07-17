@@ -1,63 +1,34 @@
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { WALL_HEIGHT } from '@shared/constants.ts'
 import type { Arena } from '@shared/sim/arena.ts'
 import { yawTowardCenter } from '@shared/sim/arena.ts'
+import { KITS } from '@shared/cosmetics/jerseys.ts'
+import { createGrassField, type GrassField } from './grass.ts'
 import { addInkOutline, disposeHierarchy, INK_WEIGHT, makeToonMaterial } from './materials.ts'
 import { PALETTE } from './palette.ts'
-import { tickDecalTexture } from './textures.ts'
 
 /**
- * THE colosseum (M5): one permanent round stadium — floor, seamless ring
- * wall, three audience tiers with an instanced crowd, floating-island
- * underside. Built ONCE and never rebuilt. Only the ZONE LAYER morphs:
- * painted wedge tints, ink division lines, and the wall-crown cannons
- * (one per zone, wearing that seat's color band).
+ * THE colosseum (M5): one permanent round stadium — grass pitch, seamless
+ * ring wall, five audience tiers packed with instanced BEAN spectators in
+ * team jerseys, pennant flags, floating-island underside. Built ONCE.
+ * Zone morphs are uniform writes on the grass shader (chalk lines, danger
+ * heat) + a cannon rebuild + a crowd recolor — no geometry churn.
  */
 
 export interface ArenaView {
   readonly group: THREE.Group
-  /** repaint the floor divisions + cannons for a new zone layout */
+  /** repaint the floor divisions + cannons + home-fan sections */
   setZones(arena: Arena, zoneColors: readonly number[]): void
-  /** meterFrac per zone [0..1] tints wedges hotter as danger rises */
+  /** meterFrac per zone [0..1] heats that wedge's grass */
   setDanger(fracs: readonly number[]): void
+  /** advances the grass wind */
+  update(dt: number): void
   dispose(): void
 }
 
 const SEGMENTS = 64
-
-/** Flat XZ ring-sector fan between two radii across an angle span. */
-function sectorGeometry(inner: number, outer: number, a0: number, a1: number, segments = 16): THREE.BufferGeometry {
-  const positions: number[] = []
-  const indices: number[] = []
-  for (let i = 0; i <= segments; i++) {
-    const a = a0 + ((a1 - a0) * i) / segments
-    const c = Math.cos(a)
-    const s = Math.sin(a)
-    positions.push(c * inner, 0, s * inner, c * outer, 0, s * outer)
-  }
-  for (let i = 0; i < segments; i++) {
-    const base = i * 2
-    indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3)
-  }
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-  geo.setIndex(indices)
-  geo.computeVertexNormals()
-  return geo
-}
-
-/** Flat XZ strip along +X from r0 to r1, width w — the painted division line. */
-function stripGeometry(r0: number, r1: number, w: number): THREE.BufferGeometry {
-  const geo = new THREE.BufferGeometry()
-  const h = w / 2
-  geo.setAttribute(
-    'position',
-    new THREE.Float32BufferAttribute([r0, 0, -h, r1, 0, -h, r0, 0, h, r1, 0, h], 3),
-  )
-  geo.setIndex([0, 2, 1, 1, 2, 3])
-  geo.computeVertexNormals()
-  return geo
-}
+const TIERS = 5
 
 /** Watertight annulus wall: ring shape extruded up from y=0 to `height`. */
 function ringGeometry(inner: number, outer: number, height: number): THREE.ExtrudeGeometry {
@@ -71,134 +42,220 @@ function ringGeometry(inner: number, outer: number, height: number): THREE.Extru
   return geo
 }
 
-let decalTex: THREE.Texture | null = null
-
-/** empty + dispose a group's children (shared textures survive) */
-function clearGroup(group: THREE.Group): void {
-  disposeHierarchy(group)
-  group.clear()
+/** The spectator bean: the player silhouette (torso stack + arms), merged. */
+function crowdBeanGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = []
+  const rows: ReadonlyArray<readonly [number, number]> = [
+    [0.88, 0.22],
+    [0.86, 0.26],
+    [0.76, 0.26],
+    [0.58, 0.2],
+  ]
+  let y = 0.46
+  for (const [rw, rh] of rows) {
+    const box = new THREE.BoxGeometry(rw, rh, rw * 0.8)
+    box.translate(0, y + rh / 2, 0)
+    parts.push(box)
+    y += rh
+  }
+  for (const side of [-1, 1]) {
+    const arm = new THREE.BoxGeometry(0.16, 0.44, 0.2)
+    arm.translate(side * 0.52, 0.78, 0)
+    parts.push(arm)
+  }
+  const merged = mergeGeometries(parts)
+  for (const part of parts) part.dispose()
+  return merged
 }
+
+/** Cream face plate with two ink eyes, baked into one little texture. */
+function crowdFaceTexture(): THREE.CanvasTexture {
+  const size = 64
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('2d canvas unavailable')
+  ctx.fillStyle = '#fbf6e8'
+  ctx.fillRect(4, 8, size - 8, size - 16)
+  ctx.fillStyle = '#1c1a18'
+  ctx.fillRect(size * 0.3 - 3, size * 0.32, 7, 18)
+  ctx.fillRect(size * 0.7 - 3, size * 0.32, 7, 18)
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+/** every kit colorway a fan could wear */
+const FAN_COLORS: readonly number[] = [
+  ...KITS.flatMap((kit) => [kit.home.primary, kit.away.primary]),
+  PALETTE.offWhite,
+  PALETTE.uiGold,
+]
 
 export function createArenaView(radius = 28): ArenaView {
   const group = new THREE.Group()
+  const neutralRadius = radius * 0.15
 
   // --- the permanent building --------------------------------------------------
 
-  // floor slab
-  const floor = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius, radius, 0.6, SEGMENTS),
-    makeToonMaterial(PALETTE.groundCream, 10),
-  )
+  // floor slab: soil-green top under the grass, stone rim
+  const floor = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.6, SEGMENTS), [
+    makeToonMaterial(PALETTE.warmGray), // side
+    makeToonMaterial(0x3e7f45), // top: soil under the pitch
+    makeToonMaterial(PALETTE.warmGray), // bottom
+  ])
   floor.position.y = -0.3
   addInkOutline(floor, INK_WEIGHT.arena)
   group.add(floor)
 
+  // THE PITCH — instanced stadium grass; zones/chalk/danger live in its shader
+  const grass = createGrassField(radius, neutralRadius)
+  group.add(grass.mesh)
+
   // seamless ring wall the players bounce off
-  const wall = new THREE.Mesh(ringGeometry(radius, radius + 1.8, WALL_HEIGHT), makeToonMaterial(PALETTE.warmGray, 0.15))
+  const wall = new THREE.Mesh(ringGeometry(radius, radius + 1.8, WALL_HEIGHT), makeToonMaterial(PALETTE.warmGray))
   addInkOutline(wall, INK_WEIGHT.arena)
   group.add(wall)
 
-  // three stepped audience tiers + a tall outer rim: the colosseum bowl
+  // five stepped audience tiers, each with a parapet lip, + a tall outer rim
   const tierTops: Array<{ inner: number; outer: number; top: number }> = []
-  for (let tier = 0; tier < 3; tier++) {
-    const inner = radius + 1.8 + tier * 2.6
-    const outer = inner + 2.6
-    const top = WALL_HEIGHT + 1.1 + tier * 1.5
+  for (let tier = 0; tier < TIERS; tier++) {
+    const inner = radius + 1.8 + tier * 2.5
+    const outer = inner + 2.5
+    const top = WALL_HEIGHT + 1.0 + tier * 1.35
     tierTops.push({ inner, outer, top })
     const ring = new THREE.Mesh(
       ringGeometry(inner, outer, top),
-      makeToonMaterial(tier % 2 === 0 ? PALETTE.warmGray : PALETTE.greenGray, 0.12),
+      makeToonMaterial(tier % 2 === 0 ? PALETTE.warmGray : PALETTE.greenGray),
     )
     addInkOutline(ring, INK_WEIGHT.arena)
     group.add(ring)
+    const parapet = new THREE.Mesh(ringGeometry(inner, inner + 0.35, top + 0.55), makeToonMaterial(PALETTE.greenGray))
+    group.add(parapet)
   }
-  const rim = new THREE.Mesh(
-    ringGeometry(radius + 9.6, radius + 10.9, WALL_HEIGHT + 6.6),
-    makeToonMaterial(PALETTE.warmGray, 0.1),
-  )
+  const rimInner = radius + 1.8 + TIERS * 2.5
+  const rimTop = WALL_HEIGHT + 1.0 + TIERS * 1.35 + 1.9
+  const rim = new THREE.Mesh(ringGeometry(rimInner, rimInner + 1.3, rimTop), makeToonMaterial(PALETTE.warmGray))
   addInkOutline(rim, INK_WEIGHT.arena)
   group.add(rim)
 
-  // instanced crowd: little blocky spectators scattered over the tiers
-  const CROWD = 400
-  const crowdGeo = new THREE.BoxGeometry(0.55, 0.75, 0.45)
-  crowdGeo.translate(0, 0.375, 0)
-  const crowdMat = makeToonMaterial(0xffffff, 0.5)
-  const crowd = new THREE.InstancedMesh(crowdGeo, crowdMat, CROWD)
-  crowd.frustumCulled = false
-  const crowdColors = [
-    PALETTE.teamRed,
-    PALETTE.teamBlue,
-    PALETTE.teamYellow,
-    PALETTE.teamGreen,
-    PALETTE.teamViolet,
-    PALETTE.teamOrange,
-    PALETTE.offWhite,
-    PALETTE.uiGold,
-    PALETTE.horizonCream,
-  ]
-  const m = new THREE.Matrix4()
-  const q = new THREE.Quaternion()
-  const up = new THREE.Vector3(0, 1, 0)
-  const color = new THREE.Color()
-  for (let i = 0; i < CROWD; i++) {
-    const tier = tierTops[Math.floor(Math.random() * tierTops.length)]!
-    const a = Math.random() * Math.PI * 2
-    const r = tier.inner + 0.6 + Math.random() * (tier.outer - tier.inner - 1.2)
-    const x = Math.cos(a) * r
-    const z = Math.sin(a) * r
-    q.setFromAxisAngle(up, yawTowardCenter(x, z) + (Math.random() - 0.5) * 0.5)
-    const s = 0.8 + Math.random() * 0.45
-    m.compose(new THREE.Vector3(x, tier.top, z), q, new THREE.Vector3(s, s * (0.85 + Math.random() * 0.3), s))
-    crowd.setMatrixAt(i, m)
-    color.setHex(crowdColors[Math.floor(Math.random() * crowdColors.length)]!)
-    crowd.setColorAt(i, color)
+  // pennant flags around the crown
+  const FLAGS = 20
+  const poleGeo = new THREE.CylinderGeometry(0.07, 0.07, 2.6, 6)
+  poleGeo.translate(0, 1.3, 0)
+  const poles = new THREE.InstancedMesh(poleGeo, makeToonMaterial(PALETTE.ink), FLAGS)
+  const flagGeo = new THREE.BufferGeometry()
+  flagGeo.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute([0, 2.5, 0, 0, 1.9, 0, 1.15, 2.2, 0], 3),
+  )
+  flagGeo.setIndex([0, 1, 2])
+  flagGeo.computeVertexNormals()
+  const flags = new THREE.InstancedMesh(
+    flagGeo,
+    new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+    FLAGS,
+  )
+  poles.frustumCulled = flags.frustumCulled = false
+  {
+    const m = new THREE.Matrix4()
+    const q = new THREE.Quaternion()
+    const up = new THREE.Vector3(0, 1, 0)
+    const color = new THREE.Color()
+    for (let i = 0; i < FLAGS; i++) {
+      const a = ((i + 0.5) / FLAGS) * Math.PI * 2
+      const x = Math.cos(a) * (rimInner + 0.65)
+      const z = Math.sin(a) * (rimInner + 0.65)
+      q.setFromAxisAngle(up, yawTowardCenter(x, z) + Math.PI / 2)
+      m.compose(new THREE.Vector3(x, rimTop, z), q, new THREE.Vector3(1, 1, 1))
+      poles.setMatrixAt(i, m)
+      flags.setMatrixAt(i, m)
+      color.setHex(FAN_COLORS[i % FAN_COLORS.length]!)
+      flags.setColorAt(i, color)
+    }
+    poles.instanceMatrix.needsUpdate = true
+    flags.instanceMatrix.needsUpdate = true
+    if (flags.instanceColor) flags.instanceColor.needsUpdate = true
   }
-  crowd.instanceMatrix.needsUpdate = true
-  if (crowd.instanceColor) crowd.instanceColor.needsUpdate = true
-  group.add(crowd)
+  group.add(poles, flags)
+
+  // --- the crowd: BEAN spectators in team jerseys ------------------------------
+  // placement first, then two instanced draws sharing transforms (body + face)
+  const placements: Array<{ x: number; z: number; y: number; yaw: number; s: number; angle: number; pick: number }> = []
+  for (const tier of tierTops) {
+    const r = (tier.inner + tier.outer) / 2
+    const count = Math.floor((Math.PI * 2 * r) / 1.05)
+    for (let i = 0; i < count; i++) {
+      if (Math.random() > 0.85) continue // empty seats read organic
+      const a = ((i + Math.random() * 0.55) / count) * Math.PI * 2
+      const x = Math.cos(a) * (r + (Math.random() - 0.5) * 1.3)
+      const z = Math.sin(a) * (r + (Math.random() - 0.5) * 1.3)
+      placements.push({
+        x,
+        z,
+        y: tier.top,
+        yaw: yawTowardCenter(x, z) + (Math.random() - 0.5) * 0.45,
+        s: 0.82 + Math.random() * 0.4,
+        angle: (Math.atan2(z, x) + Math.PI * 2) % (Math.PI * 2),
+        pick: Math.random(),
+      })
+    }
+  }
+  const crowdCount = placements.length
+  const crowdBody = new THREE.InstancedMesh(crowdBeanGeometry(), makeToonMaterial(0xffffff), crowdCount)
+  const faceGeo = new THREE.PlaneGeometry(0.5, 0.42)
+  faceGeo.translate(0, 0.98, 0.36)
+  const crowdFace = new THREE.InstancedMesh(
+    faceGeo,
+    new THREE.MeshBasicMaterial({ map: crowdFaceTexture(), transparent: true }),
+    crowdCount,
+  )
+  crowdBody.frustumCulled = crowdFace.frustumCulled = false
+  {
+    const m = new THREE.Matrix4()
+    const q = new THREE.Quaternion()
+    const up = new THREE.Vector3(0, 1, 0)
+    for (let i = 0; i < crowdCount; i++) {
+      const p = placements[i]!
+      q.setFromAxisAngle(up, p.yaw)
+      m.compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(p.s, p.s, p.s))
+      crowdBody.setMatrixAt(i, m)
+      crowdFace.setMatrixAt(i, m)
+    }
+    crowdBody.instanceMatrix.needsUpdate = true
+    crowdFace.instanceMatrix.needsUpdate = true
+  }
+  const crowdColor = new THREE.Color()
+  function recolorCrowd(zoneCount: number, zoneColors: readonly number[]): void {
+    const span = (Math.PI * 2) / Math.max(2, zoneCount)
+    for (let i = 0; i < crowdCount; i++) {
+      const p = placements[i]!
+      const zone = Math.floor(((p.angle + span / 2) % (Math.PI * 2)) / span) % Math.max(2, zoneCount)
+      const home = zoneColors[zone]
+      // each wedge's stands fill with that seat's supporters, plus neutrals
+      if (home !== undefined && p.pick < 0.62) crowdColor.setHex(home)
+      else crowdColor.setHex(FAN_COLORS[Math.floor(p.pick * 997) % FAN_COLORS.length]!)
+      crowdBody.setColorAt(i, crowdColor)
+    }
+    if (crowdBody.instanceColor) crowdBody.instanceColor.needsUpdate = true
+  }
+  recolorCrowd(6, []) // pre-match: everyone in random team colors
+  group.add(crowdBody, crowdFace)
 
   // floating dream island: tapered rock mass under the floor
   const island = new THREE.Mesh(
     new THREE.CylinderGeometry(radius * 1.02, radius * 0.28, 9, 24),
-    makeToonMaterial(PALETTE.greenGray, 0.15),
+    makeToonMaterial(PALETTE.greenGray),
   )
   island.position.y = -5.1
   addInkOutline(island, INK_WEIGHT.arena)
   group.add(island)
 
-  // neutral center disc + its painted ring outline (radius never changes)
-  const neutralRadius = radius * 0.15
-  const disc = new THREE.Mesh(new THREE.CircleGeometry(neutralRadius, 40), makeToonMaterial(PALETTE.offWhite, 3))
-  disc.rotation.x = -Math.PI / 2
-  disc.position.y = 0.05
-  group.add(disc)
-  const inkLine = () =>
-    new THREE.MeshBasicMaterial({ color: PALETTE.ink, transparent: true, opacity: 0.5, depthWrite: false })
-  const neutralRing = new THREE.Mesh(
-    sectorGeometry(neutralRadius - 0.12, neutralRadius + 0.18, 0, Math.PI * 2, 56),
-    inkLine(),
-  )
-  neutralRing.position.y = 0.06
-  group.add(neutralRing)
+  // --- the morphing layer: just the cannons ------------------------------------
 
-  // scatter tick/pebble decals (trait 2.2)
-  decalTex ??= tickDecalTexture()
-  const decalMat = new THREE.MeshBasicMaterial({ map: decalTex, transparent: true, depthWrite: false })
-  for (let i = 0; i < 26; i++) {
-    const decal = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), decalMat)
-    const a = Math.random() * Math.PI * 2
-    const r = neutralRadius + 2 + Math.random() * (radius - neutralRadius - 5)
-    decal.position.set(Math.cos(a) * r, 0.07, Math.sin(a) * r)
-    decal.rotation.set(-Math.PI / 2, 0, Math.random() * Math.PI * 2)
-    group.add(decal)
-  }
-
-  // --- the morphing zone layer -------------------------------------------------
-
-  const zonesGroup = new THREE.Group()
-  group.add(zonesGroup)
-  let wedgeMats: THREE.MeshBasicMaterial[] = []
+  const cannonsGroup = new THREE.Group()
+  group.add(cannonsGroup)
 
   function buildCannon(angle: number, zoneColor: number): THREE.Group {
     const cannon = new THREE.Group()
@@ -207,12 +264,12 @@ export function createArenaView(radius = 28): ArenaView {
     cannon.position.set(px, WALL_HEIGHT, pz)
     cannon.rotation.y = yawTowardCenter(px, pz) // local +Z aims at the center
 
-    const base = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9, 1.4), makeToonMaterial(PALETTE.ink, 0.5))
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9, 1.4), makeToonMaterial(PALETTE.ink))
     base.position.y = 0.45
     addInkOutline(base, INK_WEIGHT.prop)
     cannon.add(base)
 
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.6, 2.6, 12), makeToonMaterial(PALETTE.ink, 0.5))
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.6, 2.6, 12), makeToonMaterial(PALETTE.ink))
     barrel.geometry.translate(0, 1.0, 0) // pivot at the breech
     barrel.position.set(0, 0.8, 0.1)
     barrel.rotation.x = 0.92 // tip the muzzle up-and-inward over the wall
@@ -220,58 +277,38 @@ export function createArenaView(radius = 28): ArenaView {
     cannon.add(barrel)
 
     // the seat's colors on a muzzle band
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.52, 0.42, 12), makeToonMaterial(zoneColor, 0.5))
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.52, 0.42, 12), makeToonMaterial(zoneColor))
     band.position.y = 2.05
     barrel.add(band)
     return cannon
   }
 
+  let elapsed = 0
+
   return {
     group,
 
     setZones(arena: Arena, zoneColors: readonly number[]): void {
-      clearGroup(zonesGroup)
-      wedgeMats = []
-      const n = arena.seats
-      const half = Math.PI / n
-
-      for (let zone = 0; zone < n; zone++) {
-        const center = arena.zoneAngles[zone] ?? 0
-        const zoneColor = zoneColors[zone] ?? PALETTE.warmGray
-
-        // translucent wedge tint (danger heat lives here)
-        const mat = new THREE.MeshBasicMaterial({
-          color: zoneColor,
-          transparent: true,
-          opacity: 0.1,
-          depthWrite: false,
-        })
-        wedgeMats.push(mat)
-        const wedge = new THREE.Mesh(
-          sectorGeometry(arena.neutralRadius + 0.4, radius * 0.985, center - half + 0.015, center + half - 0.015),
-          mat,
-        )
-        wedge.position.y = 0.035
-        zonesGroup.add(wedge)
-
-        // painted division line on the zone's leading boundary
-        const line = new THREE.Mesh(stripGeometry(arena.neutralRadius + 0.1, radius - 0.25, 0.34), inkLine())
-        line.rotation.y = -(center + half)
-        line.position.y = 0.06
-        zonesGroup.add(line)
-
-        // the cannon on the wall crown, wearing the seat's color
-        zonesGroup.add(buildCannon(center, zoneColor))
+      grass.setZones(arena.seats, zoneColors)
+      recolorCrowd(arena.seats, zoneColors)
+      disposeHierarchy(cannonsGroup)
+      cannonsGroup.clear()
+      for (let zone = 0; zone < arena.seats; zone++) {
+        cannonsGroup.add(buildCannon(arena.zoneAngles[zone] ?? 0, zoneColors[zone] ?? PALETTE.warmGray))
       }
     },
 
     setDanger(fracs: readonly number[]): void {
-      for (let zone = 0; zone < wedgeMats.length; zone++) {
-        wedgeMats[zone]!.opacity = 0.08 + Math.min(1, fracs[zone] ?? 0) * 0.3
-      }
+      grass.setDanger(fracs)
+    },
+
+    update(dt: number): void {
+      elapsed += dt
+      grass.update(elapsed)
     },
 
     dispose(): void {
+      grass.dispose()
       disposeHierarchy(group)
     },
   }

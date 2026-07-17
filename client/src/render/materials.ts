@@ -1,12 +1,13 @@
 import * as THREE from 'three'
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js'
 import { PALETTE } from './palette.ts'
-import { gouacheTexture, strokeTexture } from './textures.ts'
+import { strokeTexture } from './textures.ts'
 
 /**
  * The two shared material families of the whole game (architecture.md §1):
- * gouache-modulated toon fills + sketch ink hulls. Everything visible goes
- * through here so the style stays one system.
+ * FLAT toon fills (Fall Guys-clean — no texture modulation, ever) + sketch
+ * ink hulls. Everything visible goes through here so the style stays one
+ * system.
  */
 
 // --- shared singletons -------------------------------------------------------
@@ -24,21 +25,6 @@ export function toonRamp(): THREE.DataTexture {
   return ramp
 }
 
-let gouache: THREE.Texture | null = null
-const gouacheVariants = new Map<number, THREE.Texture>()
-function sharedGouache(repeat = 2): THREE.Texture {
-  gouache ??= gouacheTexture()
-  if (repeat === 2) return gouache
-  let variant = gouacheVariants.get(repeat)
-  if (!variant) {
-    variant = gouache.clone() // shares the image, independent repeat
-    variant.repeat.set(repeat, repeat)
-    variant.needsUpdate = true
-    gouacheVariants.set(repeat, variant)
-  }
-  return variant
-}
-
 let stroke: THREE.Texture | null = null
 function sharedStroke(): THREE.Texture {
   stroke ??= strokeTexture()
@@ -47,13 +33,11 @@ function sharedStroke(): THREE.Texture {
 
 // --- toon fills ----------------------------------------------------------------
 
-/** Gouache-modulated toon fill — the only surface material in the game.
- *  `gouacheRepeat` scales the paint tile for big surfaces (arena floor). */
-export function makeToonMaterial(color: number, gouacheRepeat = 2): THREE.MeshToonMaterial {
+/** Flat toon fill — the only surface material in the game. */
+export function makeToonMaterial(color: number): THREE.MeshToonMaterial {
   return new THREE.MeshToonMaterial({
     color,
     gradientMap: toonRamp(),
-    map: sharedGouache(gouacheRepeat),
   })
 }
 

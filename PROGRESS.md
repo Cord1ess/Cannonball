@@ -78,6 +78,19 @@ invalid-id/bot kits/lock), smoke+smoke-bots regressions, playwright lobby+launch
 **M4a AND M4b are NOT yet user-playtested in-browser — first thing next session may be feedback
 on card feel or jersey look.**
 
+### M5a.2 — flat look + grass pitch + bean crowd (user feedback pass)
+Gouache texture KILLED everywhere (it had seams/scale problems): `makeToonMaterial(color)` is now
+a FLAT toon fill, Fall Guys-clean; stone palette brightened (warmGray/greenGray). THE PITCH:
+`render/grass.ts` — GPU-instanced stadium grass (technique studied from
+achrefelouafi/GrassSystemThreeJS per user, rebuilt in our style): ~60k blades, 5 verts each, ONE
+draw call, wind gust+flutter in the vertex shader; ZONES LIVE IN THE SHADER — chalk division
+lines, neutral-circle ring, per-zone danger heat, mow bands — so a morph is a uniform write.
+Wedge tint planes/strip lines/decals/disc meshes deleted (grass replaced them). Crowd: cubes →
+instanced BEAN spectators (torso+arms merged geometry + baked face plates, 2 draws, ~900), FIVE
+tiers + parapets + pennant flags; `recolorCrowd` at every morph dresses each wedge's stands
+mostly in that seat's kit color (home fans). arenaView gained `update(dt)` (wind time), called
+from both frame loops.
+
 ### M5a — THE colosseum (user design revision, replaces the morphing polygon)
 **The arena no longer changes shape.** One permanent round stadium; only the PAINTED floor
 divisions morph: 6 wedge sectors → 5 → 4 → 3 → two halves. `shared/src/sim/arena.ts` rewritten:

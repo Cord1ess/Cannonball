@@ -4,12 +4,16 @@ export const PALETTE = {
   skyTeal: 0x7dcdc2,
   cloud: 0xc6eadd,
   horizonCream: 0xeef4e2,
-  // world neutrals
+  // world neutrals (flat Fall Guys-clean stone, no texture mud)
   groundCream: 0xe6e1d3,
-  warmGray: 0xd9d4c7,
-  greenGray: 0xcbd0c2,
+  warmGray: 0xe9dfc9,
+  greenGray: 0xdcd2b8,
   offWhite: 0xefebe0,
   shadowShape: 0xc2beb8,
+  // the pitch
+  grassBase: 0x4f9e54,
+  grassTip: 0x8ecf6f,
+  chalk: 0xf4f0e0,
   // ink
   ink: 0x4a443c,
   // team accents (fallback kit set — the "red postbox" role)
