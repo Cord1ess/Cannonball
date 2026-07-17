@@ -183,14 +183,31 @@ export function createOnlineGame(
   let lastPatchAt = 0
   const serverMe = { x: 0, y: 0, z: 0, has: false }
   // pooled grass bodies — reused each frame so the hot path never allocates
-  const grassBodyPool: GrassBody[] = Array.from({ length: 8 }, () => ({ x: 0, z: 0, radius: 0 }))
+  // grass bodies: pooled + per-key wobble state so blades spring back after a
+  // body passes. wobble ramps up with movement speed and decays each frame.
+  const grassBodyPool: GrassBody[] = Array.from({ length: 8 }, () => ({ x: 0, z: 0, radius: 0, wobble: 0 }))
   const grassBodies: GrassBody[] = []
-  const pushBody = (x: number, z: number, radius: number): void => {
+  const grassState = new Map<string, { px: number; pz: number; wobble: number; seen: boolean }>()
+  const grassSeen = new Set<string>()
+  const pushBody = (key: string, x: number, z: number, radius: number, dt: number): void => {
     const b = grassBodyPool[grassBodies.length]
     if (!b) return
+    let st = grassState.get(key)
+    if (!st) {
+      st = { px: x, pz: z, wobble: 0, seen: true }
+      grassState.set(key, st)
+    }
+    const speed = Math.hypot(x - st.px, z - st.pz) / Math.max(dt, 1e-3)
+    st.px = x
+    st.pz = z
+    st.seen = true
+    // moving fast -> high wobble target; always decay toward it so it settles
+    const target = Math.min(1, speed / 6)
+    st.wobble += (target - st.wobble) * (target > st.wobble ? 0.5 : Math.min(1, dt * 4))
     b.x = x
     b.z = z
     b.radius = radius
+    b.wobble = st.wobble
     grassBodies.push(b)
   }
 
@@ -723,13 +740,32 @@ export function createOnlineGame(
       const zoneOwner = zone >= 0 && zoneSeatArr ? zoneSeatArr[zone] : undefined
       ballView.update(bx, by, bz, zoneOwner !== undefined ? (seatColors[zoneOwner] ?? null) : null)
 
-      // grass parts around bodies near the ground: self + alive remotes + ball
+      // grass parts around bodies near the ground: self + alive remotes + ball.
+      // radii are TIGHT (just wider than the body) so only the grass you touch
+      // reacts; wobble state per key springs it back after you pass.
       grassBodies.length = 0
-      if (localSim && aliveOf(mySeat) && selfY < 1.2) pushBody(selfX, selfZ, 1.1)
-      for (const remote of remotes.values()) {
-        if (aliveOf(remote.seat) && remote.stub.y < 1.2) pushBody(remote.stub.x, remote.stub.z, 1.1)
+      grassSeen.clear()
+      if (localSim && aliveOf(mySeat) && selfY < 1.0) {
+        pushBody('self', selfX, selfZ, 0.7, dt)
+        grassSeen.add('self')
       }
-      if (by < BALL_RADIUS + 1.2) pushBody(bx, bz, BALL_RADIUS + 0.8)
+      for (const remote of remotes.values()) {
+        if (aliveOf(remote.seat) && remote.stub.y < 1.0) {
+          const k = `r${remote.seat}`
+          pushBody(k, remote.stub.x, remote.stub.z, 0.7, dt)
+          grassSeen.add(k)
+        }
+      }
+      if (by < BALL_RADIUS + 0.6) {
+        pushBody('ball', bx, bz, BALL_RADIUS + 0.35, dt)
+        grassSeen.add('ball')
+      }
+      // decay+prune bodies that left the grass so their wobble settles to rest
+      for (const [key, st] of grassState) {
+        if (grassSeen.has(key)) continue
+        st.wobble *= Math.max(0, 1 - dt * 4)
+        if (st.wobble < 0.02) grassState.delete(key)
+      }
       arenaView.setGrassBodies(grassBodies)
 
       const fracs: number[] = []

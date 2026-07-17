@@ -107,11 +107,14 @@ source folder `grass_02_1k/` gitignored). **Grass upgrades (user request, all in
 uncapped at 160k):** blade count 110k→160k; wind is now LAYERED and non-uniform (slow base sway +
 big rolling gust fronts that sweep across the field + per-blade flutter); INTERACTIVE displacement
 — up to 8 bodies (players + ball, fed each frame from online.ts/sandbox.ts via `setGrassBodies`,
-pooled/no-alloc) push blades radially away and mash their height, trodden blades darken; wind made
-VISIBLE via `render/windStreaks.ts` (90 instanced additive dashes drifting on the wind, length +
-alpha pulse with the gust envelope the grass returns from `update()`). ArenaView threads wind→
-streaks and exposes `setGrassBodies`. Perf headroom confirmed earlier: fill-bound not geometry-
-bound, ~5x headroom at 1080p, so all this was free.
+pooled/no-alloc). Feedback pass: TIGHT radii (~body size, not a whole region), blades PART
+sideways like walking THROUGH grass with only a whisker of height loss, and SPRINGY recovery —
+per-key wobble state (keyed self/rN/ball in online.ts) ramps with move-speed and decays after a
+body leaves so blades bob back up. Wind made VISIBLE via `render/windStreaks.ts` (140 instanced
+dashes drifting on the wind, brighten on gusts). GOTCHA: streaks MUST be view-space billboarded
+— world-flat horizontal quads are seen edge-on from the chase cam and vanish (cost a round).
+GOTCHA: never name a GLSL local `flat` (reserved keyword → shader won't compile → grass vanishes).
+Perf: fill-bound not geometry-bound, ~5x headroom at 1080p, all of this measured free (~2ms/frame).
 
 Feedback pass 4: the tile's luminance is remapped
 onto the EXACT blade palette at load (grassBase→grassTip, unlit MeshBasicMaterial like the

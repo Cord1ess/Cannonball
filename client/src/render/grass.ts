@@ -28,6 +28,8 @@ export interface GrassBody {
   x: number
   z: number
   radius: number
+  /** springy wobble 0..1 — raise while the body moves, let it decay to settle */
+  wobble: number
 }
 
 export interface GrassField {
@@ -47,7 +49,7 @@ const VERT = /* glsl */ `
 
   uniform float uTime;
   uniform vec2 uWindDir;
-  uniform vec4 uBodies[${MAX_BODIES}]; // xz = pos, z-comp(w?) see below: x,y=pos z=radius w=unused
+  uniform vec4 uBodies[${MAX_BODIES}]; // x,y = xz pos · z = radius · w = wobble 0..1
   uniform int uBodyCount;
 
   varying float vT;         // 0 root .. 1 tip
@@ -91,24 +93,34 @@ const VERT = /* glsl */ `
     float sway = (baseSway * 0.13 + gustSway * 0.22 + flutter * 0.05) * t * t;
     p.xz += uWindDir * sway;
 
-    // --- INTERACTIVE displacement ------------------------------------------
-    // bodies push blade tips radially away and mash them down
-    // (note: 'flat' is a reserved GLSL keyword — this var must NOT be named it)
+    // --- INTERACTIVE displacement (walking THROUGH grass) ------------------
+    // Blades PART sideways around a body — a tight ring right at the contact,
+    // not a flattened region. Only a whisker of height loss. As a body leaves,
+    // disturbed blades SPRING back with a decaying wobble (uWobble drives it).
+    // (note: 'flat' is a reserved GLSL keyword — never name a local that)
     float press = 0.0;
+    float wobbleAmt = 0.0;
     for (int i = 0; i < ${MAX_BODIES}; i++) {
       if (i >= uBodyCount) break;
       vec2 d = root - uBodies[i].xy;
       float dist = length(d);
       float rad = uBodies[i].z;
-      float infl = 1.0 - smoothstep(rad * 0.35, rad, dist);
+      // tight falloff: full only within ~0.55*rad, gone by rad
+      float infl = 1.0 - smoothstep(rad * 0.55, rad, dist);
       if (infl > 0.0) {
         vec2 push = (dist > 0.001 ? d / dist : vec2(1.0, 0.0));
-        // bend away from the body, stronger at the tip; mash height down
-        p.xz += push * infl * 0.7 * t;
+        // part sideways, stronger toward the tip; barely any height loss
+        p.xz += push * infl * 0.5 * t;
+        p.y *= 1.0 - infl * 0.12 * t; // just a slight bow, not a mash
         press = max(press, infl);
+        wobbleAmt = max(wobbleAmt, infl * uBodies[i].w);
       }
     }
-    p.y *= 1.0 - press * 0.6; // flattened blades lose height
+    // springy recovery: while wobble>0 (a body is/was near and moving) the
+    // blade bobs on a fast axis; wobble decays on the CPU so it settles
+    float spring = sin(uTime * 15.0 + aSeed.x * 6.2831 + root.x * 0.7) * wobbleAmt;
+    p.xz += uWindDir * spring * 0.18 * t;
+    p.y += abs(spring) * 0.08 * t;
     vFlat = press;
 
     vec3 world = vec3(root.x + p.x, p.y, root.y + p.z);
@@ -267,7 +279,7 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
       const n = Math.min(MAX_BODIES, list.length)
       for (let i = 0; i < n; i++) {
         const b = list[i]!
-        bodies[i]!.set(b.x, b.z, b.radius, 0)
+        bodies[i]!.set(b.x, b.z, b.radius, b.wobble)
       }
       material.uniforms.uBodyCount!.value = n
     },

@@ -238,8 +238,8 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
 
       // grass parts around the player + ball (sandbox test path)
       const bodies = []
-      if (players[0]!.y < 1.2) bodies.push({ x: px, z: pz, radius: 1.1 })
-      if (by < BALL_RADIUS + 1.2) bodies.push({ x: bx, z: bz, radius: BALL_RADIUS + 0.8 })
+      if (players[0]!.y < 1.0) bodies.push({ x: px, z: pz, radius: 0.7, wobble: 0.6 })
+      if (by < BALL_RADIUS + 0.6) bodies.push({ x: bx, z: bz, radius: BALL_RADIUS + 0.35, wobble: 0.6 })
       arenaView.setGrassBodies(bodies)
 
       camera.update(dt, px, py, pz)
