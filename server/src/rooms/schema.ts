@@ -25,6 +25,7 @@ export const PlayerState = schema(
     stamina: { type: 'float32', default: 100 },
     alive: { type: 'boolean', default: true },
     connected: { type: 'boolean', default: true },
+    bot: { type: 'boolean', default: false },
     lastSeq: { type: 'uint32', default: 0 },
     // loadout — revealed publicly at launch (empty until then)
     cardAbility: { type: 'string', default: '' },

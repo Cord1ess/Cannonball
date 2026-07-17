@@ -66,6 +66,8 @@ interface Session {
   aim: number // launch aim offset, radians
   picks: Partial<Record<CardPool, string>>
   offers: Record<CardPool, string[]> | null
+  isBot: boolean
+  bot?: { wanderX: number; wanderZ: number; wanderT: number }
 }
 
 export class MatchRoom extends Room<{ state: MatchStateT }> {
@@ -178,6 +180,18 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       this.broadcast('emote', { seat: session.sim.seat, id })
     })
 
+    this.onMessage('addBot', (client) => {
+      if (this.#phase !== Phase.Lobby || client.sessionId !== this.state.hostSessionId) return
+      this.#addBot()
+    })
+
+    this.onMessage('fillBots', (client) => {
+      if (this.#phase !== Phase.Lobby || client.sessionId !== this.state.hostSessionId) return
+      while (this.#addBot()) {
+        /* fill every free seat */
+      }
+    })
+
     this.onMessage('rematch', (client) => {
       if (this.#phase !== Phase.End) return
       if (client.sessionId !== this.state.hostSessionId) return
@@ -231,6 +245,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       aim: 0,
       picks: {},
       offers: null,
+      isBot: false,
     })
 
     const ps = new PlayerState()
@@ -273,6 +288,110 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.state.players.forEach((p) => taken.add(p.seat))
     for (let seat = 0; seat < MAX_SEATS; seat++) if (!taken.has(seat)) return seat
     return -1
+  }
+
+  #addBot(): boolean {
+    const seat = this.#freeSeat()
+    if (seat === -1) return false
+    const id = `bot-${seat}-${Math.floor(this.#rng.next() * 1e6)}`
+    const sim = makePlayer(seat, 0, 0, 0)
+    this.#sessions.set(id, {
+      sim,
+      queue: [],
+      lastInput: { ...ZERO_INPUT },
+      lastSeq: 0,
+      aim: 0,
+      picks: {},
+      offers: null,
+      isBot: true,
+      bot: { wanderX: 0, wanderZ: 0, wanderT: 0 },
+    })
+    const ps = new PlayerState()
+    ps.sessionId = id
+    ps.seat = seat
+    ps.bot = true
+    this.state.players.set(id, ps)
+    console.log(`[room ${this.roomId}] bot -> seat ${seat}`)
+    return true
+  }
+
+  /**
+   * The M7 bot, pulled forward: roam your wedge; when the ball is in YOUR
+   * wedge (or sitting in the neutral disc and you're the nearest bean),
+   * charge it from the wall side, jump close, dive through it — the header
+   * clears it away from your wall. Dumb but alive.
+   */
+  #botInput(session: Session, dt: number): PlayerInputFrame {
+    const sim = session.sim
+    const bot = session.bot!
+    const ball = this.#ball
+    const zone = this.#zoneSeat.indexOf(sim.seat)
+    const ballZone = footprintZone(this.#arena, ball.x, ball.z)
+    const distToBall = Math.hypot(ball.x - sim.x, ball.z - sim.z)
+
+    let chase = ballZone >= 0 && this.#zoneSeat[ballZone] === sim.seat
+    if (!chase && ballZone === -1) {
+      // neutral ball: nearest alive bean takes initiative
+      let nearest = Infinity
+      let nearestSeat = -1
+      for (const other of this.#sessions.values()) {
+        if (!this.#alive[other.sim.seat]) continue
+        const d = Math.hypot(ball.x - other.sim.x, ball.z - other.sim.z)
+        if (d < nearest) {
+          nearest = d
+          nearestSeat = other.sim.seat
+        }
+      }
+      chase = nearestSeat === sim.seat
+    }
+
+    let tx: number
+    let tz: number
+    let jump = false
+    let dive = false
+    let sprint = false
+
+    if (chase && zone >= 0) {
+      const wallAngle = this.#arena.circle ? (zone === 0 ? 0 : Math.PI) : (this.#arena.wallAngles[zone] ?? 0)
+      const wx = Math.cos(wallAngle)
+      const wz = Math.sin(wallAngle)
+      const behindX = ball.x + wx * 2.4
+      const behindZ = ball.z + wz * 2.4
+      const distBehind = Math.hypot(behindX - sim.x, behindZ - sim.z)
+      if (distBehind > 1.4 && distToBall > 3.6) {
+        tx = behindX
+        tz = behindZ
+        sprint = distBehind > 7
+      } else {
+        tx = ball.x
+        tz = ball.z
+        jump = sim.grounded && distToBall < 5
+        dive = !sim.grounded && !sim.diving && distToBall < 4.2 && this.#rng.next() < 0.4
+      }
+    } else {
+      bot.wanderT -= dt
+      if (bot.wanderT <= 0) {
+        bot.wanderT = 1.5 + this.#rng.next() * 2.5
+        bot.wanderX = (this.#rng.next() - 0.5) * 7
+        bot.wanderZ = (this.#rng.next() - 0.5) * 7
+        if (this.#rng.next() < 0.12) jump = sim.grounded
+      }
+      const anchor = zoneAnchor(this.#arena, Math.max(zone, 0), 0.55)
+      tx = anchor.x + bot.wanderX
+      tz = anchor.z + bot.wanderZ
+    }
+
+    let dirX = tx - sim.x
+    let dirZ = tz - sim.z
+    const len = Math.hypot(dirX, dirZ)
+    if (len < 0.5) {
+      dirX = 0
+      dirZ = 0
+    } else {
+      dirX /= len
+      dirZ /= len
+    }
+    return { dirX, dirZ, jump, dive, sprint }
   }
 
   // --- phase transitions -----------------------------------------------------------
@@ -460,9 +579,9 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     const pauseTotal = this.#scale(halftime ? HALFTIME_PAUSE_S : RESTART_PAUSE_S)
     this.#enter(Phase.Restart, pauseTotal)
 
-    // eliminated player disconnected? auto-assign immediately
+    // eliminated bot or disconnected player? auto-assign immediately
     const elimSession = [...this.#sessions.values()].find((s) => s.sim.seat === elimSeat)
-    if (!elimSession) this.#autoAssignHandout()
+    if (!elimSession || elimSession.isBot) this.#autoAssignHandout()
   }
 
   /** timeout rule (idea.md §2): curse -> leader (lowest cumulative), advantage -> random other */
@@ -553,12 +672,16 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #stepPlay(dt: number): void {
     const sims: PlayerSim[] = []
     for (const session of this.#sessions.values()) {
-      const next = session.queue.shift()
-      if (next) {
-        session.lastInput = next
-        session.lastSeq = next.seq
+      if (session.isBot) {
+        session.lastInput = this.#alive[session.sim.seat] ? this.#botInput(session, dt) : { ...ZERO_INPUT }
       } else {
-        session.lastInput = { ...session.lastInput, jump: false, dive: false }
+        const next = session.queue.shift()
+        if (next) {
+          session.lastInput = next
+          session.lastSeq = next.seq
+        } else {
+          session.lastInput = { ...session.lastInput, jump: false, dive: false }
+        }
       }
       // the eliminated don't play (they emote from the stands)
       const input = this.#alive[session.sim.seat] ? session.lastInput : ZERO_INPUT

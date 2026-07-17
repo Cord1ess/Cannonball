@@ -100,11 +100,27 @@ export function createMatchUi(client: MatchClient): MatchUi {
         for (const p of client.players()) {
           const chip = document.createElement('div')
           chip.style.cssText = `background:${seatColor(p.seat)};color:#fffdf5;border-radius:8px;padding:6px 12px;font-weight:700;${p.connected ? '' : 'opacity:0.4;'}`
-          chip.textContent = `P${p.seat + 1}${p.sessionId === '' ? '' : ''}${p.seat === client.mySeat() ? ' (you)' : ''}`
+          chip.textContent = `${p.bot ? '🤖 ' : ''}P${p.seat + 1}${p.seat === client.mySeat() ? ' (you)' : ''}`
           list.appendChild(chip)
         }
         panel.appendChild(list)
         if (client.isHost()) {
+          const botRow = document.createElement('div')
+          botRow.style.cssText = 'display:flex;gap:8px;justify-content:center;margin-bottom:12px;'
+          const addBot = document.createElement('button')
+          addBot.textContent = '+ BOT'
+          addBot.style.cssText =
+            'font-size:13px;font-weight:800;background:#4fa3d8;color:#fff;border:0;border-radius:8px;padding:6px 14px;cursor:pointer;'
+          addBot.addEventListener('click', () => client.addBot())
+          const fillBots = document.createElement('button')
+          fillBots.textContent = 'FILL WITH BOTS'
+          fillBots.style.cssText =
+            'font-size:13px;font-weight:800;background:#9678c8;color:#fff;border:0;border-radius:8px;padding:6px 14px;cursor:pointer;'
+          fillBots.addEventListener('click', () => client.fillBots())
+          botRow.appendChild(addBot)
+          botRow.appendChild(fillBots)
+          panel.appendChild(botRow)
+
           const startButton = document.createElement('button')
           startButton.textContent = 'START MATCH'
           startButton.style.cssText =

@@ -31,6 +31,7 @@ export interface NetPlayerRead {
   stamina: number
   alive: boolean
   connected: boolean
+  bot: boolean
   lastSeq: number
   cardAbility: string
   cardEquipment: string

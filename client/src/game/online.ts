@@ -76,6 +76,7 @@ export interface MatchPlayerInfo {
   seat: number
   alive: boolean
   connected: boolean
+  bot: boolean
   cards: string[]
 }
 
@@ -96,6 +97,8 @@ export interface MatchClient {
   picks(): Partial<Record<CardPool, string>>
   aimAngle(): number
   start(): void
+  addBot(): void
+  fillBots(): void
   pick(pool: CardPool, index: number): void
   assign(advTo: number, curseTo: number): void
   rematch(): void
@@ -384,6 +387,7 @@ export function createOnlineGame(
           seat: p.seat,
           alive: p.alive,
           connected: p.connected,
+          bot: p.bot,
           cards: [p.cardAbility, p.cardEquipment, p.cardAdvantage].filter(Boolean),
         })
       })
@@ -402,6 +406,8 @@ export function createOnlineGame(
     picks: () => myPicks,
     aimAngle: () => myAim,
     start: () => conn.send('start'),
+    addBot: () => conn.send('addBot'),
+    fillBots: () => conn.send('fillBots'),
     pick(pool: CardPool, index: number): void {
       const id = draftOffers?.[pool]?.[index]
       if (id) myPicks[pool] = id
