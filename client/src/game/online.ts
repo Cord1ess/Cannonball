@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import {
+  BALL_GRAVITY,
   BALL_RADIUS,
+  BALL_RESTITUTION,
   DUEL_METER_CAPACITY_S,
   FIXED_DELTA,
   INTERP_DELAY_MS,
@@ -40,6 +42,7 @@ import type { WindMark } from '../render/windMarks.ts'
 import { createBallView, type BallView } from '../render/ballView.ts'
 import { createBean, type Bean } from '../render/bean.ts'
 import { createNameTag, type NameTag } from '../render/nameTag.ts'
+import { createZoneLabel, type ZoneLabel } from '../render/zoneLabel.ts'
 import { PALETTE } from '../render/palette.ts'
 import type { ChaseCamera } from './camera.ts'
 import type { DebugHooks } from './debug.ts'
@@ -164,6 +167,7 @@ export function createOnlineGame(
   // the colosseum is permanent — only its painted zone layer morphs
   const arenaView: ArenaView = createArenaView(arena.radius)
   scene.add(arenaView.group)
+  camera.setArenaRadius(arena.radius) // keep the chase cam inside the wall
   let arenaKey = ''
 
   const ballView: BallView = createBallView()
@@ -175,10 +179,11 @@ export function createOnlineGame(
   let myBean: Bean | null = null
   const myTag: NameTag = createNameTag()
   scene.add(myTag.sprite)
-  // one persistent owner label per zone (placed in the wedge, shows whose it is)
-  const zoneLabels: NameTag[] = Array.from({ length: 6 }, () => {
-    const t = createNameTag()
-    scene.add(t.sprite)
+  // one persistent owner label per zone, painted FLAT on the grass (reads as
+  // territory, not a floating player tag — those are the head name-tags)
+  const zoneLabels: ZoneLabel[] = Array.from({ length: 6 }, () => {
+    const t = createZoneLabel()
+    scene.add(t.mesh)
     return t
   })
   const selfSnaps: Snap[] = []
@@ -205,6 +210,7 @@ export function createOnlineGame(
   let simTime = 0
   // the wind this frame, exposed for HUD/streak/direction-line consumers
   const currentWind: WindState = { x: 1, z: 0, gust: 0, force: 0 }
+  let alarmPulse = 0 // >0 when the ball is in MY zone (drives the blink + prompt)
   // pooled grass bodies — reused each frame so the hot path never allocates
   // grass bodies: pooled + per-key wobble state so blades spring back after a
   // body passes. wobble ramps up with movement speed and decays each frame.
@@ -672,7 +678,27 @@ export function createOnlineGame(
         renderOffset.x = renderOffset.y = renderOffset.z = 0
       }
       wasPredicting = isPredicting
-      if (!isPredicting) return
+      if (!isPredicting) {
+        // SPECTATING (or pre-play): we don't run the full sim, but the ball
+        // must still move smoothly between 30Hz patches. Integrate it locally
+        // from the server velocity + gravity, and ease toward server truth,
+        // so a spectated ball glides instead of stuttering patch-to-patch.
+        if (isPlayPhase(phase)) {
+          prevBall.x = ball.x
+          prevBall.y = ball.y
+          prevBall.z = ball.z
+          ball.vy -= BALL_GRAVITY * dt
+          ball.x += ball.vx * dt
+          ball.y += ball.vy * dt
+          ball.z += ball.vz * dt
+          if (ball.y < BALL_RADIUS) {
+            ball.y = BALL_RADIUS
+            if (ball.vy < 0) ball.vy = -ball.vy * BALL_RESTITUTION
+          }
+          blendBallToServer(dt)
+        }
+        return
+      }
 
       // M4: self-prediction uses the SAME modifier stack as the server
       const meNow = state.players.get(conn.sessionId)
@@ -877,8 +903,17 @@ export function createOnlineGame(
       }
       arenaView.setDanger(fracs)
 
-      // zone-owner labels: one floating tag per wedge, near its wall, showing
-      // whose zone it is + colored by that owner — the primary "who owns what".
+      // OWN-ZONE ALARM: ball sitting in MY wedge -> blink that wedge + prompt
+      const ballZone = footprintZone(arena, ball.x, ball.z)
+      const myZoneUnderBall =
+        ballZone >= 0 && zoneSeatArr?.[ballZone] === mySeat && aliveOf(mySeat) && isPlayPhase(state.phase ?? 0)
+      alarmPulse = myZoneUnderBall
+        ? 0.5 + 0.5 * Math.sin((performance.now() / 1000) * 9) // fast blink
+        : 0
+      arenaView.setAlarm(myZoneUnderBall ? ballZone : -1, alarmPulse)
+
+      // zone-owner labels: name painted FLAT on the grass in each wedge, so
+      // it reads as territory (not a floating player tag).
       const zoneCount = zoneSeatArr?.length ?? 0
       const showZoneLabels = isPlayPhase(state.phase ?? 0)
       for (let i = 0; i < zoneLabels.length; i++) {
@@ -890,9 +925,8 @@ export function createOnlineGame(
         const seat = zoneSeatArr[i] ?? 0
         const owner = playerNameOf(seat)
         label.set(owner, toHex(seatColors[seat] ?? 0x888888))
-        const a = zoneAnchor(arena, i, 0.86) // out near the wall of this wedge
-        // place() adds +2.55 internally; pass a low base so it floats ~1.3m up
-        label.place(a.x, -1.25, a.z)
+        const a = zoneAnchor(arena, i, 0.62) // mid-wedge, flat on the grass
+        label.place(a.x, a.z)
         label.setVisible(true)
       }
 

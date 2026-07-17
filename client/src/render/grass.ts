@@ -45,6 +45,8 @@ export interface GrassField {
   readonly mesh: THREE.Mesh
   setZones(zoneCount: number, zoneColors: readonly number[]): void
   setDanger(fracs: readonly number[]): void
+  /** blink a zone red (ball in your own wedge); zone=-1 off, pulse 0..1 */
+  setAlarm(zone: number, pulse: number): void
   /** feed the bodies that flatten grass this frame (players + ball) */
   setBodies(bodies: readonly GrassBody[]): void
   /** feed the active localized gust cells this frame */
@@ -91,31 +93,38 @@ const VERT = /* glsl */ `
     p.x += s * curl * t * t;
     p.z += c * curl * t * t;
 
-    // --- wind = gentle AMBIENT breeze + LOCALIZED travelling gust cells ----
-    // 1) subtle ambient sway so the field is never dead-still (small!)
+    // --- wind = livelier AMBIENT breeze + FEATHERED travelling gust cells ---
+    // 1) ambient sway — bigger now so the idle field visibly breathes; two
+    //    slow waves + per-blade random phase keep it from reading as one sine
     float amb = uTime * 0.9 + root.x * 0.15 + root.y * 0.11;
-    float ambSway = (sin(amb) * 0.5 + sin(amb * 0.43 + 1.7) * 0.3);
-    // a touch of per-blade random phase so it's not one clean sine
-    float jitter = sin(uTime * 6.0 + aSeed.x * 25.13) * 0.25;
-    p.xz += uWindDir * (0.06 + ambSway * 0.05 + jitter * 0.02) * t * t;
+    float ambSway = (sin(amb) * 0.5 + sin(amb * 0.43 + 1.7) * 0.35);
+    float jitter = sin(uTime * 5.0 + aSeed.x * 25.13) * 0.5 + sin(uTime * 3.1 + aSeed.x * 11.7) * 0.3;
+    p.xz += uWindDir * (0.09 + ambSway * 0.14 + jitter * 0.05) * t * t;
 
     // 2) GUST CELLS: each is a moving disc; where it overlaps THIS blade it
-    //    bends it hard downwind + a swirl, tapering with distance. Grass only
-    //    moves where a gust actually passes — localized, appears/disappears.
+    //    bends it downwind. FEATHERED — a long soft falloff so the leading and
+    //    trailing edges of the gust zone smooth out (no sharp ring). DELAYED —
+    //    the bend responds behind the cell center, as if the wind is pushing
+    //    the grass over rather than teleporting it.
     for (int gi = 0; gi < ${MAX_GUSTS}; gi++) {
       if (gi >= uGustCount) break;
       vec2 gc = uGusts[gi].xy;
       float grad = uGusts[gi].z;
       float gstr = uGusts[gi].w;
-      float gd = distance(root, gc);
-      float infl = (1.0 - smoothstep(grad * 0.35, grad, gd)) * gstr;
+      // sample the cell's influence a bit UPWIND of the blade so the push
+      // trails the gust front (delay): shift the compare point backwards
+      vec2 delayed = root - uWindDir * grad * 0.28;
+      float gd = distance(delayed, gc);
+      // long feathered falloff: full only deep inside, fading way out to 1.15*r
+      float infl = (1.0 - smoothstep(grad * 0.15, grad * 1.15, gd)) * gstr;
+      // extra smooth shoulder (smoothstep of smoothstep) softens both edges
+      infl = infl * infl * (3.0 - 2.0 * infl);
       if (infl > 0.0) {
-        // random-ish swirl direction per cell + per-blade so it's not linear
-        float swirl = sin(gd * 1.3 - uTime * 5.0 + aSeed.x * 6.2831) * 0.4;
+        float swirl = sin(gd * 1.1 - uTime * 4.0 + aSeed.x * 6.2831) * 0.35;
         vec2 gdir = normalize(uWindDir + vec2(-uWindDir.y, uWindDir.x) * swirl);
-        float bend = infl * 1.1 * t * t;
+        float bend = infl * 1.15 * t * t;
         p.xz += gdir * bend;
-        p.y *= 1.0 - infl * 0.18 * t; // bows over as it's hit
+        p.y *= 1.0 - infl * 0.16 * t; // bows over as it's hit
       }
     }
 
@@ -166,6 +175,8 @@ const FRAG = /* glsl */ `
   uniform float uRadius;
   uniform vec3 uZoneColors[${MAX_ZONES}];
   uniform float uDanger[${MAX_ZONES}];
+  uniform float uAlarmZone; // -1 = none, else the zone index that blinks
+  uniform float uAlarmPulse; // 0..1 blink phase
 
   varying float vT;
   varying float vColorVar;
@@ -219,6 +230,12 @@ const FRAG = /* glsl */ `
     float ownEdge = smoothstep(uNeutralR, uRadius * 0.9, r);
     col = mix(col, ownerCol, 0.16 * ownEdge);
     col = mix(col, vec3(0.82, 0.20, 0.16), danger * 0.45);
+
+    // ALARM: when the ball is in the LOCAL player's own zone, that whole wedge
+    // BLINKS bright red so it's impossible to miss "get the ball out of here".
+    if (uAlarmZone >= 0.0 && float(zone) == uAlarmZone) {
+      col = mix(col, vec3(0.95, 0.15, 0.12), uAlarmPulse * 0.6 * (0.3 + ownEdge * 0.7));
+    }
 
     // chalk: zone division lines + neutral ring — wobbly width, grainy fill.
     // The BOUNDARY between zone i and i+1 is at (i+0.5)*span (zones are
@@ -297,6 +314,8 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
       uRadius: { value: radius },
       uZoneColors: { value: zoneColors },
       uDanger: { value: new Array(MAX_ZONES).fill(0) },
+      uAlarmZone: { value: -1 },
+      uAlarmPulse: { value: 0 },
       uBodies: { value: bodies },
       uBodyCount: { value: 0 },
       uGusts: { value: gusts },
@@ -318,6 +337,10 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
     setDanger(fracs: readonly number[]): void {
       const danger = material.uniforms.uDanger!.value as number[]
       for (let i = 0; i < MAX_ZONES; i++) danger[i] = Math.min(1, fracs[i] ?? 0)
+    },
+    setAlarm(zone: number, pulse: number): void {
+      material.uniforms.uAlarmZone!.value = zone
+      material.uniforms.uAlarmPulse!.value = pulse
     },
     setBodies(list: readonly GrassBody[]): void {
       const n = Math.min(MAX_BODIES, list.length)

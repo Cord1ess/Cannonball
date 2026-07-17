@@ -25,6 +25,8 @@ export interface ArenaView {
   setZones(arena: Arena, zoneColors: readonly number[]): void
   /** meterFrac per zone [0..1] heats that wedge's grass */
   setDanger(fracs: readonly number[]): void
+  /** blink one zone red (ball in your own wedge); zone=-1 off, pulse 0..1 */
+  setAlarm(zone: number, pulse: number): void
   /** bodies (players + ball) that flatten/part the grass this frame */
   setGrassBodies(bodies: readonly GrassBody[]): void
   /** advance the wind field, grass, and streaks (self-driven gust cells) */
@@ -442,6 +444,10 @@ export function createArenaView(radius = 28): ArenaView {
 
     setDanger(fracs: readonly number[]): void {
       grass.setDanger(fracs)
+    },
+
+    setAlarm(zone: number, pulse: number): void {
+      grass.setAlarm(zone, pulse)
     },
 
     setGrassBodies(list: readonly GrassBody[]): void {

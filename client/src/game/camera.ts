@@ -13,9 +13,16 @@ export class ChaseCamera {
   #pos = new THREE.Vector3(0, 4, -9)
   #look = new THREE.Vector3()
   #shake = 0
+  /** arena bound so the camera never passes through the stadium wall */
+  #boundR = 999
 
   constructor(camera: THREE.PerspectiveCamera) {
     this.#camera = camera
+  }
+
+  /** the interior radius the camera must stay inside (a bit past the wall) */
+  setArenaRadius(r: number): void {
+    this.#boundR = r + 3.5
   }
 
   addMouse(dx: number, dy: number): void {
@@ -50,9 +57,35 @@ export class ChaseCamera {
     const fx = this.forwardX
     const fz = this.forwardZ
 
-    const wantX = tx - fx * dist
+    let wantX = tx - fx * dist
     const wantY = ty + height
-    const wantZ = tz - fz * dist
+    let wantZ = tz - fz * dist
+
+    // WALL GUARD: if the desired camera spot is outside the arena bound, pull
+    // it in along the player->camera direction so it never enters the wall —
+    // the camera simply sits closer to the player at the edges.
+    const wantR = Math.hypot(wantX, wantZ)
+    if (wantR > this.#boundR) {
+      // shorten the boom until the camera is back inside the bound. Solve for
+      // the largest d' <= dist such that |target - forward*d'| <= boundR.
+      const px = tx
+      const pz = tz
+      // quadratic in d: |(px,pz) - (fx,fz)*d|^2 = boundR^2
+      const bDot = px * fx + pz * fz
+      const c = px * px + pz * pz - this.#boundR * this.#boundR
+      const disc = bDot * bDot - c
+      if (disc > 0) {
+        const dClamp = Math.max(1.5, Math.min(dist, bDot - Math.sqrt(disc)))
+        wantX = tx - fx * dClamp
+        wantZ = tz - fz * dClamp
+      } else {
+        // target itself near the edge — just clamp radially
+        const s = this.#boundR / wantR
+        wantX *= s
+        wantZ *= s
+      }
+    }
+
     const k = 1 - Math.exp(-14 * dt)
     this.#pos.x += (wantX - this.#pos.x) * k
     this.#pos.y += (wantY - this.#pos.y) * k
