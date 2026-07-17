@@ -28,6 +28,8 @@ export function tickLosers(meters: readonly number[], alive: readonly boolean[])
   for (let seat = 0; seat < meters.length; seat++) {
     if (alive[seat] && (meters[seat] ?? 0) > max) max = meters[seat] ?? 0
   }
+  // nothing accrued anywhere -> nobody deserves elimination this tick
+  if (max <= TIE_EPSILON_S) return []
   const losers: number[] = []
   for (let seat = 0; seat < meters.length; seat++) {
     if (alive[seat] && max - (meters[seat] ?? 0) < TIE_EPSILON_S) losers.push(seat)

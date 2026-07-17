@@ -219,7 +219,9 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       this.#tickRemaining = TICK_SECONDS_PER_SURVIVOR * SEATS
 
       const aliveOccupied = occupiedAlive.filter((v, seat) => v && seat !== loser).length
-      if (aliveOccupied <= 1 && this.#sessions.size > 1) this.#resetRound()
+      // reset when the round is decided — or when literally nobody is left
+      // (solo tester who eliminated themselves must always come back)
+      if (aliveOccupied === 0 || (aliveOccupied <= 1 && this.#sessions.size > 1)) this.#resetRound()
     }
 
     // 4. mirror sim -> schema (delta-patched to clients at 20Hz)
