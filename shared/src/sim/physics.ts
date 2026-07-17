@@ -31,7 +31,6 @@ import {
   STAMINA_REGEN,
   DIVE_COST,
   TURN_RATE,
-  WIND_ENABLED,
   WIND_GUST_DURATION_S,
   WIND_GUST_PERIOD_S,
 } from '../constants.ts'
@@ -293,7 +292,6 @@ export interface WindRng {
 }
 
 export function stepWind(wind: Wind, rng: WindRng, strength: number, ball: BallSim, dt: number): void {
-  if (!WIND_ENABLED) return
   if (wind.timeLeft > 0) {
     wind.timeLeft -= dt
     ball.vx += wind.x * strength * dt
@@ -432,23 +430,30 @@ export function interactBallPlayers(
       continue
     }
 
-    // SLOW BALL: heavy — separate, tiny nudge, and it blocks the player
-    ball.x = p.x + cnx * contact
-    ball.z = p.z + cnz * contact
+    // SLOW BALL: heavy — SOFT separation. Never teleport the ball out of
+    // overlap (position snapping is exactly the dragging jitter): ease it
+    // apart over a few steps and let it yield at the pusher's speed.
+    const overlap = contact - dist
+    const push = Math.min(overlap, 6 * dt)
+    ball.x += cnx * push
+    ball.z += cnz * push
+    // the player also gives a little, so deep overlaps can't happen
+    p.x -= cnx * Math.min(overlap * 0.3, 3 * dt)
+    p.z -= cnz * Math.min(overlap * 0.3, 3 * dt)
+
+    const pInto = p.vx * cnx + p.vz * cnz
     const outward = ball.vx * cnx + ball.vz * cnz
-    const minOut = 1.2
-    if (outward < minOut) {
-      ball.vx += cnx * (minOut - outward) * 0.5
-      ball.vz += cnz * (minOut - outward) * 0.5
+    if (pInto > 0 && outward < pInto) {
+      // ball rolls away just ahead of you — smooth dragging, no pulsing
+      const boost = (pInto - outward) * 0.8
+      ball.vx += cnx * boost
+      ball.vz += cnz * boost
+      // pushing two tons of ball slows you down
+      p.vx -= cnx * pInto * 0.35
+      p.vz -= cnz * pInto * 0.35
     }
     ball.vx += cnx * BODY_NUDGE_FORCE * dt
     ball.vz += cnz * BODY_NUDGE_FORCE * dt
-    // pushing two tons of ball slows you down
-    const pInto = p.vx * cnx + p.vz * cnz
-    if (pInto > 0) {
-      p.vx -= cnx * pInto * 0.6
-      p.vz -= cnz * pInto * 0.6
-    }
   }
 }
 

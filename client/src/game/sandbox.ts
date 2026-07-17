@@ -1,10 +1,12 @@
 import * as THREE from 'three'
 import {
+  BALL_RADIUS,
   FIXED_DELTA,
   SPRINT_SPEED,
   STAMINA_MAX,
   TICK_SECONDS_PER_SURVIVOR,
   WIND_BASE_STRENGTH,
+  WIND_ENABLED,
   WIND_STEP_PER_ELIMINATION,
 } from '@shared/constants.ts'
 import { footprintZone, makeArena, yawTowardCenter, zoneAnchor, type Arena } from '@shared/sim/arena.ts'
@@ -31,6 +33,7 @@ import { createBallView, type BallView } from '../render/ballView.ts'
 import { createBean, type Bean } from '../render/bean.ts'
 import { PALETTE } from '../render/palette.ts'
 import type { ChaseCamera } from './camera.ts'
+import type { DebugHooks } from './debug.ts'
 import type { Hud, HudZone } from './hud.ts'
 
 /**
@@ -67,6 +70,7 @@ export interface Sandbox {
   tickRemaining: number
   ballAlarm(): boolean
   staminaFrac(): number
+  readonly debug: DebugHooks
 }
 
 export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud): Sandbox {
@@ -80,6 +84,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
   let survivors = SEATS
   let eliminations = 0
   let gameOver = false
+  let windOn = WIND_ENABLED
 
   const players: PlayerSim[] = []
   const beans: Bean[] = []
@@ -152,7 +157,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
         dummy.yaw = Math.atan2(ball.x - dummy.x, ball.z - dummy.z)
       }
 
-      stepWind(wind, rng, WIND_BASE_STRENGTH + eliminations * WIND_STEP_PER_ELIMINATION, ball, dt)
+      if (windOn) stepWind(wind, rng, WIND_BASE_STRENGTH + eliminations * WIND_STEP_PER_ELIMINATION, ball, dt)
       stepBall(ball, arena, dt, events)
       collidePlayers(players, alive, events)
       interactBallPlayers(ball, players, alive, dt, events)
@@ -250,6 +255,37 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
 
     staminaFrac(): number {
       return players[0]!.stamina / STAMINA_MAX
+    },
+
+    debug: {
+      label: 'offline sandbox',
+      send(cmd: string): void {
+        const player = players[0]!
+        if (cmd === 'resetRound') sandbox.reset()
+        else if (cmd === 'resetBall') resetBall(ball)
+        else if (cmd === 'ballToMe') {
+          ball.x = player.x + Math.sin(player.yaw) * 5
+          ball.z = player.z + Math.cos(player.yaw) * 5
+          ball.y = BALL_RADIUS + 3
+          ball.vx = ball.vy = ball.vz = 0
+        } else if (cmd === 'windToggle') windOn = !windOn
+        else if (cmd === 'elimMe') {
+          gameOver = true
+          hud.showEnd('ELIMINATED (debug)\npress R to run it back')
+        }
+      },
+      info(): Record<string, string | number> {
+        const player = players[0]!
+        return {
+          survivors,
+          tick: sandbox.tickRemaining.toFixed(1),
+          wind: windOn ? 'on' : 'off',
+          stamina: player.stamina.toFixed(0),
+          me: `${player.x.toFixed(1)}, ${player.z.toFixed(1)}`,
+          ball: `${ball.x.toFixed(1)}, ${ball.z.toFixed(1)} y${ball.y.toFixed(1)}`,
+          ballSpeed: Math.hypot(ball.vx, ball.vz).toFixed(1),
+        }
+      },
     },
   }
 

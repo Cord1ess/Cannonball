@@ -1,11 +1,13 @@
 import { Room, type Client } from 'colyseus'
 import {
+  BALL_RADIUS,
   FIXED_DELTA,
   GRACE_SECONDS,
   PATCH_HZ,
   PLAYERS_MAX,
   TICK_SECONDS_PER_SURVIVOR,
   WIND_BASE_STRENGTH,
+  WIND_ENABLED,
   WIND_STEP_PER_ELIMINATION,
 } from '../../../shared/src/constants.ts'
 import { footprintZone, makeArena, yawTowardCenter, zoneAnchor } from '../../../shared/src/sim/arena.ts'
@@ -64,6 +66,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #zoneSeat: number[] = [0, 1, 2, 3, 4, 5] // fixed hexagon in M2
   #meters: number[] = new Array(SEATS).fill(0)
   #tickRemaining = TICK_SECONDS_PER_SURVIVOR * SEATS
+  #windOn = WIND_ENABLED
 
   override onCreate(): void {
     this.setState(new MatchState())
@@ -71,6 +74,37 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     for (let seat = 0; seat < SEATS; seat++) this.state.meters.push(0)
     this.state.tickRemaining = this.#tickRemaining
     this.setPatchRate(1000 / PATCH_HZ) // ball & player positions matter: 30Hz
+
+    // dev/debug commands — every client may drive these during the jam build
+    this.onMessage('debug', (client, message: { cmd?: string }) => {
+      const session = this.#sessions.get(client.sessionId)
+      switch (message?.cmd) {
+        case 'resetRound':
+          this.#resetRound()
+          break
+        case 'resetBall':
+          resetBall(this.#ball)
+          break
+        case 'ballToMe':
+          if (session) {
+            this.#ball.x = session.sim.x + Math.sin(session.sim.yaw) * 5
+            this.#ball.z = session.sim.z + Math.cos(session.sim.yaw) * 5
+            this.#ball.y = BALL_RADIUS + 3
+            this.#ball.vx = this.#ball.vy = this.#ball.vz = 0
+          }
+          break
+        case 'windToggle':
+          this.#windOn = !this.#windOn
+          break
+        case 'elimMe':
+          if (session) {
+            this.#alive[session.sim.seat] = false
+            this.broadcast('elim', { seat: session.sim.seat })
+          }
+          break
+      }
+      console.log(`[room ${this.roomId}] debug: ${message?.cmd} from ${client.sessionId}`)
+    })
 
     this.onMessage('input', (client, message: NetInput) => {
       const session = this.#sessions.get(client.sessionId)
@@ -160,7 +194,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
 
     // 2. world
     const strength = WIND_BASE_STRENGTH + this.#eliminations * WIND_STEP_PER_ELIMINATION
-    stepWind(this.#wind, this.#rng, strength, this.#ball, dt)
+    if (this.#windOn) stepWind(this.#wind, this.#rng, strength, this.#ball, dt)
     stepBall(this.#ball, this.#arena, dt, this.#events)
     collidePlayers(sims, this.#alive, this.#events)
     interactBallPlayers(this.#ball, sims, this.#alive, dt, this.#events)
@@ -244,10 +278,12 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     ball.vy = this.#ball.vy
     ball.vz = this.#ball.vz
 
-    this.state.windX = this.#wind.timeLeft > 0 ? this.#wind.x : 0
-    this.state.windZ = this.#wind.timeLeft > 0 ? this.#wind.z : 0
-    this.state.windStrength =
-      this.#wind.timeLeft > 0 ? WIND_BASE_STRENGTH + this.#eliminations * WIND_STEP_PER_ELIMINATION : 0
+    const windLive = this.#windOn && this.#wind.timeLeft > 0
+    this.state.windX = windLive ? this.#wind.x : 0
+    this.state.windZ = windLive ? this.#wind.z : 0
+    this.state.windStrength = windLive
+      ? WIND_BASE_STRENGTH + this.#eliminations * WIND_STEP_PER_ELIMINATION
+      : 0
     this.state.tickRemaining = this.#tickRemaining
     this.state.survivors = this.#alive.filter(Boolean).length
     for (let seat = 0; seat < SEATS; seat++) this.state.meters[seat] = this.#meters[seat] ?? 0

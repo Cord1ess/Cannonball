@@ -25,6 +25,7 @@ import { createBallView, type BallView } from '../render/ballView.ts'
 import { createBean, type Bean } from '../render/bean.ts'
 import { PALETTE } from '../render/palette.ts'
 import type { ChaseCamera } from './camera.ts'
+import type { DebugHooks } from './debug.ts'
 import type { Hud, HudZone } from './hud.ts'
 import type { Connection } from '../net/connection.ts'
 import { SEAT_COLORS } from './sandbox.ts'
@@ -69,6 +70,7 @@ export interface OnlineGame {
   readonly tickRemaining: number
   ballAlarm(): boolean
   staminaFrac(): number
+  readonly debug: DebugHooks
 }
 
 export function createOnlineGame(
@@ -112,6 +114,8 @@ export function createOnlineGame(
 
   // --- server time estimate ---------------------------------------------------------
   let timeOffset: number | null = null // serverTime - performance.now()/1000
+  let lastPatchAt = 0
+  const serverMe = { x: 0, y: 0, z: 0, has: false }
 
   function ensureLocal(): void {
     if (localSim) return
@@ -127,6 +131,7 @@ export function createOnlineGame(
 
   conn.room.onStateChange(() => {
     ensureLocal()
+    lastPatchAt = performance.now()
 
     const nowS = performance.now() / 1000
     const measured = state.serverTime - nowS
@@ -134,6 +139,12 @@ export function createOnlineGame(
 
     // --- reconcile local player -------------------------------------------------
     const me = state.players.get(conn.sessionId)
+    if (me) {
+      serverMe.x = me.x
+      serverMe.y = me.y
+      serverMe.z = me.z
+      serverMe.has = true
+    }
     if (me && localSim) {
       const beforeX = localSim.x
       const beforeY = localSim.y
@@ -407,6 +418,37 @@ export function createOnlineGame(
 
     staminaFrac(): number {
       return (localSim?.stamina ?? STAMINA_MAX) / STAMINA_MAX
+    },
+
+    debug: {
+      label: 'online',
+      send(cmd: string): void {
+        conn.send('debug', { cmd })
+      },
+      info(): Record<string, string | number> {
+        const offMag = Math.hypot(renderOffset.x, renderOffset.y, renderOffset.z)
+        const corrMag = Math.hypot(ballCorr.x, ballCorr.y, ballCorr.z)
+        return {
+          session: conn.sessionId,
+          seat: mySeat,
+          players: state.players?.size ?? 0,
+          seq,
+          buffered: inputBuffer.length,
+          renderOff: `${offMag.toFixed(3)}m`,
+          ballCorr: `${corrMag.toFixed(3)}m`,
+          patchAge: `${(performance.now() - lastPatchAt).toFixed(0)}ms`,
+          offset: timeOffset === null ? 'n/a' : `${timeOffset.toFixed(3)}s`,
+          me: localSim ? `${localSim.x.toFixed(1)}, ${localSim.z.toFixed(1)}` : 'n/a',
+          ball: `${ball.x.toFixed(1)}, ${ball.z.toFixed(1)} y${ball.y.toFixed(1)}`,
+        }
+      },
+      ghosts(draw): void {
+        if (serverMe.has) {
+          draw.wireBox(serverMe.x, serverMe.y + 0.7, serverMe.z, 0.45, 0.7, 0.45, 1, 0, 1)
+        }
+        draw.wireSphere(serverBall.x, serverBall.y, serverBall.z, BALL_RADIUS, 0, 1, 1)
+        draw.line(ball.x, ball.y, ball.z, serverBall.x, serverBall.y, serverBall.z, 1, 1, 0)
+      },
     },
   }
 }

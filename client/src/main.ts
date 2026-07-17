@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { Time } from '@vendor/scheduler/time.ts'
 import { isPointerLocked, requestPointerLock } from '@vendor/platform/fullscreen.ts'
 import { ChaseCamera } from './game/camera.ts'
+import { createDebugPanel } from './game/debug.ts'
 import { createHud } from './game/hud.ts'
 import { createGameInput } from './game/input.ts'
 import { createOnlineGame, type OnlineGame } from './game/online.ts'
@@ -66,6 +67,8 @@ if (wantOffline) {
   }
 }
 
+const debugPanel = createDebugPanel(renderer, scene, game.debug)
+
 renderer.domElement.addEventListener('click', () => {
   if (!isPointerLocked(document)) void requestPointerLock(renderer.domElement)
 })
@@ -115,6 +118,8 @@ function frame(nowMs: number): void {
     stamina: game.staminaFrac(),
     locked,
   })
+
+  debugPanel.update(time.unscaledDelta)
 
   renderer.clear()
   renderer.render(scene, camera3)

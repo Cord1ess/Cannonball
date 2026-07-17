@@ -50,7 +50,7 @@ export function createBallView(): BallView {
         const dz = z - last.z
         const dist = Math.hypot(dx, dz)
         const grounded = y < BALL_RADIUS + 0.08
-        if (grounded && dist > 1e-5) {
+        if (grounded && dist > 2e-3) {
           rollAxis.set(dz, 0, -dx).normalize() // up x velocity
           const angle = dist / BALL_RADIUS
           q.setFromAxisAngle(rollAxis, angle)
