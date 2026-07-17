@@ -50,8 +50,11 @@ export async function connect(): Promise<Connection> {
 
   const client = new Client(endpoint)
   const params = new URLSearchParams(location.search)
-  const fresh = params.has('fresh')
-  const roomOptions = params.has('fast') ? { fast: true } : {}
+  // dev implies fresh: every reload is a brand-new instant arena, never a
+  // reconnect into a spectator seat
+  const fresh = params.has('fresh') || params.has('dev')
+  // dev implies fast: restart pauses shrink too while iterating
+  const roomOptions = params.has('fast') || params.has('dev') ? { fast: true } : {}
 
   let room: Room | null = null
 

@@ -227,6 +227,12 @@ export function createOnlineGame(
 
   const predicting = (): boolean => isPlayPhase(state.phase ?? 0) && aliveOf(mySeat) && localSim !== null
 
+  // ?dev: reload-and-play — the room jumps straight to a live 6-bean arena,
+  // and does so again every time it falls back to the lobby
+  const devMode = new URLSearchParams(location.search).has('dev')
+  let lastPhaseSeen = -1
+  if (devMode) conn.send('debug', { cmd: 'instantArena' })
+
   function aliveOf(seat: number): boolean {
     let alive = false
     state.players.forEach((p) => {
@@ -277,6 +283,11 @@ export function createOnlineGame(
   }
 
   conn.room.onStateChange(() => {
+    const phaseNow = state.phase ?? 0
+    if (devMode && phaseNow === Phase.Lobby && lastPhaseSeen > Phase.Lobby) {
+      conn.send('debug', { cmd: 'instantArena' })
+    }
+    lastPhaseSeen = phaseNow
     // identity colors first — the arena/bean paths below read them
     state.players.forEach((p: NetPlayerRead) => {
       seatColors[p.seat] = kitOf(p).primary

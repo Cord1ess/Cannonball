@@ -64,6 +64,21 @@ room.send('debug', { cmd: 'freeze' })
 await waitFor(() => (read(room).tickRemaining ?? 99) < t1 - 0.2, 'clock resumed')
 console.log('[smoke-debug] freeze: clock stopped and resumed')
 
+// instantArena: one message = full live arena (the ?dev reload path)
+const client2 = new Client(endpoint)
+const room2 = await client2.create('match')
+room2.onMessage('*', () => {})
+await waitFor(() => read(room2).players?.size === 1, 'second room joined')
+const sentAt = Date.now()
+room2.send('debug', { cmd: 'instantArena' })
+await waitFor(
+  () => read(room2).phase === 3 && read(room2).players?.size === 6 && read(room2).survivors === 6,
+  'instant live arena',
+  4000,
+)
+console.log(`[smoke-debug] instantArena: live 6-bean arena in ${Date.now() - sentAt}ms`)
+await room2.leave()
+
 clearTimeout(timeout)
 console.log('[smoke-debug] PASS')
 await room.leave()

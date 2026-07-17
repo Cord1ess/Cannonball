@@ -50,7 +50,7 @@ export function createDebugPanel(
   // --- DOM panel -------------------------------------------------------------------
   const panel = document.createElement('div')
   panel.style.cssText =
-    'position:fixed;top:10px;right:10px;width:250px;background:#1c1a18e0;color:#f2eddc;' +
+    'position:fixed;top:10px;left:10px;width:250px;background:#1c1a18e0;color:#f2eddc;' +
     'font:11px/1.5 ui-monospace,monospace;padding:10px;border-radius:8px;display:none;' +
     'pointer-events:auto;z-index:50;user-select:none;'
   document.body.appendChild(panel)
@@ -87,7 +87,8 @@ export function createDebugPanel(
   panel.appendChild(stats)
 
   const help = document.createElement('div')
-  help.textContent = '` panel · G ghosts · ?lag=100 · ?offline · ?fresh · ?fast (0.15x timers)'
+  help.textContent =
+    '` panel · G ghosts · ?dev (reload = instant live arena) · ?fast (0.15x timers) · ?lag=100 · ?offline · ?fresh'
   help.style.cssText = 'margin-top:6px;color:#9b948a;'
   panel.appendChild(help)
 

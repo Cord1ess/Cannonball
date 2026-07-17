@@ -253,6 +253,9 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
         case 'skipPhase':
           this.#debugSkipPhase()
           break
+        case 'instantArena':
+          this.#debugInstantArena()
+          break
         case 'botPlus':
           this.#debugAddBotLive()
           break
@@ -922,6 +925,36 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
         this.#toLobby()
         break
     }
+  }
+
+  /** reload-and-play (?dev): lobby or end screen -> LIVE arena, zero waits.
+   *  Bots fill every seat, draft auto-picks, the launch is skipped entirely —
+   *  everyone starts standing in their wedge with the ball centered. */
+  #debugInstantArena(): void {
+    if (this.#phase === Phase.End) this.#toLobby()
+    if (this.#phase !== Phase.Lobby) return
+    while (this.#addBot()) {
+      /* fill every free seat */
+    }
+    this.#startMatch()
+    this.#finishDraft() // auto-picks + morph; leaves us parked at the cannons
+    for (const session of this.#sessions.values()) {
+      const sim = session.sim
+      if (!this.#alive[sim.seat]) continue
+      const zone = this.#zoneSeat.indexOf(sim.seat)
+      const anchor = zoneAnchor(this.#arena, Math.max(zone, 0), 0.65)
+      sim.x = anchor.x
+      sim.z = anchor.z
+      sim.y = 0
+      sim.vx = sim.vy = sim.vz = 0
+      sim.grounded = true
+      sim.diving = false
+      sim.yaw = yawTowardCenter(anchor.x, anchor.z)
+    }
+    resetBall(this.#ball)
+    this.#tickRemaining = this.#scale(tickInterval(this.#survivors))
+    this.#enter(Phase.Arena, 0)
+    this.broadcast('volley', {})
   }
 
   /** drop a bot straight onto the field mid-match: zones repaint live */

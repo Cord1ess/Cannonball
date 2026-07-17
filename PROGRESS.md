@@ -85,6 +85,10 @@ MID-MATCH — zones/cannons/crowd repaint instantly, no elimination ceremony; re
 below 2 alive), **freeze ticks** (toggle: physics/abilities stay live, accrual/ticks/
 eliminations stand still; auto-unfreezes at rematch). Plus `?fast` URL flag = create the room
 with 0.15x timers from the browser. `scripts/smoke-debug.ts` covers all three.
+**`?dev` = ZERO-DELAY iteration:** every reload creates a fresh room and jumps STRAIGHT to a
+live 6-bean arena (bots fill, draft auto-picks, launch skipped — beans spawn standing in their
+wedges, ball centered; 'instantArena' debug cmd, ~51ms server-side, reload→playing ~340ms).
+Implies fresh+fast; re-fires whenever the room falls back to lobby. Panel moved to the LEFT.
 
 ### M5a.2 — flat look + grass pitch + bean crowd (user feedback pass)
 Gouache texture KILLED everywhere (it had seams/scale problems): `makeToonMaterial(color)` is now
