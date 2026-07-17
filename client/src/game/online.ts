@@ -11,11 +11,10 @@ import { footprintZone, makeArena } from '@shared/sim/arena.ts'
 import type { NetInput, NetPlayerRead, NetStateRead } from '@shared/sim/net.ts'
 import {
   clearEvents,
-  interactBallPlayers,
   makeBall,
   makeEvents,
   makePlayer,
-  stepBall,
+  stepBallWithPlayers,
   stepPlayer,
   type PlayerInputFrame,
   type PlayerSim,
@@ -313,11 +312,10 @@ export function createOnlineGame(
       // 2. predict the ball: synced wind + local physics + player contacts
       ball.vx += (state.windX ?? 0) * (state.windStrength ?? 0) * dt
       ball.vz += (state.windZ ?? 0) * (state.windStrength ?? 0) * dt
-      stepBall(ball, arena, dt, events)
       const bodies: PlayerSim[] = [localSim]
       const bodiesAlive: boolean[] = new Array(SEATS).fill(true)
       for (const remote of remotes.values()) bodies.push(remote.stub)
-      interactBallPlayers(ball, bodies, bodiesAlive, dt, events)
+      stepBallWithPlayers(ball, bodies, bodiesAlive, arena, dt, events)
       for (const header of events.headers) {
         if (header.seat === mySeat) {
           myBean?.header()

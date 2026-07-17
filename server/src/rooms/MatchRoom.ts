@@ -15,13 +15,12 @@ import { accrueBallTime, tickLosers } from '../../../shared/src/sim/meters.ts'
 import {
   clearEvents,
   collidePlayers,
-  interactBallPlayers,
   makeBall,
   makeEvents,
   makePlayer,
   makeWind,
   resetBall,
-  stepBall,
+  stepBallWithPlayers,
   stepPlayer,
   stepWind,
   ZERO_INPUT,
@@ -195,9 +194,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     // 2. world
     const strength = WIND_BASE_STRENGTH + this.#eliminations * WIND_STEP_PER_ELIMINATION
     if (this.#windOn) stepWind(this.#wind, this.#rng, strength, this.#ball, dt)
-    stepBall(this.#ball, this.#arena, dt, this.#events)
     collidePlayers(sims, this.#alive, this.#events)
-    interactBallPlayers(this.#ball, sims, this.#alive, dt, this.#events)
+    stepBallWithPlayers(this.#ball, sims, this.#alive, this.#arena, dt, this.#events)
 
     for (const header of this.#events.headers) this.broadcast('header', { seat: header.seat })
     for (const knock of this.#events.knocks) this.broadcast('knock', { seat: knock.seat })

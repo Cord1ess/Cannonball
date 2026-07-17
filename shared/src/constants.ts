@@ -73,12 +73,20 @@ export const HEADER_UP_BIAS = 0.35 // fraction of header impulse aimed upward
 export const HEADER_MARGIN = 0.5 // extra reach beyond ball+player radii while diving
 export const HEADER_COOLDOWN_S = 0.35
 
-// --- ball knocks players, not the other way around ----------------------------
-export const BALL_KNOCK_MIN_SPEED = 7 // above this the ball wins the exchange
-export const BALL_KNOCK_FORCE = 10 // base knockback (scales with ball speed)
+// --- ball<->player contact solver (industry-standard trio) ---------------------
+export const BALL_MASS = 5 // vs player mass 1: the ball wins exchanges naturally
+export const PLAYER_MASS = 1
+export const BODY_RESTITUTION = 0.2 // body contact is a thud, not a bounce
+export const CONTACT_SLOP = 0.02 // allowed overlap — kills micro-jitter
+export const CONTACT_CORRECTION = 0.8 // Baumgarte: fraction of penetration fixed/step
+export const BALL_SUBSTEP_TRAVEL = 0.3 // max ball travel per substep (anti-tunnel)
+export const BALL_MAX_SUBSTEPS = 4
+
+// --- knock gameplay layer (on top of the physical impulse) ----------------------
+export const KNOCK_DELTA_V = 6.5 // player Δv above this = knocked (stun + flail)
+export const PLAYER_MAX_KNOCK_SPEED = 14 // clamp so launches stay readable
 export const BALL_KNOCK_POP = 3.5 // upward pop on a knock
 export const KNOCK_STUN_S = 0.6 // flailing, no control
-export const BALL_DEFLECT_RESTITUTION = 0.4 // ball bounces off the body it knocked
 
 // --- wind (only escalating force, idea.md §4) --------------------------------
 export const WIND_ENABLED = false // OFF until the ball itself feels right

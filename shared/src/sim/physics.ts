@@ -1,16 +1,18 @@
 import {
   ACCEL_AIR,
   ACCEL_GROUND,
-  BALL_DEFLECT_RESTITUTION,
   BALL_DRAG,
   BALL_GRAVITY,
-  BALL_KNOCK_FORCE,
-  BALL_KNOCK_MIN_SPEED,
   BALL_KNOCK_POP,
+  BALL_MASS,
   BALL_MAX_SPEED,
+  BALL_MAX_SUBSTEPS,
   BALL_RADIUS,
   BALL_RESTITUTION,
-  BODY_NUDGE_FORCE,
+  BALL_SUBSTEP_TRAVEL,
+  BODY_RESTITUTION,
+  CONTACT_CORRECTION,
+  CONTACT_SLOP,
   DIVE_FORCE,
   DIVE_PUSH,
   DIVE_RECOVERY_S,
@@ -21,7 +23,11 @@ import {
   HEADER_POWER,
   HEADER_UP_BIAS,
   JUMP_SPEED,
+  KNOCK_DELTA_V,
   KNOCK_STUN_S,
+  PLAYER_HEIGHT,
+  PLAYER_MASS,
+  PLAYER_MAX_KNOCK_SPEED,
   PLAYER_PUSH,
   PLAYER_RADIUS,
   RUN_SPEED,
@@ -310,12 +316,12 @@ export function stepWind(wind: Wind, rng: WindRng, strength: number, ball: BallS
 
 // --- ball --------------------------------------------------------------------------
 
-export function stepBall(ball: BallSim, arena: Arena, dt: number, events: SimEvents): void {
-  ball.vy -= BALL_GRAVITY * dt
+function integrateBall(ball: BallSim, arena: Arena, h: number, events: SimEvents): void {
+  ball.vy -= BALL_GRAVITY * h
 
-  ball.x += ball.vx * dt
-  ball.y += ball.vy * dt
-  ball.z += ball.vz * dt
+  ball.x += ball.vx * h
+  ball.y += ball.vy * h
+  ball.z += ball.vz * h
 
   // floor
   if (ball.y < BALL_RADIUS) {
@@ -328,7 +334,7 @@ export function stepBall(ball: BallSim, arena: Arena, dt: number, events: SimEve
   }
   // rolling drag
   if (ball.y <= BALL_RADIUS + 0.02) {
-    const drag = Math.max(0, 1 - BALL_DRAG * dt)
+    const drag = Math.max(0, 1 - BALL_DRAG * h)
     ball.vx *= drag
     ball.vz *= drag
   }
@@ -342,118 +348,146 @@ export function stepBall(ball: BallSim, arena: Arena, dt: number, events: SimEve
       if (vn > 1.5) events.bounces++
     }
   }
+}
+
+/**
+ * Ball step + ball<->player contacts, SUBSTEPPED so a fast ball can never
+ * pass through (or deeply into) a bean between checks — the one-important-
+ * object version of continuous collision detection.
+ *
+ * Contact model (the industry-standard anti-jitter trio):
+ * 1. TRUE sphere-vs-capsule normals — full 3D, so undersides/tops resolve.
+ * 2. Impulse resolution with a separating-velocity early-out and 5:1
+ *    ball:player mass ratio — no forces once already separating.
+ * 3. Baumgarte positional correction with slop — only (depth - 2cm) x 80%
+ *    per step, split by inverse mass, so resting contact never oscillates.
+ *
+ * Gameplay layer on top (Rocket League-style, deliberately non-physical):
+ * the dive-header velocity override, and the knock stun when the physical
+ * impulse throws a bean hard enough.
+ */
+export function stepBallWithPlayers(
+  ball: BallSim,
+  players: readonly PlayerSim[],
+  alive: readonly boolean[],
+  arena: Arena,
+  dt: number,
+  events: SimEvents,
+): void {
+  // worst-case closing speed decides the substep count
+  const speed = Math.hypot(ball.vx, ball.vy, ball.vz) + 12
+  const substeps = Math.min(BALL_MAX_SUBSTEPS, Math.max(1, Math.ceil((speed * dt) / BALL_SUBSTEP_TRAVEL)))
+  const h = dt / substeps
+
+  for (let i = 0; i < substeps; i++) {
+    integrateBall(ball, arena, h, events)
+    resolveBallPlayerContacts(ball, players, alive, events)
+  }
 
   // speed cap keeps play readable
-  const speed = Math.hypot(ball.vx, ball.vy, ball.vz)
-  if (speed > BALL_MAX_SPEED) {
-    const s = BALL_MAX_SPEED / speed
+  const finalSpeed = Math.hypot(ball.vx, ball.vy, ball.vz)
+  if (finalSpeed > BALL_MAX_SPEED) {
+    const s = BALL_MAX_SPEED / finalSpeed
     ball.vx *= s
     ball.vy *= s
     ball.vz *= s
   }
 }
 
-// --- ball <-> players -----------------------------------------------------------------
+const INV_BALL_MASS = 1 / BALL_MASS
+const INV_PLAYER_MASS = 1 / PLAYER_MASS
+const INV_MASS_SUM = INV_BALL_MASS + INV_PLAYER_MASS
 
-/**
- * The ball is the boss (playtest feedback):
- * - DIVING contact = HEADER: the ball rockets along the diver's facing.
- * - FAST ball hits you = YOU get knocked flying (stunned, flailing); the
- *   ball deflects off your body keeping most of its energy.
- * - Slow ball = a heavy object: walking into it barely nudges it and
- *   noticeably slows YOU.
- */
-export function interactBallPlayers(
+function resolveBallPlayerContacts(
   ball: BallSim,
   players: readonly PlayerSim[],
   alive: readonly boolean[],
-  dt: number,
   events: SimEvents,
 ): void {
+  const contactR = BALL_RADIUS + PLAYER_RADIUS
   for (const p of players) {
     if (!alive[p.seat]) continue
-    const bodyY = p.y + 0.75
+
+    // closest point on the bean's capsule core segment to the ball center
+    const coreBottom = p.y + PLAYER_RADIUS
+    const coreTop = p.y + PLAYER_HEIGHT - PLAYER_RADIUS
+    const closestY = Math.min(coreTop, Math.max(coreBottom, ball.y))
     const dx = ball.x - p.x
-    const dy = ball.y - bodyY
+    const dy = ball.y - closestY
     const dz = ball.z - p.z
     const dist = Math.hypot(dx, dy, dz)
-    const contact = BALL_RADIUS + PLAYER_RADIUS + 0.1
 
-    if (p.diving && p.headerCd <= 0 && dist < contact + HEADER_MARGIN) {
+    // gameplay override: the dive-header
+    if (p.diving && p.headerCd <= 0 && dist < contactR + HEADER_MARGIN) {
       const fx = Math.sin(p.yaw)
       const fz = Math.cos(p.yaw)
       ball.vx = fx * HEADER_POWER
       ball.vz = fz * HEADER_POWER
       ball.vy = HEADER_POWER * HEADER_UP_BIAS + Math.max(0, ball.vy * 0.2)
       p.headerCd = HEADER_COOLDOWN_S
-      // the ball wins the exchange — the diver stops dead and drops
       p.vx *= 0.25
       p.vz *= 0.25
       events.headers.push({ seat: p.seat, x: ball.x, y: ball.y, z: ball.z })
       continue
     }
 
-    if (dist >= contact || dist < 1e-4) continue
+    if (dist >= contactR || dist < 1e-6) continue
 
-    // contact normal, player -> ball, horizontal
-    const nh = Math.hypot(dx, dz)
-    if (nh < 1e-4) continue
-    const cnx = dx / nh
-    const cnz = dz / nh
+    // full 3D contact normal, player -> ball
+    const nx = dx / dist
+    const ny = dy / dist
+    const nz = dz / dist
 
-    const ballSpeed = Math.hypot(ball.vx, ball.vz) + Math.max(0, -ball.vy) * 0.3
+    // 3) positional correction: slop + percentage, split by inverse mass
+    const depth = contactR - dist
+    const correction = Math.max(depth - CONTACT_SLOP, 0) * CONTACT_CORRECTION
+    const ballShare = INV_BALL_MASS / INV_MASS_SUM
+    const playerShare = INV_PLAYER_MASS / INV_MASS_SUM
+    ball.x += nx * correction * ballShare
+    ball.y += ny * correction * ballShare
+    ball.z += nz * correction * ballShare
+    p.x -= nx * correction * playerShare
+    p.z -= nz * correction * playerShare
+    p.y = Math.max(0, p.y - ny * correction * playerShare)
+    if (ball.y < BALL_RADIUS) ball.y = BALL_RADIUS
 
-    if (ballSpeed > BALL_KNOCK_MIN_SPEED && p.knockedCd <= 0) {
-      // BALL WINS: launch the player along the ball's travel direction
-      const vh = Math.hypot(ball.vx, ball.vz)
-      const kx = vh > 1e-4 ? ball.vx / vh : -cnx
-      const kz = vh > 1e-4 ? ball.vz / vh : -cnz
-      const power = BALL_KNOCK_FORCE * Math.min(1.6, ballSpeed / BALL_KNOCK_MIN_SPEED)
-      p.vx = kx * power
-      p.vz = kz * power
-      p.vy = Math.max(p.vy, BALL_KNOCK_POP)
-      p.grounded = false
-      p.diving = false
-      p.knockedCd = KNOCK_STUN_S
-      events.knocks.push({ seat: p.seat, speed: ballSpeed })
+    // 2) impulse with separating-velocity early-out
+    const rvx = ball.vx - p.vx
+    const rvy = ball.vy - p.vy
+    const rvz = ball.vz - p.vz
+    const approaching = rvx * nx + rvy * ny + rvz * nz
+    if (approaching < 0) {
+      const j = (-(1 + BODY_RESTITUTION) * approaching) / INV_MASS_SUM
+      ball.vx += nx * j * INV_BALL_MASS
+      ball.vy += ny * j * INV_BALL_MASS
+      ball.vz += nz * j * INV_BALL_MASS
+      const playerDv = j * INV_PLAYER_MASS
+      p.vx -= nx * playerDv
+      p.vy -= ny * playerDv
+      p.vz -= nz * playerDv
 
-      // ball deflects off the body, keeping most of its energy
-      const into = ball.vx * -cnx + ball.vz * -cnz
-      if (into > 0) {
-        ball.vx += cnx * into * (1 + BALL_DEFLECT_RESTITUTION)
-        ball.vz += cnz * into * (1 + BALL_DEFLECT_RESTITUTION)
+      // clamp launches so they stay readable
+      const pSpeed = Math.hypot(p.vx, p.vy, p.vz)
+      if (pSpeed > PLAYER_MAX_KNOCK_SPEED) {
+        const clamp = PLAYER_MAX_KNOCK_SPEED / pSpeed
+        p.vx *= clamp
+        p.vy *= clamp
+        p.vz *= clamp
       }
-      ball.vx *= 0.85
-      ball.vz *= 0.85
-      ball.x = p.x + cnx * contact
-      ball.z = p.z + cnz * contact
-      continue
+
+      // gameplay layer: a hard hit is a KNOCK — stun + pop + flail
+      if (playerDv > KNOCK_DELTA_V && p.knockedCd <= 0 && !p.diving) {
+        p.vy = Math.max(p.vy, BALL_KNOCK_POP)
+        p.grounded = false
+        p.knockedCd = KNOCK_STUN_S
+        events.knocks.push({ seat: p.seat, speed: playerDv })
+      }
     }
 
-    // SLOW BALL: heavy — SOFT separation. Never teleport the ball out of
-    // overlap (position snapping is exactly the dragging jitter): ease it
-    // apart over a few steps and let it yield at the pusher's speed.
-    const overlap = contact - dist
-    const push = Math.min(overlap, 6 * dt)
-    ball.x += cnx * push
-    ball.z += cnz * push
-    // the player also gives a little, so deep overlaps can't happen
-    p.x -= cnx * Math.min(overlap * 0.3, 3 * dt)
-    p.z -= cnz * Math.min(overlap * 0.3, 3 * dt)
-
-    const pInto = p.vx * cnx + p.vz * cnz
-    const outward = ball.vx * cnx + ball.vz * cnz
-    if (pInto > 0 && outward < pInto) {
-      // ball rolls away just ahead of you — smooth dragging, no pulsing
-      const boost = (pInto - outward) * 0.8
-      ball.vx += cnx * boost
-      ball.vz += cnz * boost
-      // pushing two tons of ball slows you down
-      p.vx -= cnx * pInto * 0.35
-      p.vz -= cnz * pInto * 0.35
+    // support: standing ON the ball counts as ground (dribble on top, jump off)
+    if (ny < -0.55) {
+      p.grounded = true
     }
-    ball.vx += cnx * BODY_NUDGE_FORCE * dt
-    ball.vz += cnz * BODY_NUDGE_FORCE * dt
   }
 }
 

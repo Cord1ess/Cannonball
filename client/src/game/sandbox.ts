@@ -14,13 +14,12 @@ import { accrueBallTime, tickLosers } from '@shared/sim/meters.ts'
 import {
   clearEvents,
   collidePlayers,
-  interactBallPlayers,
   makeBall,
   makeEvents,
   makePlayer,
   makeWind,
   resetBall,
-  stepBall,
+  stepBallWithPlayers,
   stepPlayer,
   stepWind,
   ZERO_INPUT,
@@ -158,9 +157,8 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
       }
 
       if (windOn) stepWind(wind, rng, WIND_BASE_STRENGTH + eliminations * WIND_STEP_PER_ELIMINATION, ball, dt)
-      stepBall(ball, arena, dt, events)
       collidePlayers(players, alive, events)
-      interactBallPlayers(ball, players, alive, dt, events)
+      stepBallWithPlayers(ball, players, alive, arena, dt, events)
 
       for (const header of events.headers) {
         beans[header.seat]?.header()
