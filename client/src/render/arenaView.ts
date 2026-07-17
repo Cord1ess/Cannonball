@@ -30,6 +30,18 @@ export interface ArenaView {
 const SEGMENTS = 64
 const TIERS = 5
 
+/** A fully-configured tiling ground texture from an ALREADY-painted canvas.
+ *  Built atomically (fresh CanvasTexture, needsUpdate implicit) so it never
+ *  races a partially-drawn canvas against the GPU upload. */
+function makeGroundTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+  tex.repeat.set(10, 10)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 4
+  return tex
+}
+
 /** Watertight annulus wall: ring shape extruded up from y=0 to `height`. */
 function ringGeometry(inner: number, outer: number, height: number): THREE.ExtrudeGeometry {
   const shape = new THREE.Shape()
@@ -103,21 +115,23 @@ export function createArenaView(radius = 28): ArenaView {
   // blades. Its luminance is remapped onto the EXACT blade palette at load
   // (grassBase -> grassTip) and rendered UNLIT like the blades, so ground
   // and blades can never drift apart in color.
-  const groundCanvas = document.createElement('canvas')
-  groundCanvas.width = groundCanvas.height = 64
+  // placeholder tile — dark strokes on a DEEP base (never bright grassBase):
+  // this is what shows for the split-second before the remapped PNG arrives,
+  // so a slow load can never flash a bright untextured floor.
+  const placeholder = document.createElement('canvas')
+  placeholder.width = placeholder.height = 64
   {
-    // placeholder until the tile arrives: rough strokes, never flat color
-    const seed = groundCanvas.getContext('2d')
+    const seed = placeholder.getContext('2d')
     if (seed) {
-      seed.fillStyle = `#${PALETTE.grassBase.toString(16).padStart(6, '0')}`
+      seed.fillStyle = `#${new THREE.Color(PALETTE.grassBase).multiplyScalar(0.72).getHexString()}`
       seed.fillRect(0, 0, 64, 64)
-      seed.strokeStyle = `#${PALETTE.grassTip.toString(16).padStart(6, '0')}`
+      seed.strokeStyle = `#${PALETTE.grassBase.toString(16).padStart(6, '0')}`
       seed.lineCap = 'round'
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 70; i++) {
+        seed.globalAlpha = 0.3 + Math.random() * 0.3
+        seed.lineWidth = 1 + Math.random()
         const x = Math.random() * 64
         const y = Math.random() * 64
-        seed.globalAlpha = 0.25 + Math.random() * 0.3
-        seed.lineWidth = 1 + Math.random()
         seed.beginPath()
         seed.moveTo(x, y)
         seed.lineTo(x + (Math.random() - 0.5) * 5, y - 3 - Math.random() * 4)
@@ -126,24 +140,31 @@ export function createArenaView(radius = 28): ArenaView {
       seed.globalAlpha = 1
     }
   }
-  const groundTex = new THREE.CanvasTexture(groundCanvas)
-  groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping
-  groundTex.repeat.set(10, 10)
-  groundTex.colorSpace = THREE.SRGBColorSpace
-  groundTex.anisotropy = 4
+  const floorTopMat = new THREE.MeshBasicMaterial({ map: makeGroundTexture(placeholder) })
+  const floor = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.6, SEGMENTS), [
+    makeToonMaterial(PALETTE.warmGray), // side
+    floorTopMat, // top: unlit, like the blades
+    makeToonMaterial(PALETTE.warmGray), // bottom
+  ])
+
+  // load + remap the real tile off-thread; swap the map in ATOMICALLY once the
+  // remapped canvas is fully painted. The old code mutated a live canvas and
+  // flipped needsUpdate, which raced the GPU upload — sometimes the bright
+  // placeholder won and stuck. Building a detached canvas first kills the race.
   {
     const img = new Image()
     img.onload = () => {
       const s = img.width
-      groundCanvas.width = groundCanvas.height = s
-      const ctx = groundCanvas.getContext('2d')
+      const off = document.createElement('canvas')
+      off.width = off.height = s
+      const ctx = off.getContext('2d')
       if (!ctx) return
       ctx.drawImage(img, 0, 0)
       const id = ctx.getImageData(0, 0, s, s)
       const d = id.data
-      // EXACT approved pipeline — absolute min/max on the ORIGINAL PNG.
-      // Never feed this a lossy re-encode: JPEG smoothing + ringing shifts
-      // this normalization and washes the whole pitch out (it happened).
+      // EXACT approved remap — absolute min/max luminance of the ORIGINAL PNG.
+      // Never feed this a lossy re-encode (JPEG ringing shifts the bounds and
+      // washes the pitch out) and never touch these constants — see PROGRESS.
       let lo = 1
       let hi = 0
       for (let i = 0; i < s * s; i++) {
@@ -156,22 +177,20 @@ export function createArenaView(radius = 28): ArenaView {
       const span = Math.max(0.01, hi - lo)
       for (let i = 0; i < s * s; i++) {
         const lum = (d[i * 4]! + d[i * 4 + 1]! + d[i * 4 + 2]!) / 765
-        // gamma keeps the ground a touch deeper than the blade tips
         const t = Math.pow((lum - lo) / span, 1.2) * 0.9
         d[i * 4] = Math.round((base.r + (tip.r - base.r) * t) * 255)
         d[i * 4 + 1] = Math.round((base.g + (tip.g - base.g) * t) * 255)
         d[i * 4 + 2] = Math.round((base.b + (tip.b - base.b) * t) * 255)
       }
       ctx.putImageData(id, 0, 0)
-      groundTex.needsUpdate = true
+      // canvas is fully painted NOW — build a fresh texture from it and swap.
+      const old = floorTopMat.map
+      floorTopMat.map = makeGroundTexture(off)
+      floorTopMat.needsUpdate = true
+      old?.dispose()
     }
     img.src = '/textures/pitch_grass.png'
   }
-  const floor = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.6, SEGMENTS), [
-    makeToonMaterial(PALETTE.warmGray), // side
-    new THREE.MeshBasicMaterial({ map: groundTex }), // top: unlit, like the blades
-    makeToonMaterial(PALETTE.warmGray), // bottom
-  ])
   floor.position.y = -0.3
   addInkOutline(floor, INK_WEIGHT.arena)
   group.add(floor)
