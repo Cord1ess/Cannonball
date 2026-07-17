@@ -58,8 +58,8 @@ export const DIVE_UP = 1.5 // small float at dive start
 export const DIVE_RECOVERY_S = 0.3 // landing stumble: damped input, no jump
 
 // --- player-vs-player --------------------------------------------------------
-export const PLAYER_PUSH = 2.5 // running into someone: slight push
-export const DIVE_PUSH = 9 // diving into someone: major shove
+export const PLAYER_PUSH = 6 // running into someone: a firm shove, no overlap
+export const DIVE_PUSH = 22 // diving into someone: LAUNCH them off their feet
 
 // --- ball & header (tune in M1 fun-test) -------------------------------------
 export const BALL_RADIUS = 2.0 // ~3x the bean: a giant, satisfying target

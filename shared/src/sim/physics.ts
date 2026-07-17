@@ -682,18 +682,20 @@ export function collidePlayers(
       b.z += pz * overlap * 0.5
 
       if (a.diving !== b.diving) {
-        // major shove: the diver launches the other bean
+        // major shove: the diver LAUNCHES the other bean off their feet
         const diver = a.diving ? a : b
         const target = a.diving ? b : a
         const dir = a.diving ? 1 : -1
         target.vx += px * DIVE_PUSH * dir
         target.vz += pz * DIVE_PUSH * dir
-        target.vy = Math.max(target.vy, 2.2)
-        diver.vx *= 0.4
-        diver.vz *= 0.4
+        target.vy = Math.max(target.vy, 6.5) // real air, not a hop
+        target.knockedCd = Math.max(target.knockedCd, KNOCK_STUN_S) // sent tumbling
+        target.grounded = false
+        diver.vx *= 0.35
+        diver.vz *= 0.35
         events.shoves.push({ fromSeat: diver.seat, toSeat: target.seat, major: true })
       } else {
-        // mutual slight push
+        // firm mutual push — enough to actually separate, never overlap
         a.vx -= px * PLAYER_PUSH * 0.5
         a.vz -= pz * PLAYER_PUSH * 0.5
         b.vx += px * PLAYER_PUSH * 0.5

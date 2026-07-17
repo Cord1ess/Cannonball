@@ -79,19 +79,25 @@ const VERT = /* glsl */ `
     p.x += s * curl * t * t;
     p.z += c * curl * t * t;
 
-    // --- LAYERED wind (always breathing, never fully still) ----------------
-    // 1) CONSTANT base sway — this alone keeps the field alive at all times
+    // --- LAYERED wind (always breathing + strong VISIBLE gusts) ------------
+    // 1) CONSTANT lean + sway downwind — keeps the field alive at all times
     float base = dot(root, uWindDir) * 0.05 + uTime * 0.7;
     float baseSway = sin(base) * 0.5 + sin(base * 0.37 + 1.1) * 0.3;
-    // 2) GUST SURGE driven by the real wind envelope (uGust 0..1): rolling
-    //    fronts sweep along the wind so patches bend together on a gust
-    float gp = dot(root, uWindDir) * 0.09 - uTime * 1.1;
-    float gustSway = (sin(gp) * 0.6 + sin(gp * 2.3 + root.x * 0.3) * 0.4) * uGust;
-    // 3) per-blade flutter (high freq, individual), a touch stronger on gusts
-    float flutter = sin(uTime * 7.0 + aSeed.x * 6.2831) * (0.12 + uGust * 0.14);
+    float baseLean = 0.18; // grass always leans a bit downwind
+    // 2) GUST SURGE (uGust 0..1): big rolling fronts sweep along the wind so
+    //    whole patches BEND OVER together — this is the visible wind wave
+    float gp = dot(root, uWindDir) * 0.09 - uTime * 1.4;
+    float gustWave = smoothstep(-0.3, 1.0, sin(gp)); // 0..1 rolling front
+    float gustSway = (gustWave * 1.1 + sin(gp * 2.3 + root.x * 0.3) * 0.3) * uGust;
+    // 3) per-blade flutter (high freq, individual), stronger on gusts
+    float flutter = sin(uTime * 8.0 + aSeed.x * 6.2831) * (0.12 + uGust * 0.2);
 
-    float sway = (baseSway * 0.11 + gustSway * 0.3 + flutter * 0.05) * t * t;
-    p.xz += uWindDir * sway;
+    // downwind bend (lean + gust) is much larger than the lateral flutter
+    float bend = (baseLean + baseSway * 0.14 + gustSway * 0.9) * t * t;
+    p.xz += uWindDir * bend;
+    p.xz += uWindDir * flutter * 0.05 * t * t;
+    // gusts also mash height a touch as the blade bows over
+    p.y *= 1.0 - gustSway * 0.12 * t;
 
     // --- INTERACTIVE displacement (walking THROUGH grass) ------------------
     // Blades PART sideways around a body — a tight ring right at the contact,
@@ -178,10 +184,14 @@ const FRAG = /* glsl */ `
     // which painted zone sector is this blade in?
     int zone = int(mod(floor(angle / span + 0.5), uZoneCount));
 
-    // danger heat: the wedge blushes with its seat's color
+    // danger heat: the wedge scorches toward warning RED as its meter fills.
+    // NO tint at rest — team colors must NEVER bleed into the grass (they did,
+    // via a 0.06 floor, so a yellow-kit wedge had permanently yellow grass).
+    float danger = 0.0;
     for (int i = 0; i < ${MAX_ZONES}; i++) {
-      if (i == zone) col = mix(col, uZoneColors[i], 0.06 + uDanger[i] * 0.32);
+      if (i == zone) danger = uDanger[i];
     }
+    col = mix(col, vec3(0.78, 0.24, 0.20), danger * 0.4);
 
     // chalk: zone division lines + neutral ring — wobbly width, grainy fill
     float toBoundary = abs(mod(angle + span * 0.5, span) - span * 0.5) * r + wob * 0.1;

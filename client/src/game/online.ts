@@ -12,9 +12,9 @@ import {
 import { footprintZone, makeArena, type Arena } from '@shared/sim/arena.ts'
 import type { NetHandoutRead, NetInput, NetPlayerRead, NetStateRead } from '@shared/sim/net.ts'
 import {
-  applyWindToBall,
   applyWindToPlayer,
   clearEvents,
+  collidePlayers,
   makeBall,
   makeEvents,
   makePlayer,
@@ -674,10 +674,15 @@ export function createOnlineGame(
       if (inputBuffer.length > 120) inputBuffer.splice(0, inputBuffer.length - 120)
       conn.send('input', net)
 
-      applyWindToBall(ball, wind, dt)
       const bodies: PlayerSim[] = [localSim]
       const bodiesAlive: boolean[] = new Array(8).fill(true)
       for (const remote of remotes.values()) bodies.push(remote.stub)
+      // PREDICT PvP locally so you never visually pass through another bean —
+      // the remote stubs get overwritten from snapshots next frame, so shoving
+      // them here is transient; only localSim's push persists into prediction.
+      collidePlayers(bodies, bodiesAlive, events)
+      // NOTE: wind does NOT touch the ball — a randomly drifting ball reads as
+      // a netcode glitch. Wind only catches airborne beans.
       stepBallWithPlayers(ball, bodies, bodiesAlive, arena, dt, events)
       for (const header of events.headers) {
         if (header.seat === mySeat) {

@@ -12,7 +12,6 @@ import {
 import { footprintZone, makeArena, yawTowardCenter, zoneAnchor, type Arena } from '@shared/sim/arena.ts'
 import { accrueBallTime, tickLosers } from '@shared/sim/meters.ts'
 import {
-  applyWindToBall,
   applyWindToPlayer,
   clearEvents,
   collidePlayers,
@@ -165,7 +164,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
         dummy.yaw = Math.atan2(ball.x - dummy.x, ball.z - dummy.z)
       }
 
-      if (windOn) applyWindToBall(ball, wind, dt)
+      // wind does NOT push the ball (a drifting ball reads as a netcode bug)
       collidePlayers(players, alive, events)
       stepBallWithPlayers(ball, players, alive, arena, dt, events)
 

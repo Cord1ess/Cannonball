@@ -30,7 +30,6 @@ import {
 } from '../../../shared/src/sim/arena.ts'
 import { accrueBallTime, tickLosers } from '../../../shared/src/sim/meters.ts'
 import {
-  applyWindToBall,
   applyWindToPlayer,
   clearEvents,
   collidePlayers,
@@ -788,8 +787,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       if (this.#windOn && this.#alive[session.sim.seat]) applyWindToPlayer(session.sim, wind, dt)
       sims.push(session.sim)
     }
-
-    if (this.#windOn) applyWindToBall(this.#ball, wind, dt)
+    // wind deliberately does NOT push the ball — a drifting ball reads as lag
     // Magnet Curse: the ball drifts toward the cursed bean's wedge
     for (const session of this.#sessions.values()) {
       const seat = session.sim.seat

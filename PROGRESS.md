@@ -132,6 +132,20 @@ bodies the wind is catching (airborne beans + airborne ball), fed from online.ts
 unified too. GOTCHA carried: streaks/marks MUST billboard (view-space) or vanish edge-on. 56 tests
 + smoke pass with wind live; perf ~3.6ms/frame uncapped (still ~4x headroom).
 
+**Wind/PvP feedback pass:** (1) BUG FIX — kit/audience colors bled into grass: the danger tint
+had a 0.06 floor of `uZoneColors[i]` (team color) so a yellow-kit wedge had permanently yellow
+grass. Now danger tints toward warning RED and is ZERO at rest; grass never reads team colors.
+(2) Wind NO LONGER pushes the ball (a drifting ball read as netcode lag) — removed applyWindToBall
+everywhere; wind still catches airborne beans. (3) PvP fixed: client now predicts `collidePlayers`
+(remote stubs shoved transiently, overwritten from snapshots — so you never visually pass through
+someone); PLAYER_PUSH 2.5→6, DIVE_PUSH 9→22 with vy launch 2.2→6.5 + a knock stun, so a dive
+LAUNCHES the target. (4) Wind streaks rebuilt as PHYSICAL 3D curved tubes (round cross-section,
+GPU-bent S-curves, toon-shaded, ~22 of them, higher up) — visible from any angle, no more flat
+billboards. GOTCHA: build the tube frame from a REAL tangent (two spine samples) + a ref-up that's
+never parallel, else the frame goes degenerate and tubes explode into black smears. (5) Grass gust
+displacement much stronger + directional: constant downwind lean + big rolling gust fronts that
+bend whole patches over (not just tiny flutter).
+
 Feedback pass 4: the tile's luminance is remapped
 onto the EXACT blade palette at load (grassBase→grassTip, unlit MeshBasicMaterial like the
 blades) so ground/blade color can never drift; ground chalk LINES removed (they doubled the
