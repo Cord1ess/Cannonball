@@ -187,8 +187,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
     },
 
     frameUpdate(dt: number, alpha: number, lean: number): void {
-      const vw = sampleWind(windTime, (windOn ? WIND_BASE_STRENGTH : 0) + 1.4)
-      arenaView.update(dt, vw.x, vw.z, vw.gust)
+      arenaView.update(dt)
       const p = players[0]!
       const px = prevPlayer.x + (p.x - prevPlayer.x) * alpha
       const py = prevPlayer.y + (p.y - prevPlayer.y) * alpha

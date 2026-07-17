@@ -57,8 +57,6 @@ import { SEAT_COLORS } from './sandbox.ts'
 
 const SNAP_ERROR = 3
 const SERVER_BALL_LOOKAHEAD_S = 0.7 / PATCH_HZ
-// a gentle breeze for the grass visual even if physical wind strength is 0
-const WIND_VISUAL_STRENGTH = 1.4
 
 const toHex = (c: number): string => `#${c.toString(16).padStart(6, '0')}`
 
@@ -696,11 +694,8 @@ export function createOnlineGame(
 
     frameUpdate(dt: number, alpha: number, lean: number): void {
       // wind visual runs every phase (grass breathes in the lobby too): sample
-      // the deterministic field at render time so it never stalls between steps
-      const renderTimeS = timeOffset === null ? simTime : performance.now() / 1000 + timeOffset
-      // grass always breathes: use the real strength, or a gentle visual breeze
-      const vw = sampleWind(renderTimeS, (state.windStrength || 0) + WIND_VISUAL_STRENGTH)
-      arenaView.update(dt, vw.x, vw.z, vw.gust)
+      // the arena owns its own localized gust-cell wind field now
+      arenaView.update(dt)
       const decay = Math.exp(-10 * dt)
       renderOffset.x *= decay
       renderOffset.y *= decay
@@ -801,25 +796,20 @@ export function createOnlineGame(
       }
       arenaView.setGrassBodies(grassBodies)
 
-      // wind marks: direction lines beside bodies the wind is catching —
-      // airborne beans (jump/dive) and the ball while it's off the ground.
+      // wind marks: direction lines beside AIRBORNE beans (jump/dive) — the
+      // only bodies wind actually catches. (Not the ball; wind ignores it.)
       windMarks.length = 0
+      const wdir = arenaView.windDir()
       const gustLevel = currentWind.gust
-      const airborne = localSim && aliveOf(mySeat) && selfY > 0.6
-      if ((airborne || gustLevel > 0.25) && localSim && aliveOf(mySeat)) {
-        const s = airborne ? 0.6 + gustLevel * 0.4 : gustLevel * 0.5
-        if (s > 0.15) windMarks.push({ x: selfX, y: selfY + 0.7, z: selfZ, strength: s })
+      if (localSim && aliveOf(mySeat) && selfY > 0.7) {
+        windMarks.push({ x: selfX, y: selfY + 0.7, z: selfZ, strength: 0.6 + gustLevel * 0.4 })
       }
       for (const remote of remotes.values()) {
-        if (aliveOf(remote.seat) && remote.stub.y > 0.6) {
+        if (aliveOf(remote.seat) && remote.stub.y > 0.7) {
           windMarks.push({ x: remote.stub.x, y: remote.stub.y + 0.7, z: remote.stub.z, strength: 0.6 + gustLevel * 0.4 })
         }
       }
-      // the ball catches wind whenever it's airborne, harder on a gust
-      if (by > BALL_RADIUS + 0.4) {
-        windMarks.push({ x: bx, y: by, z: bz, strength: 0.5 + gustLevel * 0.5 })
-      }
-      arenaView.setWindMarks(windMarks, currentWind.x, currentWind.z)
+      arenaView.setWindMarks(windMarks, wdir.x, wdir.z)
 
       const fracs: number[] = []
       const capacity =

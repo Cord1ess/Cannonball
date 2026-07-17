@@ -146,6 +146,18 @@ never parallel, else the frame goes degenerate and tubes explode into black smea
 displacement much stronger + directional: constant downwind lean + big rolling gust fronts that
 bend whole patches over (not just tiny flutter).
 
+**Wind refined to LOCALIZED gust cells (feedback: too much, too uniform, too sine-y).** New
+`render/windField.ts`: a pool of ≤6 gust cells that spawn upwind (bursty — sometimes 2-4 at once),
+travel downwind across a SMALL area (radius 5-12m), swell then fade on a sin bell, and die. arenaView
+owns the field, steps it, feeds the live cells to grass (`grass.setGusts`, `GustCell[]` uniform — a
+blade bends only where a cell overlaps it, with a per-cell/per-blade swirl so it's not linear) and to
+streaks. Grass base motion is now just a SMALL ambient breeze + jitter (never dead, never a big
+uniform wave). `windStreaks.ts` rewritten: thin (r 0.06) FAINT (α 0.42) 3D tubes CLUSTERED at each
+active cell (3/cell), fading in/out with it — lines appear in a spot, whiz past, vanish, then another
+cluster elsewhere. `windMarks` now only on airborne beans (not the ball). arenaView.update(dt) is
+self-driven (owns wind); exposes windDir(). Spectate grass color bug was STALE BUILD — verified clean
+(uniform green, no team tint) on current code. 56 tests + smoke pass, no shader errors.
+
 Feedback pass 4: the tile's luminance is remapped
 onto the EXACT blade palette at load (grassBase→grassTip, unlit MeshBasicMaterial like the
 blades) so ground/blade color can never drift; ground chalk LINES removed (they doubled the

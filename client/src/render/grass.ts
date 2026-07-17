@@ -22,6 +22,7 @@ import { PALETTE } from './palette.ts'
 
 const MAX_ZONES = 6
 const MAX_BODIES = 8
+const MAX_GUSTS = 6
 
 /** a body that pushes grass: world xz + radius (players ~0.5, ball ~2) */
 export interface GrassBody {
@@ -32,14 +33,24 @@ export interface GrassBody {
   wobble: number
 }
 
+/** a travelling gust cell: world center + radius + strength 0..1 */
+export interface GustCell {
+  x: number
+  z: number
+  radius: number
+  strength: number
+}
+
 export interface GrassField {
   readonly mesh: THREE.Mesh
   setZones(zoneCount: number, zoneColors: readonly number[]): void
   setDanger(fracs: readonly number[]): void
   /** feed the bodies that flatten grass this frame (players + ball) */
   setBodies(bodies: readonly GrassBody[]): void
-  /** advance the grass; drive it with the real wind (dir + gust 0..1) */
-  update(time: number, windX: number, windZ: number, gust: number): void
+  /** feed the active localized gust cells this frame */
+  setGusts(gusts: readonly GustCell[]): void
+  /** advance the grass; windDir sets the gust bend direction */
+  update(time: number, windX: number, windZ: number): void
   dispose(): void
 }
 
@@ -49,7 +60,8 @@ const VERT = /* glsl */ `
 
   uniform float uTime;
   uniform vec2 uWindDir;
-  uniform float uGust; // 0 = only base breeze .. 1 = peak gust
+  uniform vec4 uGusts[${MAX_GUSTS}]; // x,y = xz center · z = radius · w = strength
+  uniform int uGustCount;
   uniform vec4 uBodies[${MAX_BODIES}]; // x,y = xz pos · z = radius · w = wobble 0..1
   uniform int uBodyCount;
 
@@ -79,25 +91,33 @@ const VERT = /* glsl */ `
     p.x += s * curl * t * t;
     p.z += c * curl * t * t;
 
-    // --- LAYERED wind (always breathing + strong VISIBLE gusts) ------------
-    // 1) CONSTANT lean + sway downwind — keeps the field alive at all times
-    float base = dot(root, uWindDir) * 0.05 + uTime * 0.7;
-    float baseSway = sin(base) * 0.5 + sin(base * 0.37 + 1.1) * 0.3;
-    float baseLean = 0.18; // grass always leans a bit downwind
-    // 2) GUST SURGE (uGust 0..1): big rolling fronts sweep along the wind so
-    //    whole patches BEND OVER together — this is the visible wind wave
-    float gp = dot(root, uWindDir) * 0.09 - uTime * 1.4;
-    float gustWave = smoothstep(-0.3, 1.0, sin(gp)); // 0..1 rolling front
-    float gustSway = (gustWave * 1.1 + sin(gp * 2.3 + root.x * 0.3) * 0.3) * uGust;
-    // 3) per-blade flutter (high freq, individual), stronger on gusts
-    float flutter = sin(uTime * 8.0 + aSeed.x * 6.2831) * (0.12 + uGust * 0.2);
+    // --- wind = gentle AMBIENT breeze + LOCALIZED travelling gust cells ----
+    // 1) subtle ambient sway so the field is never dead-still (small!)
+    float amb = uTime * 0.9 + root.x * 0.15 + root.y * 0.11;
+    float ambSway = (sin(amb) * 0.5 + sin(amb * 0.43 + 1.7) * 0.3);
+    // a touch of per-blade random phase so it's not one clean sine
+    float jitter = sin(uTime * 6.0 + aSeed.x * 25.13) * 0.25;
+    p.xz += uWindDir * (0.06 + ambSway * 0.05 + jitter * 0.02) * t * t;
 
-    // downwind bend (lean + gust) is much larger than the lateral flutter
-    float bend = (baseLean + baseSway * 0.14 + gustSway * 0.9) * t * t;
-    p.xz += uWindDir * bend;
-    p.xz += uWindDir * flutter * 0.05 * t * t;
-    // gusts also mash height a touch as the blade bows over
-    p.y *= 1.0 - gustSway * 0.12 * t;
+    // 2) GUST CELLS: each is a moving disc; where it overlaps THIS blade it
+    //    bends it hard downwind + a swirl, tapering with distance. Grass only
+    //    moves where a gust actually passes — localized, appears/disappears.
+    for (int gi = 0; gi < ${MAX_GUSTS}; gi++) {
+      if (gi >= uGustCount) break;
+      vec2 gc = uGusts[gi].xy;
+      float grad = uGusts[gi].z;
+      float gstr = uGusts[gi].w;
+      float gd = distance(root, gc);
+      float infl = (1.0 - smoothstep(grad * 0.35, grad, gd)) * gstr;
+      if (infl > 0.0) {
+        // random-ish swirl direction per cell + per-blade so it's not linear
+        float swirl = sin(gd * 1.3 - uTime * 5.0 + aSeed.x * 6.2831) * 0.4;
+        vec2 gdir = normalize(uWindDir + vec2(-uWindDir.y, uWindDir.x) * swirl);
+        float bend = infl * 1.1 * t * t;
+        p.xz += gdir * bend;
+        p.y *= 1.0 - infl * 0.18 * t; // bows over as it's hit
+      }
+    }
 
     // --- INTERACTIVE displacement (walking THROUGH grass) ------------------
     // Blades PART sideways around a body — a tight ring right at the contact,
@@ -249,6 +269,7 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
 
   const windDir = new THREE.Vector2(0.8, 0.6).normalize()
   const bodies = Array.from({ length: MAX_BODIES }, () => new THREE.Vector4(0, 0, 0, 0))
+  const gusts = Array.from({ length: MAX_GUSTS }, () => new THREE.Vector4(0, 0, 0, 0))
   const zoneColors = Array.from({ length: MAX_ZONES }, () => new THREE.Color(PALETTE.grassBase))
   const material = new THREE.ShaderMaterial({
     vertexShader: VERT,
@@ -257,7 +278,6 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
     uniforms: {
       uTime: { value: 0 },
       uWindDir: { value: windDir },
-      uGust: { value: 0 },
       uBase: { value: new THREE.Color(PALETTE.grassBase) },
       uTip: { value: new THREE.Color(PALETTE.grassTip) },
       uChalk: { value: new THREE.Color(PALETTE.chalk) },
@@ -268,6 +288,8 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
       uDanger: { value: new Array(MAX_ZONES).fill(0) },
       uBodies: { value: bodies },
       uBodyCount: { value: 0 },
+      uGusts: { value: gusts },
+      uGustCount: { value: 0 },
     },
   })
 
@@ -294,10 +316,17 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
       }
       material.uniforms.uBodyCount!.value = n
     },
-    update(time: number, windX: number, windZ: number, gust: number): void {
+    setGusts(list: readonly GustCell[]): void {
+      const n = Math.min(MAX_GUSTS, list.length)
+      for (let i = 0; i < n; i++) {
+        const g = list[i]!
+        gusts[i]!.set(g.x, g.z, g.radius, g.strength)
+      }
+      material.uniforms.uGustCount!.value = n
+    },
+    update(time: number, windX: number, windZ: number): void {
       material.uniforms.uTime!.value = time
       windDir.set(windX, windZ)
-      material.uniforms.uGust!.value = gust
     },
     dispose(): void {
       geo.dispose()

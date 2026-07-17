@@ -4,8 +4,9 @@ import { WALL_HEIGHT } from '@shared/constants.ts'
 import type { Arena } from '@shared/sim/arena.ts'
 import { yawTowardCenter } from '@shared/sim/arena.ts'
 import { KITS } from '@shared/cosmetics/jerseys.ts'
-import { createGrassField, type GrassBody, type GrassField } from './grass.ts'
-import { createWindStreaks, type WindStreaks } from './windStreaks.ts'
+import { createGrassField, type GrassBody, type GrassField, type GustCell } from './grass.ts'
+import { createWindField, type WindField } from './windField.ts'
+import { createWindStreaks, type StreakCell, type WindStreaks } from './windStreaks.ts'
 import { createWindMarks, type WindMark, type WindMarks } from './windMarks.ts'
 import { addInkOutline, disposeHierarchy, INK_WEIGHT, makeToonMaterial } from './materials.ts'
 import { PALETTE } from './palette.ts'
@@ -26,8 +27,10 @@ export interface ArenaView {
   setDanger(fracs: readonly number[]): void
   /** bodies (players + ball) that flatten/part the grass this frame */
   setGrassBodies(bodies: readonly GrassBody[]): void
-  /** advance grass + streaks, driven by the real wind (dir + gust 0..1) */
-  update(dt: number, windX: number, windZ: number, gust: number): void
+  /** advance the wind field, grass, and streaks (self-driven gust cells) */
+  update(dt: number): void
+  /** the current wind direction (from the field) for marks + airborne visuals */
+  windDir(): { x: number; z: number }
   /** direction lines beside bodies the wind is currently pushing */
   setWindMarks(marks: readonly WindMark[], windX: number, windZ: number): void
   dispose(): void
@@ -240,12 +243,17 @@ export function createArenaView(radius = 28): ArenaView {
   const grass = createGrassField(radius, neutralRadius)
   group.add(grass.mesh)
 
-  // wind made visible: white streaks drifting on the wind, pulsing with gusts
+  // wind: localized travelling GUST CELLS drive both the grass bend and the
+  // streaks, so gusts appear in small areas, whiz past, and disappear
+  const windField: WindField = createWindField()
   const streaks: WindStreaks = createWindStreaks()
   group.add(streaks.mesh)
   // direction lines that appear beside bodies the wind is pushing
   const marks: WindMarks = createWindMarks()
   group.add(marks.mesh)
+  // reused per-frame scratch so the hot path never allocates
+  const gustScratch: GustCell[] = []
+  const streakScratch: StreakCell[] = []
 
   // seamless ring wall the players bounce off
   const wall = new THREE.Mesh(ringGeometry(radius, radius + 1.8, WALL_HEIGHT), makeToonMaterial(PALETTE.warmGray))
@@ -440,10 +448,25 @@ export function createArenaView(radius = 28): ArenaView {
       grass.setBodies(list)
     },
 
-    update(dt: number, windX: number, windZ: number, gust: number): void {
+    update(dt: number): void {
       elapsed += dt
-      grass.update(elapsed, windX, windZ, gust)
-      streaks.update(dt, windX, windZ, gust)
+      const cells = windField.step(dt)
+      const dx = windField.dirX
+      const dz = windField.dirZ
+      // hand the live gust cells to grass (bend) and streaks (clusters)
+      gustScratch.length = 0
+      streakScratch.length = 0
+      for (const c of cells) {
+        gustScratch.push({ x: c.x, z: c.z, radius: c.radius, strength: c.strength })
+        streakScratch.push({ x: c.x, z: c.z, strength: c.strength })
+      }
+      grass.setGusts(gustScratch)
+      grass.update(elapsed, dx, dz)
+      streaks.update(dt, streakScratch, dx, dz)
+    },
+
+    windDir(): { x: number; z: number } {
+      return { x: windField.dirX, z: windField.dirZ }
     },
 
     setWindMarks(list: readonly WindMark[], windX: number, windZ: number): void {
