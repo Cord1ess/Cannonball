@@ -93,7 +93,8 @@ const VERT = /* glsl */ `
 
     // --- INTERACTIVE displacement ------------------------------------------
     // bodies push blade tips radially away and mash them down
-    float flat = 0.0;
+    // (note: 'flat' is a reserved GLSL keyword — this var must NOT be named it)
+    float press = 0.0;
     for (int i = 0; i < ${MAX_BODIES}; i++) {
       if (i >= uBodyCount) break;
       vec2 d = root - uBodies[i].xy;
@@ -104,11 +105,11 @@ const VERT = /* glsl */ `
         vec2 push = (dist > 0.001 ? d / dist : vec2(1.0, 0.0));
         // bend away from the body, stronger at the tip; mash height down
         p.xz += push * infl * 0.7 * t;
-        flat = max(flat, infl);
+        press = max(press, infl);
       }
     }
-    p.y *= 1.0 - flat * 0.6; // flattened blades lose height
-    vFlat = flat;
+    p.y *= 1.0 - press * 0.6; // flattened blades lose height
+    vFlat = press;
 
     vec3 world = vec3(root.x + p.x, p.y, root.y + p.z);
     vWorldXZ = world.xz;
