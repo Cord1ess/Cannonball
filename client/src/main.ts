@@ -65,6 +65,14 @@ if (wantOffline) {
   } catch (error) {
     console.warn('[cannonball] server unreachable, falling back to offline sandbox', error)
     game = createSandbox(scene, chase, hud)
+    // make the fallback IMPOSSIBLE to miss — an offline sandbox looks like the
+    // old game and reads as "nothing new" when the server is simply down
+    const offlineBanner = document.createElement('div')
+    offlineBanner.style.cssText =
+      'position:fixed;top:0;left:0;right:0;background:#d96c6c;color:#fff;font:700 14px system-ui;' +
+      'text-align:center;padding:6px;z-index:100;'
+    offlineBanner.textContent = 'OFFLINE SANDBOX — game server unreachable. Run `npm run dev:server` and reload.'
+    document.body.appendChild(offlineBanner)
   }
 }
 
