@@ -1,0 +1,5 @@
+{
+  "name": "@cannonball/shared",
+  "private": true,
+  "type": "module"
+}
