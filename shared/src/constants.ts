@@ -24,9 +24,9 @@ export const PLATFORM_COUNT = 3
 export const PILLAR_COUNT = 4
 
 // --- tick & elimination ------------------------------------------------------
-export const TICK_SECONDS_PER_SURVIVOR = 5 // interval = survivors x 5s (idea.md §4)
+export const TICK_SECONDS_PER_SURVIVOR = 10 // interval = survivors x 10s — longer rounds for playtesting
 export const TIE_EPSILON_S = 0.05 // meters within this = tied -> overtime
-export const DUEL_METER_CAPACITY_S = 15 // sudden kickoff cumulative meter
+export const DUEL_METER_CAPACITY_S = 30 // sudden kickoff cumulative meter (longer duel)
 
 // --- match flow pauses -------------------------------------------------------
 export const DRAFT_SECONDS = 25

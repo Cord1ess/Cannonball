@@ -10,5 +10,9 @@ export default defineConfig({
   },
   server: {
     fs: { allow: ['..'] },
+    // bind all interfaces so LAN + tunnels (cloudflared/ngrok) can reach the
+    // client; allowedHosts lets any tunnel hostname serve it
+    host: true,
+    allowedHosts: true,
   },
 })

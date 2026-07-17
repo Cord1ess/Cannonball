@@ -8,7 +8,7 @@ import { createMatchUi, type MatchUi } from './game/matchUi.ts'
 import { createGameInput } from './game/input.ts'
 import { createOnlineGame, type OnlineGame } from './game/online.ts'
 import { createSandbox, type Sandbox } from './game/sandbox.ts'
-import { connect } from './net/connection.ts'
+import { connect, currentServerUrl, saveServerUrl } from './net/connection.ts'
 import { createGrainOverlay } from './render/grain.ts'
 import { PALETTE } from './render/palette.ts'
 import { makeSky } from './render/sky.ts'
@@ -65,14 +65,31 @@ if (wantOffline) {
   } catch (error) {
     console.warn('[cannonball] server unreachable, falling back to offline sandbox', error)
     game = createSandbox(scene, chase, hud)
-    // make the fallback IMPOSSIBLE to miss — an offline sandbox looks like the
-    // old game and reads as "nothing new" when the server is simply down
-    const offlineBanner = document.createElement('div')
-    offlineBanner.style.cssText =
-      'position:fixed;top:0;left:0;right:0;background:#d96c6c;color:#fff;font:700 14px system-ui;' +
-      'text-align:center;padding:6px;z-index:100;'
-    offlineBanner.textContent = 'OFFLINE SANDBOX — game server unreachable. Run `npm run dev:server` and reload.'
-    document.body.appendChild(offlineBanner)
+    // make the fallback IMPOSSIBLE to miss, and let a FRIEND fix the server
+    // address right here (their tunnel URL) + retry, without editing any files
+    const bar = document.createElement('div')
+    bar.style.cssText =
+      'position:fixed;top:0;left:0;right:0;background:#d96c6c;color:#fff;font:600 13px system-ui;' +
+      'text-align:center;padding:8px;z-index:100;display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;'
+    const label = document.createElement('span')
+    label.textContent = `OFFLINE — can't reach ${currentServerUrl()}. Paste the host's server address:`
+    const input = document.createElement('input')
+    input.placeholder = 'wss://your-tunnel-url  (or  192.168.1.5:2567)'
+    input.style.cssText = 'font:12px ui-monospace,monospace;padding:4px 8px;border-radius:6px;border:0;min-width:280px;'
+    input.value = currentServerUrl()
+    const go = document.createElement('button')
+    go.textContent = 'connect'
+    go.style.cssText = 'font:700 12px system-ui;background:#fff;color:#4a443c;border:0;border-radius:6px;padding:5px 12px;cursor:pointer;'
+    const retry = (): void => {
+      const url = saveServerUrl(input.value)
+      if (url) location.href = `${location.pathname}?fresh`
+    }
+    go.addEventListener('click', retry)
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') retry()
+    })
+    bar.append(label, input, go)
+    document.body.appendChild(bar)
   }
 }
 

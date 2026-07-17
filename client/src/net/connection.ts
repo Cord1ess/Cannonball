@@ -12,11 +12,63 @@ import { Client, type Room } from '@colyseus/sdk'
  * dropped and we retry with a clean join. An empty frozen world can't happen.
  *
  * URL flags: `?fresh` forces a brand-new room · `?lag=100` delays sends N ms
- * · `?fast` creates the room with 0.15x phase timers (dev iteration).
+ * · `?fast` creates the room with 0.15x phase timers (dev iteration)
+ * · `?server=wss://host` points the client at a specific server (tunnels).
+ *
+ * SERVER RESOLUTION (first match wins):
+ *   1. ?server=... in the URL (share this to friends)
+ *   2. a value saved from the lobby's server field (localStorage)
+ *   3. VITE_SERVER_URL build env
+ *   4. same host as the page on :2567 (local play)
  */
 
 const TOKEN_KEY = 'cannonball:reconnection'
+const SERVER_KEY = 'cannonball:server'
 const WS_CLOSE_CONSENTED = 4000
+
+/** Normalize a user-typed address into a ws/wss URL. Accepts bare host,
+ *  host:port, http(s)://, or ws(s)://. Tunnels (https) -> wss automatically. */
+export function normalizeServerUrl(raw: string): string {
+  let s = raw.trim()
+  if (!s) return ''
+  // strip a trailing slash
+  s = s.replace(/\/+$/, '')
+  if (s.startsWith('ws://') || s.startsWith('wss://')) return s
+  if (s.startsWith('https://')) return 'wss://' + s.slice('https://'.length)
+  if (s.startsWith('http://')) return 'ws://' + s.slice('http://'.length)
+  // bare host[:port] — a public tunnel host has no port and wants wss
+  const hasPort = /:\d+$/.test(s)
+  return (hasPort ? 'ws://' : 'wss://') + s
+}
+
+/** The server URL the client should use, applying the resolution order. */
+export function resolveServerUrl(): string {
+  const params = new URLSearchParams(location.search)
+  const fromParam = params.get('server')
+  if (fromParam) {
+    const url = normalizeServerUrl(fromParam)
+    localStorage.setItem(SERVER_KEY, url) // remember it for reloads
+    return url
+  }
+  const saved = localStorage.getItem(SERVER_KEY)
+  if (saved) return saved
+  const fromEnv = import.meta.env.VITE_SERVER_URL as string | undefined
+  if (fromEnv) return fromEnv
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:2567`
+}
+
+/** Persist a server URL chosen in the lobby field (for the next reload). */
+export function saveServerUrl(raw: string): string {
+  const url = normalizeServerUrl(raw)
+  if (url) localStorage.setItem(SERVER_KEY, url)
+  else localStorage.removeItem(SERVER_KEY)
+  return url
+}
+
+/** The currently-resolved server URL, for display in the lobby field. */
+export function currentServerUrl(): string {
+  return resolveServerUrl()
+}
 
 export interface Connection {
   room: Room
@@ -44,9 +96,8 @@ async function stateArrives(room: Room, ms: number): Promise<boolean> {
 }
 
 export async function connect(): Promise<Connection> {
-  const endpoint =
-    (import.meta.env.VITE_SERVER_URL as string | undefined) ??
-    `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:2567`
+  const endpoint = resolveServerUrl()
+  console.log(`[net] connecting to ${endpoint}`)
 
   const client = new Client(endpoint)
   const params = new URLSearchParams(location.search)

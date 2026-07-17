@@ -39,8 +39,13 @@ Giant ball, wedge zones, tick eliminations, dive-headers, card draft. Solo dev +
 - Colyseus 0.17 serves `GET /__healthcheck` itself; never add a custom request handler (it races).
 - Room option `{ fast: true }` scales all pauses/ticks ×0.15 (tests/dev).
 - Client URL flags: `?dev` (reload = INSTANT live arena with bots; implies fresh+fast)
+  · `?server=wss://host` (point client at a specific server — tunnels/LAN; auto https→wss)
   · `?offline` (M1 sandbox) · `?fresh` (new room) · `?lag=100` (send delay)
   · `?fast` (create room with 0.15x phase timers).
+- **Friend playtest (no deploy): see PLAYTEST.md.** Share one link
+  `http://<client>/?server=<server>`. Server resolution order: ?server → saved (localStorage)
+  → VITE_SERVER_URL → same-host:2567. Failed connect shows a red bar with an input to paste the
+  server address + retry. Vite binds all hosts (`host:true, allowedHosts:true`) for tunnels/LAN.
 - Debug: backquote = panel (skip-phase, live ±bot, freeze ticks, reset round/ball, ball-to-me,
   wind, elim-me, new room), G = server ghosts.
 - Reload reconnects to the same seat via sessionStorage token + 20s grace.
