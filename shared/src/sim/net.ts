@@ -32,6 +32,18 @@ export interface NetPlayerRead {
   alive: boolean
   connected: boolean
   lastSeq: number
+  cardAbility: string
+  cardEquipment: string
+  cardAdvantage: string
+}
+
+export interface NetHandoutRead {
+  elimSeat: number
+  advCardId: string
+  curseCardId: string
+  advTo: number
+  curseTo: number
+  revealed: boolean
 }
 
 export interface NetBallRead {
@@ -45,18 +57,27 @@ export interface NetBallRead {
 
 export interface NetStateRead {
   serverTime: number
+  phase: number
+  phaseRemaining: number
+  seatsAtStart: number
+  hostSessionId: string
   survivors: number
   tickRemaining: number
+  halftime: boolean
+  winnerSeat: number
   windX: number
   windZ: number
   windStrength: number
   ball: NetBallRead
+  handout: NetHandoutRead
   players: {
     get(id: string): NetPlayerRead | undefined
     forEach(cb: (player: NetPlayerRead, id: string) => void): void
     size: number
   }
   meters: ArrayLike<number>
+  zoneSeat: ArrayLike<number> & { length: number }
+  overtimeSeats: ArrayLike<number> & { length: number }
 }
 
 /** server -> client event broadcasts (FX only — state carries the truth) */

@@ -87,7 +87,7 @@ export function createHud(): Hud {
 
   return {
     update(state: HudState): void {
-      timer.textContent = Math.ceil(state.tickRemaining).toString()
+      timer.textContent = Number.isFinite(state.tickRemaining) ? Math.ceil(state.tickRemaining).toString() : ''
       if (bars.length !== state.zones.length) rebuildBars(state.zones.length)
       for (let i = 0; i < state.zones.length; i++) {
         const zone = state.zones[i]!

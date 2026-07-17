@@ -34,6 +34,15 @@ export class ChaseCamera {
     return Math.cos(this.yaw)
   }
 
+  /** eliminated spectators drift around the arena rim */
+  updateOrbit(dt: number, radius: number, height: number): void {
+    this.yaw += dt * 0.12
+    this.#pos.set(Math.cos(this.yaw) * radius, height, Math.sin(this.yaw) * radius)
+    this.#camera.position.copy(this.#pos)
+    this.#look.set(0, 1, 0)
+    this.#camera.lookAt(this.#look)
+  }
+
   update(dt: number, tx: number, ty: number, tz: number): void {
     // pulled back and raised, angled down at the player (M1 feedback)
     const dist = 10.5

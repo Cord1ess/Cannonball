@@ -1,15 +1,16 @@
 import * as THREE from 'three'
 import {
   BALL_RADIUS,
+  DUEL_METER_CAPACITY_S,
   FIXED_DELTA,
   INTERP_DELAY_MS,
+  LAUNCH_AIM_ARC_DEG,
   PATCH_HZ,
   SPRINT_SPEED,
   STAMINA_MAX,
-  TICK_SECONDS_PER_SURVIVOR,
 } from '@shared/constants.ts'
-import { footprintZone, makeArena } from '@shared/sim/arena.ts'
-import type { NetInput, NetPlayerRead, NetStateRead } from '@shared/sim/net.ts'
+import { footprintZone, makeArena, type Arena } from '@shared/sim/arena.ts'
+import type { NetHandoutRead, NetInput, NetPlayerRead, NetStateRead } from '@shared/sim/net.ts'
 import {
   clearEvents,
   makeBall,
@@ -20,6 +21,8 @@ import {
   type PlayerInputFrame,
   type PlayerSim,
 } from '@shared/sim/physics.ts'
+import { isPlayPhase, Phase, tickInterval } from '@shared/match/phases.ts'
+import type { CardPool } from '@shared/cards/definitions.ts'
 import { createArenaView, type ArenaView } from '../render/arenaView.ts'
 import { createBallView, type BallView } from '../render/ballView.ts'
 import { createBean, type Bean } from '../render/bean.ts'
@@ -31,20 +34,18 @@ import type { Connection } from '../net/connection.ts'
 import { SEAT_COLORS } from './sandbox.ts'
 
 /**
- * M2 online client (architecture.md §2):
- * - LOCAL player: client-side prediction + rewind-replay reconciliation
- *   against `lastSeq`, residual error smoothed via a decaying render offset.
- * - REMOTE players: snapshot interpolation ~120ms behind server time.
- * - BALL: simulated locally every step (so your dives connect frame-0),
- *   blended toward server truth per patch — gentle/firm/snap by error size.
- * - Judgment (meters/ticks) is read straight from replicated state.
+ * Phase-aware online client (M3).
+ * - PLAY phases (arena/overtime/duel): local player predicted + reconciled,
+ *   ball locally simulated + server-corrected, remotes interpolated.
+ * - Every other phase: EVERYONE (including self) renders from server
+ *   snapshots — the server owns drafts, launches, and pauses.
+ * - The MatchClient surface feeds the DOM match UI.
  */
 
-const SEATS = 6
-const SNAP_ERROR = 3 // beyond this, stop blending and teleport
-const SERVER_BALL_LOOKAHEAD_S = 0.7 / PATCH_HZ // sample staleness compensation
+const SNAP_ERROR = 3
+const SERVER_BALL_LOOKAHEAD_S = 0.7 / PATCH_HZ
 
-interface RemoteSnap {
+interface Snap {
   t: number
   x: number
   y: number
@@ -58,8 +59,48 @@ interface RemoteSnap {
 
 interface RemoteEntity {
   bean: Bean
-  snaps: RemoteSnap[]
-  stub: PlayerSim // approximate sim body so the local ball reacts to remotes
+  snaps: Snap[]
+  stub: PlayerSim
+  seat: number
+}
+
+export interface MatchEvent {
+  type: 'elim' | 'overtime' | 'volley' | 'emote'
+  seat?: number
+  seats?: number[]
+  id?: number
+}
+
+export interface MatchPlayerInfo {
+  sessionId: string
+  seat: number
+  alive: boolean
+  connected: boolean
+  cards: string[]
+}
+
+export interface MatchClient {
+  readonly roomId: string
+  phase(): number
+  phaseRemaining(): number
+  mySeat(): number
+  myAlive(): boolean
+  isHost(): boolean
+  seatsAtStart(): number
+  players(): MatchPlayerInfo[]
+  handout(): NetHandoutRead | null
+  winnerSeat(): number
+  halftime(): boolean
+  overtimeSeats(): number[]
+  draftOffers(): Record<CardPool, string[]> | null
+  picks(): Partial<Record<CardPool, string>>
+  aimAngle(): number
+  start(): void
+  pick(pool: CardPool, index: number): void
+  assign(advTo: number, curseTo: number): void
+  rematch(): void
+  emote(id: number): void
+  onEvent(cb: (event: MatchEvent) => void): void
 }
 
 export interface OnlineGame {
@@ -71,23 +112,22 @@ export interface OnlineGame {
   readonly tickRemaining: number
   ballAlarm(): boolean
   staminaFrac(): number
+  spectating(): boolean
+  readonly match: MatchClient
   readonly debug: DebugHooks
 }
 
 export function createOnlineGame(
   scene: THREE.Scene,
   camera: ChaseCamera,
-  hud: Hud,
+  _hud: Hud,
   conn: Connection,
 ): OnlineGame {
-  const arena = makeArena(SEATS)
   const state = conn.room.state as unknown as NetStateRead
 
-  const arenaView: ArenaView = createArenaView(
-    arena,
-    Array.from({ length: SEATS }, (_, i) => SEAT_COLORS[i] ?? PALETTE.warmGray),
-  )
-  scene.add(arenaView.group)
+  let arena: Arena = makeArena(6)
+  let arenaView: ArenaView | null = null
+  let arenaKey = ''
 
   const ballView: BallView = createBallView()
   scene.add(ballView.group)
@@ -96,27 +136,43 @@ export function createOnlineGame(
   let mySeat = -1
   let localSim: PlayerSim | null = null
   let myBean: Bean | null = null
+  const selfSnaps: Snap[] = []
   const inputBuffer: NetInput[] = []
   let seq = 0
+  let wasPredicting = false
   const renderOffset = { x: 0, y: 0, z: 0 }
   const prevLocal = { x: 0, y: 0, z: 0 }
+  let myAim = 0
+  let aimSendCd = 0
 
-  // --- remotes -------------------------------------------------------------------
+  // --- remotes / ball / time -------------------------------------------------------
   const remotes = new Map<string, RemoteEntity>()
-
-  // --- ball (local prediction) ----------------------------------------------------
   const ball = makeBall()
   const prevBall = { x: 0, y: 0, z: 0 }
   const serverBall = { x: 0, y: BALL_RADIUS, z: 0, vx: 0, vy: 0, vz: 0 }
-  // correction budget measured at patch time, paid out over ~100ms of steps —
-  // no continuous pull toward a stale sample, so the rest state never jitters
   const ballCorr = { x: 0, y: 0, z: 0 }
   const events = makeEvents()
-
-  // --- server time estimate ---------------------------------------------------------
-  let timeOffset: number | null = null // serverTime - performance.now()/1000
+  let timeOffset: number | null = null
   let lastPatchAt = 0
   const serverMe = { x: 0, y: 0, z: 0, has: false }
+
+  // --- match UI plumbing --------------------------------------------------------------
+  let draftOffers: Record<CardPool, string[]> | null = null
+  const myPicks: Partial<Record<CardPool, string>> = {}
+  const eventListeners: Array<(event: MatchEvent) => void> = []
+  const emitEvent = (event: MatchEvent): void => {
+    for (const listener of eventListeners) listener(event)
+  }
+
+  const predicting = (): boolean => isPlayPhase(state.phase ?? 0) && aliveOf(mySeat) && localSim !== null
+
+  function aliveOf(seat: number): boolean {
+    let alive = false
+    state.players.forEach((p) => {
+      if (p.seat === seat) alive = p.alive
+    })
+    return alive
+  }
 
   function ensureLocal(): void {
     if (localSim) return
@@ -130,27 +186,64 @@ export function createOnlineGame(
     camera.yaw = me.yaw
   }
 
+  function rebuildArenaIfNeeded(): void {
+    const zoneSeat = state.zoneSeat
+    if (!zoneSeat || zoneSeat.length === 0) return
+    const seats: number[] = []
+    for (let i = 0; i < zoneSeat.length; i++) seats.push(zoneSeat[i] ?? 0)
+    const key = seats.join(',')
+    if (key === arenaKey) return
+    arenaKey = key
+    arena = makeArena(Math.max(seats.length, seats.length === 2 ? 2 : 3))
+    if (arenaView) {
+      scene.remove(arenaView.group)
+      arenaView.dispose()
+    }
+    arenaView = createArenaView(
+      arena,
+      seats.map((seat) => SEAT_COLORS[seat] ?? PALETTE.warmGray),
+    )
+    scene.add(arenaView.group)
+  }
+
+  function pushSnap(buffer: Snap[], p: NetPlayerRead): void {
+    buffer.push({
+      t: state.serverTime,
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      yaw: p.yaw,
+      grounded: p.grounded,
+      diving: p.diving,
+      knocked: p.knocked,
+      sprinting: p.sprinting,
+    })
+    if (buffer.length > 40) buffer.splice(0, buffer.length - 40)
+  }
+
   conn.room.onStateChange(() => {
     ensureLocal()
+    rebuildArenaIfNeeded()
     lastPatchAt = performance.now()
 
     const nowS = performance.now() / 1000
     const measured = state.serverTime - nowS
     timeOffset = timeOffset === null ? measured : timeOffset + (measured - timeOffset) * 0.1
 
-    // --- reconcile local player -------------------------------------------------
     const me = state.players.get(conn.sessionId)
     if (me) {
       serverMe.x = me.x
       serverMe.y = me.y
       serverMe.z = me.z
       serverMe.has = true
+      pushSnap(selfSnaps, me)
     }
-    if (me && localSim) {
+
+    // reconcile only while predicting
+    if (me && localSim && predicting()) {
       const beforeX = localSim.x
       const beforeY = localSim.y
       const beforeZ = localSim.z
-
       localSim.x = me.x
       localSim.y = me.y
       localSim.z = me.z
@@ -163,49 +256,32 @@ export function createOnlineGame(
       localSim.stamina = me.stamina
       if (me.knocked) localSim.knockedCd = Math.max(localSim.knockedCd, 0.1)
 
-      // drop acked inputs, replay the rest through the SAME shared sim
       let i = 0
       while (i < inputBuffer.length && inputBuffer[i]!.seq <= me.lastSeq) i++
       inputBuffer.splice(0, i)
-      for (const pending of inputBuffer) {
-        stepPlayer(localSim, pending, arena, FIXED_DELTA)
-      }
+      for (const pending of inputBuffer) stepPlayer(localSim, pending, arena, FIXED_DELTA)
 
-      // smooth the correction instead of snapping the render
       renderOffset.x += beforeX - localSim.x
       renderOffset.y += beforeY - localSim.y
       renderOffset.z += beforeZ - localSim.z
-      const mag = Math.hypot(renderOffset.x, renderOffset.y, renderOffset.z)
-      if (mag > SNAP_ERROR) {
+      if (Math.hypot(renderOffset.x, renderOffset.y, renderOffset.z) > SNAP_ERROR) {
         renderOffset.x = renderOffset.y = renderOffset.z = 0
       }
     }
 
-    // --- sample remotes ---------------------------------------------------------------
+    // remotes
     state.players.forEach((p: NetPlayerRead, id: string) => {
       if (id === conn.sessionId) return
       let remote = remotes.get(id)
       if (!remote) {
         const bean = createBean(SEAT_COLORS[p.seat] ?? PALETTE.teamBlue)
         scene.add(bean.group)
-        remote = { bean, snaps: [], stub: makePlayer(p.seat, p.x, p.z, p.yaw) }
+        remote = { bean, snaps: [], stub: makePlayer(p.seat, p.x, p.z, p.yaw), seat: p.seat }
         remotes.set(id, remote)
       }
-      remote.snaps.push({
-        t: state.serverTime,
-        x: p.x,
-        y: p.y,
-        z: p.z,
-        yaw: p.yaw,
-        grounded: p.grounded,
-        diving: p.diving,
-        knocked: p.knocked,
-        sprinting: p.sprinting,
-      })
-      if (remote.snaps.length > 40) remote.snaps.splice(0, remote.snaps.length - 40)
+      pushSnap(remote.snaps, p)
       remote.stub.diving = p.diving
     })
-    // remove departed
     for (const [id, remote] of remotes) {
       if (!state.players.get(id)) {
         scene.remove(remote.bean.group)
@@ -214,16 +290,24 @@ export function createOnlineGame(
       }
     }
 
-    // --- ball: record server truth, blend or snap -----------------------------------------
+    // ball truth
     serverBall.x = state.ball.x
     serverBall.y = state.ball.y
     serverBall.z = state.ball.z
     serverBall.vx = state.ball.vx
     serverBall.vy = state.ball.vy
     serverBall.vz = state.ball.vz
-    // the sample is ~half a patch interval stale by the time we compare —
-    // extrapolate it along its own velocity so corrections never drag a fast
-    // ball backward down its path (reads as rubber-banding at speed)
+    if (!isPlayPhase(state.phase ?? 0)) {
+      // pauses: the server parks the ball — just follow it exactly
+      ball.x = serverBall.x
+      ball.y = serverBall.y
+      ball.z = serverBall.z
+      ball.vx = serverBall.vx
+      ball.vy = serverBall.vy
+      ball.vz = serverBall.vz
+      ballCorr.x = ballCorr.y = ballCorr.z = 0
+      return
+    }
     const srvSpeed = Math.hypot(serverBall.vx, serverBall.vy, serverBall.vz)
     const lookahead = srvSpeed > 0.5 ? SERVER_BALL_LOOKAHEAD_S : 0
     const sx = serverBall.x + serverBall.vx * lookahead
@@ -242,11 +326,9 @@ export function createOnlineGame(
       ball.vz = serverBall.vz
       ballCorr.x = ballCorr.y = ballCorr.z = 0
     } else if (err > 0.06) {
-      // measure once per patch; pay out smoothly in fixedStep
       ballCorr.x = errX
       ballCorr.y = errY
       ballCorr.z = errZ
-      // velocity converges at patch time only
       ball.vx += (serverBall.vx - ball.vx) * 0.5
       ball.vy += (serverBall.vy - ball.vy) * 0.35
       ball.vz += (serverBall.vz - ball.vz) * 0.5
@@ -255,19 +337,25 @@ export function createOnlineGame(
     }
   })
 
+  conn.room.onMessage('draftOffer', (offers: Record<CardPool, string[]>) => {
+    draftOffers = offers
+    for (const pool of Object.keys(myPicks) as CardPool[]) delete myPicks[pool]
+  })
   conn.room.onMessage('header', ({ seat }: { seat: number }) => {
-    if (seat === mySeat) return // local prediction already played it
-    for (const remote of remotes.values()) {
-      if (remote.stub.seat === seat) remote.bean.header()
-    }
+    if (seat === mySeat) return
+    for (const remote of remotes.values()) if (remote.seat === seat) remote.bean.header()
   })
   conn.room.onMessage('knock', ({ seat }: { seat: number }) => {
     if (seat === mySeat) camera.kick(0.9)
   })
-  conn.room.onMessage('elim', () => {})
+  conn.room.onMessage('elim', ({ seat }: { seat: number }) => emitEvent({ type: 'elim', seat }))
+  conn.room.onMessage('overtime', ({ seats }: { seats: number[] }) => emitEvent({ type: 'overtime', seats }))
+  conn.room.onMessage('volley', () => emitEvent({ type: 'volley' }))
+  conn.room.onMessage('emote', ({ seat, id }: { seat: number; id: number }) =>
+    emitEvent({ type: 'emote', seat, id }),
+  )
   conn.room.onMessage('round', () => {})
 
-  /** pay out the patch-time correction budget over ~100ms of fixed steps */
   function blendBallToServer(dt: number): void {
     const remaining = Math.hypot(ballCorr.x, ballCorr.y, ballCorr.z)
     if (remaining < 1e-4) return
@@ -280,29 +368,103 @@ export function createOnlineGame(
     ballCorr.z *= 1 - k
   }
 
-  const aliveOf = (seat: number): boolean => {
-    let alive = true
-    state.players.forEach((p) => {
-      if (p.seat === seat) alive = p.alive
-    })
-    return alive
+  const match: MatchClient = {
+    roomId: conn.room.roomId,
+    phase: () => state.phase ?? 0,
+    phaseRemaining: () => state.phaseRemaining ?? 0,
+    mySeat: () => mySeat,
+    myAlive: () => aliveOf(mySeat),
+    isHost: () => state.hostSessionId === conn.sessionId,
+    seatsAtStart: () => state.seatsAtStart ?? 0,
+    players(): MatchPlayerInfo[] {
+      const list: MatchPlayerInfo[] = []
+      state.players.forEach((p, sessionId) => {
+        list.push({
+          sessionId,
+          seat: p.seat,
+          alive: p.alive,
+          connected: p.connected,
+          cards: [p.cardAbility, p.cardEquipment, p.cardAdvantage].filter(Boolean),
+        })
+      })
+      return list.sort((a, b) => a.seat - b.seat)
+    },
+    handout: () => state.handout ?? null,
+    winnerSeat: () => state.winnerSeat ?? -1,
+    halftime: () => state.halftime ?? false,
+    overtimeSeats(): number[] {
+      const seats: number[] = []
+      const raw = state.overtimeSeats
+      for (let i = 0; i < (raw?.length ?? 0); i++) seats.push(raw[i] ?? 0)
+      return seats
+    },
+    draftOffers: () => draftOffers,
+    picks: () => myPicks,
+    aimAngle: () => myAim,
+    start: () => conn.send('start'),
+    pick(pool: CardPool, index: number): void {
+      const id = draftOffers?.[pool]?.[index]
+      if (id) myPicks[pool] = id
+      conn.send('pick', { pool, index })
+    },
+    assign: (advTo: number, curseTo: number) => conn.send('assign', { advTo, curseTo }),
+    rematch: () => conn.send('rematch'),
+    emote: (id: number) => conn.send('emote', { id }),
+    onEvent: (cb) => eventListeners.push(cb),
   }
 
   return {
+    match,
     get gameOver() {
-      return false // the server owns rounds in M2
+      return false
     },
     get tickRemaining() {
+      const phase = state.phase ?? 0
+      if (phase === Phase.Duel || phase === Phase.Overtime) return Number.NaN
       return state.tickRemaining ?? 0
     },
-    reset(): void {
-      /* server-side */
+    reset(): void {},
+    spectating(): boolean {
+      return (state.phase ?? 0) !== Phase.Lobby && mySeat >= 0 && !aliveOf(mySeat)
     },
 
     fixedStep(input: PlayerInputFrame): void {
       ensureLocal()
       if (!localSim) return
       const dt = FIXED_DELTA
+      const phase = state.phase ?? 0
+
+      // launch: A/D steers the cannon aim
+      if (phase === Phase.Launch) {
+        const arc = (LAUNCH_AIM_ARC_DEG * Math.PI) / 360
+        myAim = Math.max(-arc, Math.min(arc, myAim + input.dirX * 1.4 * dt))
+        aimSendCd -= dt
+        if (aimSendCd <= 0) {
+          aimSendCd = 0.1
+          conn.send('aim', { angle: myAim })
+        }
+      } else if (phase === Phase.Restart) {
+        myAim = 0
+      }
+
+      const isPredicting = predicting()
+      if (isPredicting && !wasPredicting) {
+        // entering play: adopt server truth, fresh input stream
+        const me = state.players.get(conn.sessionId)
+        if (me) {
+          localSim.x = me.x
+          localSim.y = me.y
+          localSim.z = me.z
+          localSim.vx = me.vx
+          localSim.vy = me.vy
+          localSim.vz = me.vz
+          localSim.yaw = me.yaw
+        }
+        inputBuffer.length = 0
+        renderOffset.x = renderOffset.y = renderOffset.z = 0
+      }
+      wasPredicting = isPredicting
+      if (!isPredicting) return
 
       prevLocal.x = localSim.x
       prevLocal.y = localSim.y
@@ -311,7 +473,6 @@ export function createOnlineGame(
       prevBall.y = ball.y
       prevBall.z = ball.z
 
-      // 1. predict yourself + tell the server
       seq++
       const net: NetInput = { seq, ...input }
       stepPlayer(localSim, net, arena, dt)
@@ -319,11 +480,10 @@ export function createOnlineGame(
       if (inputBuffer.length > 120) inputBuffer.splice(0, inputBuffer.length - 120)
       conn.send('input', net)
 
-      // 2. predict the ball: synced wind + local physics + player contacts
       ball.vx += (state.windX ?? 0) * (state.windStrength ?? 0) * dt
       ball.vz += (state.windZ ?? 0) * (state.windStrength ?? 0) * dt
       const bodies: PlayerSim[] = [localSim]
-      const bodiesAlive: boolean[] = new Array(SEATS).fill(true)
+      const bodiesAlive: boolean[] = new Array(8).fill(true)
       for (const remote of remotes.values()) bodies.push(remote.stub)
       stepBallWithPlayers(ball, bodies, bodiesAlive, arena, dt, events)
       for (const header of events.headers) {
@@ -337,39 +497,60 @@ export function createOnlineGame(
     },
 
     frameUpdate(dt: number, alpha: number, lean: number): void {
-      // decay the reconciliation render offset (~100ms feel)
       const decay = Math.exp(-10 * dt)
       renderOffset.x *= decay
       renderOffset.y *= decay
       renderOffset.z *= decay
 
-      if (localSim && myBean) {
-        const px = prevLocal.x + (localSim.x - prevLocal.x) * alpha + renderOffset.x
-        const py = Math.max(0, prevLocal.y + (localSim.y - prevLocal.y) * alpha + renderOffset.y)
-        const pz = prevLocal.z + (localSim.z - prevLocal.z) * alpha + renderOffset.z
-        const run = Math.min(1, Math.hypot(localSim.vx, localSim.vz) / SPRINT_SPEED)
-        const look = lookToward(localSim, ball.x, ball.y, ball.z)
-        myBean.update(dt, {
-          x: px,
-          y: py,
-          z: pz,
-          yaw: localSim.yaw,
-          run,
-          grounded: localSim.grounded,
-          diving: localSim.diving,
-          knocked: localSim.knockedCd > 0,
-          sprinting: localSim.sprinting,
-          lean,
-          lookX: look.x,
-          lookY: look.y,
-        })
-        camera.update(dt, px, py, pz)
-      }
-
-      // remotes at interpolated render time
       const nowS = performance.now() / 1000
       const renderTime = timeOffset === null ? null : nowS + timeOffset - INTERP_DELAY_MS / 1000
+
+      // self: predicted while playing, server-sampled otherwise
+      let selfX = 0
+      let selfY = 0
+      let selfZ = 0
+      if (localSim && myBean) {
+        if (predicting()) {
+          selfX = prevLocal.x + (localSim.x - prevLocal.x) * alpha + renderOffset.x
+          selfY = Math.max(0, prevLocal.y + (localSim.y - prevLocal.y) * alpha + renderOffset.y)
+          selfZ = prevLocal.z + (localSim.z - prevLocal.z) * alpha + renderOffset.z
+          const run = Math.min(1, Math.hypot(localSim.vx, localSim.vz) / SPRINT_SPEED)
+          const look = lookToward(localSim, ball.x, ball.y, ball.z)
+          myBean.update(dt, {
+            x: selfX,
+            y: selfY,
+            z: selfZ,
+            yaw: localSim.yaw,
+            run,
+            grounded: localSim.grounded,
+            diving: localSim.diving,
+            knocked: localSim.knockedCd > 0,
+            sprinting: localSim.sprinting,
+            lean,
+            lookX: look.x,
+            lookY: look.y,
+          })
+        } else {
+          const pose = sampleSnaps(selfSnaps, renderTime)
+          if (pose) {
+            selfX = pose.x
+            selfY = pose.y
+            selfZ = pose.z
+            localSim.x = pose.x
+            localSim.y = pose.y
+            localSim.z = pose.z
+            const look = lookToward(localSim, ball.x, ball.y, ball.z)
+            myBean.update(dt, { ...pose, lean, lookX: look.x, lookY: look.y })
+          }
+        }
+        myBean.group.visible = aliveOf(mySeat) || (state.phase ?? 0) === Phase.Lobby
+      }
+
+      // remotes
       for (const remote of remotes.values()) {
+        const remoteAlive = aliveOf(remote.seat)
+        remote.bean.group.visible = remoteAlive || (state.phase ?? 0) === Phase.Lobby
+        if (!remoteAlive) continue
         const pose = sampleSnaps(remote.snaps, renderTime)
         if (!pose) continue
         remote.stub.x = pose.x
@@ -377,42 +558,44 @@ export function createOnlineGame(
         remote.stub.z = pose.z
         remote.stub.yaw = pose.yaw
         const look = lookToward(remote.stub, ball.x, ball.y, ball.z)
-        remote.bean.update(dt, {
-          x: pose.x,
-          y: pose.y,
-          z: pose.z,
-          yaw: pose.yaw,
-          run: pose.run,
-          grounded: pose.grounded,
-          diving: pose.diving,
-          knocked: pose.knocked,
-          sprinting: pose.sprinting,
-          lean: 0,
-          lookX: look.x,
-          lookY: look.y,
-        })
-        remote.bean.group.visible = true
+        remote.bean.update(dt, { ...pose, lean: 0, lookX: look.x, lookY: look.y })
       }
 
       const bx = prevBall.x + (ball.x - prevBall.x) * alpha
       const by = prevBall.y + (ball.y - prevBall.y) * alpha
       const bz = prevBall.z + (ball.z - prevBall.z) * alpha
       const zone = footprintZone(arena, bx, bz)
-      ballView.update(bx, by, bz, zone >= 0 ? (SEAT_COLORS[zone] ?? null) : null)
+      const zoneSeatArr = state.zoneSeat
+      const zoneOwner = zone >= 0 && zoneSeatArr ? zoneSeatArr[zone] : undefined
+      ballView.update(bx, by, bz, zoneOwner !== undefined ? (SEAT_COLORS[zoneOwner] ?? null) : null)
 
-      const interval = TICK_SECONDS_PER_SURVIVOR * SEATS
       const fracs: number[] = []
-      for (let seat = 0; seat < SEATS; seat++) fracs.push((state.meters?.[seat] ?? 0) / Math.max(1, interval * 0.5))
-      arenaView.setDanger(fracs)
+      const capacity =
+        (state.phase ?? 0) === Phase.Duel ? DUEL_METER_CAPACITY_S : tickInterval(state.survivors || 6) * 0.5
+      for (let i = 0; i < (zoneSeatArr?.length ?? 0); i++) {
+        const seat = zoneSeatArr[i] ?? 0
+        fracs.push((state.meters?.[seat] ?? 0) / Math.max(1, capacity))
+      }
+      arenaView?.setDanger(fracs)
+
+      // camera: chase while playing/waiting, slow orbit while eliminated
+      if (this.spectating()) {
+        camera.updateOrbit(dt, arena.radius + 14, 14)
+      } else {
+        camera.update(dt, selfX, selfY, selfZ)
+      }
     },
 
     hudZones(): HudZone[] {
-      const interval = TICK_SECONDS_PER_SURVIVOR * SEATS
       const zones: HudZone[] = []
-      for (let seat = 0; seat < SEATS; seat++) {
+      const zoneSeatArr = state.zoneSeat
+      const capacity =
+        (state.phase ?? 0) === Phase.Duel ? DUEL_METER_CAPACITY_S : tickInterval(state.survivors || 6) * 0.5
+      for (let i = 0; i < (zoneSeatArr?.length ?? 0); i++) {
+        const seat = zoneSeatArr[i] ?? 0
         zones.push({
           color: `#${(SEAT_COLORS[seat] ?? 0).toString(16).padStart(6, '0')}`,
-          frac: (state.meters?.[seat] ?? 0) / Math.max(1, interval * 0.5),
+          frac: (state.meters?.[seat] ?? 0) / Math.max(1, capacity),
           isPlayer: seat === mySeat,
         })
       }
@@ -420,8 +603,10 @@ export function createOnlineGame(
     },
 
     ballAlarm(): boolean {
-      if (mySeat < 0 || !aliveOf(mySeat)) return false
-      return footprintZone(arena, ball.x, ball.z) === mySeat
+      if (mySeat < 0 || !aliveOf(mySeat) || !isPlayPhase(state.phase ?? 0)) return false
+      const zone = footprintZone(arena, ball.x, ball.z)
+      const zoneSeatArr = state.zoneSeat
+      return zone >= 0 && zoneSeatArr?.[zone] === mySeat
     },
 
     staminaFrac(): number {
@@ -439,6 +624,7 @@ export function createOnlineGame(
         return {
           session: conn.sessionId,
           seat: mySeat,
+          phase: state.phase ?? 0,
           players: state.players?.size ?? 0,
           seq,
           buffered: inputBuffer.length,
@@ -446,14 +632,11 @@ export function createOnlineGame(
           ballCorr: `${corrMag.toFixed(3)}m`,
           patchAge: `${(performance.now() - lastPatchAt).toFixed(0)}ms`,
           offset: timeOffset === null ? 'n/a' : `${timeOffset.toFixed(3)}s`,
-          me: localSim ? `${localSim.x.toFixed(1)}, ${localSim.z.toFixed(1)}` : 'n/a',
           ball: `${ball.x.toFixed(1)}, ${ball.z.toFixed(1)} y${ball.y.toFixed(1)}`,
         }
       },
       ghosts(draw): void {
-        if (serverMe.has) {
-          draw.wireBox(serverMe.x, serverMe.y + 0.7, serverMe.z, 0.45, 0.7, 0.45, 1, 0, 1)
-        }
+        if (serverMe.has) draw.wireBox(serverMe.x, serverMe.y + 0.7, serverMe.z, 0.45, 0.7, 0.45, 1, 0, 1)
         draw.wireSphere(serverBall.x, serverBall.y, serverBall.z, BALL_RADIUS, 0, 1, 1)
         draw.line(ball.x, ball.y, ball.z, serverBall.x, serverBall.y, serverBall.z, 1, 1, 0)
       },
@@ -487,8 +670,7 @@ interface SampledPose {
   sprinting: boolean
 }
 
-/** interpolate between the two snapshots bracketing renderTime */
-function sampleSnaps(snaps: RemoteSnap[], renderTime: number | null): SampledPose | null {
+function sampleSnaps(snaps: Snap[], renderTime: number | null): SampledPose | null {
   if (snaps.length === 0) return null
   const last = snaps[snaps.length - 1]!
   if (renderTime === null || snaps.length === 1 || renderTime >= last.t) {

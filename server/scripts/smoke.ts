@@ -1,9 +1,10 @@
 import { Client, type Room } from '@colyseus/sdk'
 
 /**
- * M2 smoke: two headless clients join, drive inputs for ~3s, and we assert
- * the authoritative sim moved both players, the ball exists, seats differ,
- * lastSeq acks flow, and serverTime advances. Exit 0 = netcode alive.
+ * M3 smoke: drives the full match spine with two headless clients in a
+ * fast-mode room (all pauses x0.15): LOBBY -> host start -> DRAFT (offers
+ * received, picks sent) -> LAUNCH -> DUEL (2 players skip the arena straight
+ * to sudden kickoff) -> inputs move the authoritative sims. Exit 0 = alive.
  */
 
 const endpoint = process.env.ENDPOINT ?? 'ws://localhost:2567'
@@ -12,83 +13,94 @@ const fail = (message: string): never => {
   console.error(`[smoke] FAILED: ${message}`)
   process.exit(1)
 }
-
-const timeout = setTimeout(() => fail('timed out after 15s'), 15_000)
+const timeout = setTimeout(() => fail('timed out after 30s'), 30_000)
 
 interface StateRead {
+  phase: number
+  phaseRemaining: number
+  hostSessionId: string
   serverTime: number
-  tickRemaining: number
   players: { get(id: string): PlayerRead | undefined; size: number }
-  ball: { x: number; y: number; z: number }
+  ball: { x: number; y: number }
 }
 interface PlayerRead {
   seat: number
   x: number
   z: number
   lastSeq: number
-  stamina: number
+  alive: boolean
+  cardAbility: string
 }
 
 const read = (room: Room): StateRead => room.state as unknown as StateRead
 
+async function waitFor(cond: () => boolean, what: string, ms = 15000): Promise<void> {
+  const deadline = Date.now() + ms
+  while (!cond()) {
+    if (Date.now() > deadline) fail(`waiting for ${what}`)
+    await new Promise((r) => setTimeout(r, 60))
+  }
+}
+
 const clientA = new Client(endpoint)
 const clientB = new Client(endpoint)
-// create() (not joinOrCreate) — a FRESH room, immune to ghost sessions still
-// in their reconnection grace window from earlier crashed runs
-const roomA = await clientA.create('match')
+const roomA = await clientA.create('match', { fast: true })
 const roomB = await clientB.joinById(roomA.roomId)
-console.log(`[smoke] A=${roomA.sessionId} B=${roomB.sessionId} in room ${roomA.roomId}`)
+console.log(`[smoke] A=${roomA.sessionId} B=${roomB.sessionId} room=${roomA.roomId} (fast)`)
 
-// wait for BOTH session ids to replicate
-await new Promise<void>((resolve) => {
-  const check = (): void => {
-    const players = read(roomA).players
-    if (players?.get(roomA.sessionId) && players?.get(roomB.sessionId)) resolve()
-    else setTimeout(check, 50)
-  }
-  check()
-})
+let offersA = false
+let offersB = false
+roomA.onMessage('draftOffer', () => (offersA = true))
+roomB.onMessage('draftOffer', () => (offersB = true))
+roomA.onMessage('*', () => {})
+roomB.onMessage('*', () => {})
 
-const a0 = read(roomA).players.get(roomA.sessionId) ?? fail('A missing from state')
-const b0 = read(roomA).players.get(roomB.sessionId) ?? fail('B missing from state')
-if (a0.seat === b0.seat) fail(`both got seat ${a0.seat}`)
-const startAx = a0.x
-const startBx = b0.x
-const t0 = read(roomA).serverTime
+await waitFor(() => !!read(roomA).players.get(roomB.sessionId), 'both players in state')
+if (read(roomA).hostSessionId !== roomA.sessionId) fail('A should be host')
 
-// drive: A runs +x-ish, B runs -x-ish and jumps, 60Hz for 3s
-let seqA = 0
-let seqB = 0
+// LOBBY -> start
+if (read(roomA).phase !== 0) fail(`expected Lobby(0), got ${read(roomA).phase}`)
+roomA.send('start')
+await waitFor(() => read(roomA).phase === 1, 'DRAFT phase')
+console.log('[smoke] draft started')
+await waitFor(() => offersA && offersB, 'draft offers delivered')
+roomA.send('pick', { pool: 'ability', index: 0 })
+roomB.send('pick', { pool: 'equipment', index: 1 })
+
+// DRAFT auto-completes -> LAUNCH -> (2 players) DUEL
+await waitFor(() => read(roomA).phase === 2, 'LAUNCH phase')
+console.log('[smoke] launch countdown')
+roomA.send('aim', { angle: 0.3 })
+await waitFor(() => read(roomA).phase === 6, 'DUEL phase')
+console.log('[smoke] sudden kickoff reached')
+
+const meA = read(roomA).players.get(roomA.sessionId) ?? fail('A missing')
+if (meA.cardAbility === '') fail('loadout not revealed at launch')
+
+// let the cannon flight land before measuring
+await new Promise((r) => setTimeout(r, 1200))
+const startAx = (read(roomA).players.get(roomA.sessionId) ?? fail('A missing post-flight')).x
+
+// drive A toward the FAR side (it spawns near +x) — clear displacement
+let seqNum = 0
 const driver = setInterval(() => {
-  seqA++
-  seqB++
-  roomA.send('input', { seq: seqA, dirX: 1, dirZ: 0.2, jump: false, dive: false, sprint: true })
-  roomB.send('input', { seq: seqB, dirX: -1, dirZ: -0.2, jump: seqB % 60 === 30, dive: seqB % 60 === 40, sprint: false })
+  seqNum++
+  roomA.send('input', { seq: seqNum, dirX: -1, dirZ: 0, jump: false, dive: false, sprint: true })
+  roomB.send('input', { seq: seqNum, dirX: 0.5, dirZ: 0.5, jump: seqNum % 60 === 30, dive: false, sprint: false })
 }, 1000 / 60)
-
-await new Promise((resolve) => setTimeout(resolve, 3000))
+await new Promise((r) => setTimeout(r, 2500))
 clearInterval(driver)
-await new Promise((resolve) => setTimeout(resolve, 200))
+await new Promise((r) => setTimeout(r, 200))
 
-const state = read(roomA)
-const a1 = state.players.get(roomA.sessionId) ?? fail('A vanished')
-const b1 = state.players.get(roomB.sessionId) ?? fail('B vanished')
-
-if (Math.abs(a1.x - startAx) < 1) fail(`A did not move (x ${startAx.toFixed(2)} -> ${a1.x.toFixed(2)})`)
-if (Math.abs(b1.x - startBx) < 1) fail(`B did not move (x ${startBx.toFixed(2)} -> ${b1.x.toFixed(2)})`)
-if (a1.lastSeq === 0) fail('server never acked A inputs')
-if (state.serverTime - t0 < 2) fail(`serverTime barely advanced (${(state.serverTime - t0).toFixed(2)}s)`)
-if (typeof state.ball?.y !== 'number') fail('ball missing from state')
-if (a1.stamina >= 100) fail('A sprinted for 3s but stamina did not drain')
-
+const a1 = read(roomA).players.get(roomA.sessionId) ?? fail('A vanished')
+if (Math.abs(a1.x - startAx) < 3) fail(`A did not move in duel (${startAx.toFixed(1)} -> ${a1.x.toFixed(1)})`)
+if (a1.lastSeq === 0) fail('inputs never acked')
 console.log(
-  `[smoke] A moved ${(a1.x - startAx).toFixed(1)}m (seq ${a1.lastSeq}, stamina ${a1.stamina.toFixed(0)}), ` +
-    `B moved ${(b1.x - startBx).toFixed(1)}m, ball at y=${state.ball.y.toFixed(2)}, ` +
-    `serverTime +${(state.serverTime - t0).toFixed(2)}s, tick ${state.tickRemaining.toFixed(1)}s`,
+  `[smoke] duel live: A moved ${(a1.x - startAx).toFixed(1)}m, seq ${a1.lastSeq}, ball y=${read(roomA).ball.y.toFixed(2)}`,
 )
 
 await roomA.leave()
 await roomB.leave()
 clearTimeout(timeout)
-console.log('[smoke] OK')
+console.log('[smoke] OK — lobby, draft, launch, duel all verified')
 process.exit(0)

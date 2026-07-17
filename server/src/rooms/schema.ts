@@ -4,7 +4,7 @@ import { schema } from '@colyseus/schema'
  * The replicated match state (architecture.md §2), defined via schema v4's
  * runtime factory — no decorators, so it survives any transpiler (tsx, tsc,
  * esbuild) without Symbol.metadata gymnastics. The server sim writes these
- * at 60Hz; Colyseus delta-patches to clients at 20Hz.
+ * at 60Hz; Colyseus delta-patches to clients at 30Hz.
  */
 
 export const PlayerState = schema(
@@ -26,6 +26,10 @@ export const PlayerState = schema(
     alive: { type: 'boolean', default: true },
     connected: { type: 'boolean', default: true },
     lastSeq: { type: 'uint32', default: 0 },
+    // loadout — revealed publicly at launch (empty until then)
+    cardAbility: { type: 'string', default: '' },
+    cardEquipment: { type: 'string', default: '' },
+    cardAdvantage: { type: 'string', default: '' },
   },
   'PlayerState',
 )
@@ -44,17 +48,40 @@ export const BallState = schema(
 )
 export type BallStateT = InstanceType<typeof BallState>
 
+/** the Restart Kickoff handout, replicated for the public reveal */
+export const HandoutState = schema(
+  {
+    elimSeat: { type: 'int8', default: -1 },
+    advCardId: { type: 'string', default: '' },
+    curseCardId: { type: 'string', default: '' },
+    advTo: { type: 'int8', default: -1 },
+    curseTo: { type: 'int8', default: -1 },
+    revealed: { type: 'boolean', default: false },
+  },
+  'HandoutState',
+)
+export type HandoutStateT = InstanceType<typeof HandoutState>
+
 export const MatchState = schema(
   {
     serverTime: { type: 'float64', default: 0 },
+    phase: { type: 'uint8', default: 0 },
+    phaseRemaining: { type: 'float32', default: 0 },
+    seatsAtStart: { type: 'uint8', default: 0 },
+    hostSessionId: { type: 'string', default: '' },
     survivors: { type: 'uint8', default: 0 },
     tickRemaining: { type: 'float32', default: 30 },
+    halftime: { type: 'boolean', default: false },
+    winnerSeat: { type: 'int8', default: -1 },
     windX: { type: 'float32', default: 0 },
     windZ: { type: 'float32', default: 0 },
     windStrength: { type: 'float32', default: 0 },
     ball: { type: BallState, default: undefined },
+    handout: { type: HandoutState, default: undefined },
     players: { map: PlayerState },
     meters: ['float32'],
+    zoneSeat: ['uint8'],
+    overtimeSeats: ['uint8'],
   },
   'MatchState',
 )

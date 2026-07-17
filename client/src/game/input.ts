@@ -9,6 +9,10 @@ export function createGameInput(): Input {
       dive: ['Mouse0', 'ControlLeft'], // airborne: dive/header
       sprint: ['ShiftLeft'],
       restart: ['KeyR'],
+      emote1: ['Digit1'],
+      emote2: ['Digit2'],
+      emote3: ['Digit3'],
+      emote4: ['Digit4'],
     },
     axes: {
       moveX: { negative: ['KeyA'], positive: ['KeyD'] },

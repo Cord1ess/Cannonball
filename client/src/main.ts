@@ -4,6 +4,7 @@ import { isPointerLocked, requestPointerLock } from '@vendor/platform/fullscreen
 import { ChaseCamera } from './game/camera.ts'
 import { createDebugPanel } from './game/debug.ts'
 import { createHud } from './game/hud.ts'
+import { createMatchUi, type MatchUi } from './game/matchUi.ts'
 import { createGameInput } from './game/input.ts'
 import { createOnlineGame, type OnlineGame } from './game/online.ts'
 import { createSandbox, type Sandbox } from './game/sandbox.ts'
@@ -68,6 +69,8 @@ if (wantOffline) {
 }
 
 const debugPanel = createDebugPanel(renderer, scene, game.debug)
+let matchUi: MatchUi | null = null
+if ('match' in game) matchUi = createMatchUi(game.match)
 
 renderer.domElement.addEventListener('click', () => {
   if (!isPointerLocked(document)) void requestPointerLock(renderer.domElement)
@@ -86,6 +89,11 @@ function frame(nowMs: number): void {
   if (input.justPressed('jump')) jumpQueued = true
   if (input.justPressed('dive')) diveQueued = true
   if (input.justPressed('restart') && game.gameOver) game.reset()
+  if ('match' in game) {
+    for (let e = 0; e < 4; e++) {
+      if (input.justPressed(`emote${e + 1}`)) game.match.emote(e)
+    }
+  }
 
   const steps = time.consumeFixedSteps()
   for (let i = 0; i < steps; i++) {
@@ -119,6 +127,7 @@ function frame(nowMs: number): void {
     locked,
   })
 
+  matchUi?.update()
   debugPanel.update(time.unscaledDelta)
 
   renderer.clear()
