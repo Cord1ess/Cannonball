@@ -20,6 +20,8 @@ export interface StreakCell {
   x: number
   z: number
   strength: number // 0..1 (fades the cluster in/out)
+  dirX: number // this gust's travel direction (curved arc)
+  dirZ: number
 }
 
 export interface WindStreaks {
@@ -75,9 +77,11 @@ export function createWindStreaks(): WindStreaks {
   }
   geo.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 4))
 
-  // per-instance CELL state, updated each frame: xz center + strength
+  // per-instance CELL state, updated each frame: xz center + strength + dir
   const iCell = new Float32Array(COUNT * 3)
   geo.setAttribute('iCell', new THREE.InstancedBufferAttribute(iCell, 3))
+  const iDir = new Float32Array(COUNT * 2)
+  geo.setAttribute('iDir', new THREE.InstancedBufferAttribute(iDir, 2))
 
   const material = new THREE.ShaderMaterial({
     transparent: true,
@@ -93,7 +97,8 @@ export function createWindStreaks(): WindStreaks {
     } as Record<string, THREE.IUniform>,
     vertexShader: /* glsl */ `
       attribute vec4 aSeed;
-      attribute vec3 iCell;   // x,z = cluster center · z-comp(w)=strength
+      attribute vec3 iCell;   // x,z = cluster center · z-comp = strength
+      attribute vec2 iDir;    // this gust's travel direction (curved arc)
       attribute float aRing;
       attribute float aAng;
       uniform float uTime;
@@ -106,7 +111,7 @@ export function createWindStreaks(): WindStreaks {
       void main() {
         float strength = iCell.z;
         if (strength <= 0.01) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vFade = 0.0; return; }
-        vec2 dir = normalize(uWind);
+        vec2 dir = normalize(iDir);
         vec2 perp = vec2(-dir.y, dir.x);
 
         // cluster origin = cell center + this streak's stable offset
@@ -160,22 +165,27 @@ export function createWindStreaks(): WindStreaks {
   mesh.renderOrder = 5
 
   const cellAttr = geo.getAttribute('iCell') as THREE.InstancedBufferAttribute
+  const dirAttr = geo.getAttribute('iDir') as THREE.InstancedBufferAttribute
   let elapsed = 0
   return {
     mesh,
-    update(dt, cells, windX, windZ): void {
+    update(dt, cells, _windX, _windZ): void {
       elapsed += dt
       material.uniforms.uTime!.value = elapsed
-      ;(material.uniforms.uWind!.value as THREE.Vector2).set(windX, windZ)
       for (let c = 0; c < CELLS; c++) {
         const cell = cells[c]
         for (let k = 0; k < PER_CELL; k++) {
           const idxI = c * PER_CELL + k
-          if (cell) cellAttr.setXYZ(idxI, cell.x, cell.z, cell.strength)
-          else cellAttr.setXYZ(idxI, 0, 0, 0)
+          if (cell) {
+            cellAttr.setXYZ(idxI, cell.x, cell.z, cell.strength)
+            dirAttr.setXY(idxI, cell.dirX, cell.dirZ)
+          } else {
+            cellAttr.setXYZ(idxI, 0, 0, 0)
+          }
         }
       }
       cellAttr.needsUpdate = true
+      dirAttr.needsUpdate = true
     },
     dispose(): void {
       geo.dispose()

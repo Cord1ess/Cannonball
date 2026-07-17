@@ -997,6 +997,12 @@ export function createOnlineGame(
           continue
         }
         const seat = zoneSeatArr[i] ?? 0
+        // no ground label on MY OWN zone — my head tag already names me, and a
+        // duplicate on my own turf reads as clutter
+        if (seat === mySeat) {
+          label.setVisible(false)
+          continue
+        }
         const owner = playerNameOf(seat)
         label.set(owner, toHex(seatColors[seat] ?? 0x888888))
         const a = zoneAnchor(arena, i, 0.62) // mid-wedge, flat on the grass

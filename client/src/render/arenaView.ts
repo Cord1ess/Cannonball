@@ -459,12 +459,13 @@ export function createArenaView(radius = 28): ArenaView {
       const cells = windField.step(dt)
       const dx = windField.dirX
       const dz = windField.dirZ
-      // hand the live gust cells to grass (bend) and streaks (clusters)
+      // hand the live gust cells to grass (bend) and streaks (clusters).
+      // each cell carries its OWN travel direction (curved arc around the bowl)
       gustScratch.length = 0
       streakScratch.length = 0
       for (const c of cells) {
-        gustScratch.push({ x: c.x, z: c.z, radius: c.radius, strength: c.strength })
-        streakScratch.push({ x: c.x, z: c.z, strength: c.strength })
+        gustScratch.push({ x: c.x, z: c.z, radius: c.radius, strength: c.strength, dirX: c.dirX, dirZ: c.dirZ })
+        streakScratch.push({ x: c.x, z: c.z, strength: c.strength, dirX: c.dirX, dirZ: c.dirZ })
       }
       grass.setGusts(gustScratch)
       grass.update(elapsed, dx, dz)

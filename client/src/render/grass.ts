@@ -33,12 +33,15 @@ export interface GrassBody {
   wobble: number
 }
 
-/** a travelling gust cell: world center + radius + strength 0..1 */
+/** a travelling gust cell: world center + radius + strength + travel dir */
 export interface GustCell {
   x: number
   z: number
   radius: number
   strength: number
+  /** unit travel direction of this gust (curves around the stadium) */
+  dirX: number
+  dirZ: number
 }
 
 export interface GrassField {
@@ -63,6 +66,7 @@ const VERT = /* glsl */ `
   uniform float uTime;
   uniform vec2 uWindDir;
   uniform vec4 uGusts[${MAX_GUSTS}]; // x,y = xz center · z = radius · w = strength
+  uniform vec2 uGustDir[${MAX_GUSTS}]; // per-gust travel direction (curved path)
   uniform int uGustCount;
   uniform vec4 uBodies[${MAX_BODIES}]; // x,y = xz pos · z = radius · w = wobble 0..1
   uniform int uBodyCount;
@@ -104,30 +108,23 @@ const VERT = /* glsl */ `
     float ambAmt = (0.12 + breath * 0.14) + ambSway * (0.16 + breath * 0.12) + jitter * 0.06;
     p.xz += uWindDir * ambAmt * t * t;
 
-    // 2) GUST CELLS as swirling VORTICES: the bend curls tangentially AROUND
-    //    the cell center (not straight downwind), so a passing gust twists the
-    //    grass into circular / S-shaped patterns. Feathered edges + delay.
+    // 2) GUST CELLS: each pushes the grass along ITS OWN travel direction
+    //    (uGustDir[gi]) — the cells sweep a CURVED path around the stadium, so
+    //    the grass bends the way the gust is actually blowing. Feathered edges.
     for (int gi = 0; gi < ${MAX_GUSTS}; gi++) {
       if (gi >= uGustCount) break;
       vec2 gc = uGusts[gi].xy;
       float grad = uGusts[gi].z;
       float gstr = uGusts[gi].w;
-      // delay: compare a bit upwind so the push trails the gust front
-      vec2 delayed = root - uWindDir * grad * 0.3;
-      vec2 toCell = delayed - gc;
-      float gd = length(toCell);
-      // long feathered falloff, softened on both edges
+      vec2 gDir = uGustDir[gi];
+      // delay: compare a bit upwind (of THIS gust) so the push trails its front
+      vec2 delayed = root - gDir * grad * 0.3;
+      float gd = distance(delayed, gc);
       float infl = (1.0 - smoothstep(grad * 0.12, grad * 1.2, gd)) * gstr;
-      infl = infl * infl * (3.0 - 2.0 * infl);
-      if (infl > 0.0 && gd > 0.001) {
-        vec2 radial = toCell / gd;
-        vec2 tangent = vec2(-radial.y, radial.x); // perpendicular = swirl around center
-        // blend inward-push (downwind feel) with a strong tangential swirl,
-        // and let the swirl sign flip along the radius for an S-shape
-        float sCurve = sin(gd * (2.2 / grad) * 3.14159 - uTime * 2.5);
-        vec2 gdir = normalize(uWindDir * 0.5 + tangent * sCurve * 1.2 - radial * 0.25);
+      infl = infl * infl * (3.0 - 2.0 * infl); // soft both edges
+      if (infl > 0.0) {
         float bend = infl * 1.2 * t * t;
-        p.xz += gdir * bend;
+        p.xz += gDir * bend;
         p.y *= 1.0 - infl * 0.16 * t;
       }
     }
@@ -302,6 +299,7 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
   const windDir = new THREE.Vector2(0.8, 0.6).normalize()
   const bodies = Array.from({ length: MAX_BODIES }, () => new THREE.Vector4(0, 0, 0, 0))
   const gusts = Array.from({ length: MAX_GUSTS }, () => new THREE.Vector4(0, 0, 0, 0))
+  const gustDirs = Array.from({ length: MAX_GUSTS }, () => new THREE.Vector2(1, 0))
   const zoneColors = Array.from({ length: MAX_ZONES }, () => new THREE.Color(PALETTE.grassBase))
   const material = new THREE.ShaderMaterial({
     vertexShader: VERT,
@@ -323,6 +321,7 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
       uBodies: { value: bodies },
       uBodyCount: { value: 0 },
       uGusts: { value: gusts },
+      uGustDir: { value: gustDirs },
       uGustCount: { value: 0 },
     },
   })
@@ -359,6 +358,7 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
       for (let i = 0; i < n; i++) {
         const g = list[i]!
         gusts[i]!.set(g.x, g.z, g.radius, g.strength)
+        gustDirs[i]!.set(g.dirX, g.dirZ)
       }
       material.uniforms.uGustCount!.value = n
     },

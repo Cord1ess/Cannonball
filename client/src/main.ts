@@ -37,16 +37,23 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
 })
 
-// a framed border + label for the PIP, top-right, over the canvas
+// CIRCULAR PIP window, top-right. GL renders a square viewport; a radial mask
+// (transparent center → sky color past the circle) hides the square corners,
+// and a ring frame draws the border. Top-right is ~always sky, so it blends.
+const pipMask = document.createElement('div')
+pipMask.style.cssText =
+  'position:fixed;top:16px;right:16px;pointer-events:none;z-index:13;display:none;' +
+  'background:radial-gradient(circle at center, transparent 0 70%, #7dcdc2 71%);'
+document.body.appendChild(pipMask)
 const pipFrame = document.createElement('div')
 pipFrame.style.cssText =
-  'position:fixed;top:16px;right:16px;border:3px solid #4a443c;border-radius:12px;' +
-  'box-shadow:0 3px 10px #0004;pointer-events:none;z-index:14;display:none;overflow:hidden;'
+  'position:fixed;top:16px;right:16px;border-radius:50%;border:3px solid #4a443c;' +
+  'box-shadow:0 3px 10px #0005;pointer-events:none;z-index:14;display:none;'
 const pipTab = document.createElement('div')
 pipTab.textContent = 'YOU'
 pipTab.style.cssText =
-  'position:absolute;top:0;left:0;background:#4a443c;color:#fbf6e8;font:700 10px system-ui;' +
-  'padding:2px 8px;border-bottom-right-radius:8px;letter-spacing:1px;'
+  'position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);background:#4a443c;' +
+  'color:#fbf6e8;font:700 9px system-ui;padding:2px 10px;border-radius:8px;letter-spacing:1px;'
 pipFrame.appendChild(pipTab)
 document.body.appendChild(pipFrame)
 
@@ -206,23 +213,25 @@ function frame(nowMs: number): void {
 
       const W = window.innerWidth
       const H = window.innerHeight
-      const pw = Math.round(Math.min(230, W * 0.2))
-      const ph = Math.round(pw * 1.1)
-      const px = W - pw - 16
-      const py = H - ph - 16 // gl viewport origin is bottom-left → top-right
-      renderer.setViewport(px, py, pw, ph)
-      renderer.setScissor(px, py, pw, ph)
+      const d = Math.round(Math.min(140, W * 0.12)) // SMALL square (circle diameter)
+      const px = W - d - 16
+      const py = H - d - 16 // gl viewport origin is bottom-left → top-right
+      renderer.setViewport(px, py, d, d)
+      renderer.setScissor(px, py, d, d)
       renderer.setScissorTest(true)
-      pipCam.aspect = pw / ph
+      pipCam.aspect = 1
       pipCam.updateProjectionMatrix()
       renderer.render(scene, pipCam)
       renderer.setScissorTest(false)
       renderer.setViewport(0, 0, W, H)
-      pipFrame.style.display = 'block'
-      pipFrame.style.width = `${pw}px`
-      pipFrame.style.height = `${ph}px`
+      for (const el of [pipFrame, pipMask]) {
+        el.style.display = 'block'
+        el.style.width = `${d}px`
+        el.style.height = `${d}px`
+      }
     } else {
       pipFrame.style.display = 'none'
+      pipMask.style.display = 'none'
     }
   }
 

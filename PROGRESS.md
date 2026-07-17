@@ -10,15 +10,20 @@
 - ELIMINATION GRACE (server): per-seat ball-DWELL timer — ball must sit in a zone ZONE_DWELL_
   GRACE_S(0.6s) before it accrues; + a TICK_LOCKIN_S(1.0s) final-whistle freeze so a last-instant
   ball flip can't doom you (network/reaction fairness). `#zoneDwell[]`, reset at beginLaunch.
-- WIND: gusts are now swirling VORTICES (tangential + S-curve bend around the cell center, not
-  straight downwind); idle sway has a slow breathing envelope so it's never static.
+- WIND (corrected): the misunderstanding was "circular" = the gust TRAVEL PATH, not the grass
+  bend. windField cells now ORBIT the arena center on curved arcs (orbitR/angle/angVel, swirlSign
+  bowl direction); each cell carries its own tangent dir (GustCell.dirX/dirZ) → grass + streaks
+  bend along THAT per-cell direction (uGustDir[] / iDir attribute). Grass swirl reverted to a
+  simple along-dir bend. Idle sway keeps the breathing envelope.
 - CAMERA: robust never-inside-wall — boom-cap at the arena-exit distance + a HARD radial clamp on
   the smoothed position every frame + raise-as-pulled-in; bound is now radius-1.5 (inside the wall).
 - DEBUG panel: ACCORDION (one section open at a time, no vertical scroll), grouped FLOW/PLAYERS/
   CLOCK&SCORE/BALL&WIND/ROOM, toggle state + click flash feedback, rich live stats.
-- HUD: added a live PICTURE-IN-PICTURE selfie cam (2nd PerspectiveCamera framed on the local
-  bean's face, scissored top-right with a "YOU" frame) so you see your character's expressions +
-  motion; leaderboard moved below it.
+- HUD: live PICTURE-IN-PICTURE selfie cam (2nd PerspectiveCamera on the local bean's face,
+  scissored top-right) — now SMALL + CIRCULAR (radial-gradient sky mask hides the square
+  scissor corners, ring frame + "YOU" tab). Leaderboard below it.
+- Own name tag: shows over MY head in-match; NO duplicate flat ground label on my own zone;
+  head-tag font/scale fixed so it's never squashed.
 
 ### Friend playtest + player names (works over LAN/tunnel, no deploy)
 See PLAYTEST.md. Client resolves server from `?server=` (saved to localStorage, https→wss auto);

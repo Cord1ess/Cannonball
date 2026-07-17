@@ -16,8 +16,8 @@ export interface NameTag {
   dispose(): void
 }
 
-const PAD = 12
-const FONT = 34
+const PAD = 18
+const FONT = 40
 
 export function createNameTag(): NameTag {
   const canvas = document.createElement('canvas')
@@ -58,8 +58,9 @@ export function createNameTag(): NameTag {
     ctx.fillText(name, w / 2, h / 2 - 2)
 
     tex.needsUpdate = true
-    // world size: keep text a readable height, scale width by aspect
-    const worldH = 0.85
+    // world size: fixed readable height, width follows the canvas aspect EXACTLY
+    // so the text is never stretched/squashed
+    const worldH = 0.7
     sprite.scale.set(worldH * (w / h), worldH, 1)
   }
 
@@ -72,7 +73,7 @@ export function createNameTag(): NameTag {
       redraw(name || '…', colorHex)
     },
     place(x: number, y: number, z: number): void {
-      sprite.position.set(x, y + 2.55, z) // above the bean's head
+      sprite.position.set(x, y + 2.35, z) // just above the bean's head
     },
     setVisible(v: boolean): void {
       sprite.visible = v
