@@ -1,7 +1,10 @@
-{
+{ 
   "name": "cannonball",
   "private": true,
   "type": "module",
+  "overrides": {
+    "uuid": "^9.0.0"
+  },
   "workspaces": [
     "shared",
     "server",
