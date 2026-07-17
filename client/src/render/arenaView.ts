@@ -148,13 +148,15 @@ export function createArenaView(radius = 28): ArenaView {
         if (lum < lo) lo = lum
         if (lum > hi) hi = lum
       }
-      const base = new THREE.Color(PALETTE.grassBase).multiplyScalar(0.85)
+      // the ground is the SHADOW layer under the blades: it lives well below
+      // the blade colors (deep base, capped ceiling) so blades blend DOWN
+      // into it instead of competing with it
+      const base = new THREE.Color(PALETTE.grassBase).multiplyScalar(0.62)
       const tip = new THREE.Color(PALETTE.grassTip)
       const span = Math.max(0.01, hi - lo)
       for (let i = 0; i < s * s; i++) {
         const lum = (d[i * 4]! + d[i * 4 + 1]! + d[i * 4 + 2]!) / 765
-        // gamma keeps the ground a touch deeper than the blade tips
-        const t = Math.pow((lum - lo) / span, 1.2) * 0.9
+        const t = Math.pow((lum - lo) / span, 1.3) * 0.62
         d[i * 4] = Math.round((base.r + (tip.r - base.r) * t) * 255)
         d[i * 4 + 1] = Math.round((base.g + (tip.g - base.g) * t) * 255)
         d[i * 4 + 2] = Math.round((base.b + (tip.b - base.b) * t) * 255)

@@ -94,10 +94,11 @@ const FRAG = /* glsl */ `
   void main() {
     float r = length(vWorldXZ);
 
-    // flat pastel gradient root->tip + per-blade scatter + soft base shade
+    // flat pastel gradient root->tip + per-blade scatter; roots sink into
+    // the dark ground layer so blades blend downward instead of floating
     vec3 col = mix(uBase, uTip, vT);
     col *= mix(0.93, 1.07, vColorVar);
-    col *= mix(0.78, 1.0, smoothstep(0.0, 0.45, vT));
+    col *= mix(0.6, 1.0, smoothstep(0.0, 0.5, vT));
 
     // crayon border: each blade darkens toward its drawn side edges
     col *= 1.0 - smoothstep(0.45, 1.0, vEdge) * 0.2;
