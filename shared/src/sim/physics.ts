@@ -17,9 +17,14 @@ import {
   HEADER_POWER,
   HEADER_UP_BIAS,
   JUMP_SPEED,
-  MOVE_SPEED,
   PLAYER_PUSH,
   PLAYER_RADIUS,
+  RUN_SPEED,
+  SPRINT_DRAIN,
+  SPRINT_SPEED,
+  STAMINA_MAX,
+  STAMINA_REGEN,
+  DIVE_COST,
   TURN_RATE,
   WIND_GUST_DURATION_S,
   WIND_GUST_PERIOD_S,
@@ -31,8 +36,9 @@ import type { Arena } from './arena.ts'
  * Node-safe (architecture.md §3). Fixed-step only — dt is always FIXED_DELTA.
  *
  * Facing convention: yaw 0 looks down +Z; forward = (sin(yaw), cos(yaw)) in XZ.
- * Beans face their MOVEMENT direction (the camera is free); the DIVE — E while
- * airborne — lunges along facing, and diving into the ball is the header.
+ * Beans face their MOVEMENT direction (the camera is free). The DIVE (while
+ * airborne, costs stamina) lunges along facing; diving into the ball is the
+ * header. Shift-sprint drains stamina, running refills it.
  */
 
 export interface BallSim {
@@ -55,6 +61,8 @@ export interface PlayerSim {
   yaw: number
   grounded: boolean
   diving: boolean
+  sprinting: boolean
+  stamina: number
   recoverCd: number
   headerCd: number
 }
@@ -65,9 +73,10 @@ export interface PlayerInputFrame {
   dirZ: number
   jump: boolean
   dive: boolean
+  sprint: boolean
 }
 
-export const ZERO_INPUT: PlayerInputFrame = { dirX: 0, dirZ: 0, jump: false, dive: false }
+export const ZERO_INPUT: PlayerInputFrame = { dirX: 0, dirZ: 0, jump: false, dive: false, sprint: false }
 
 export interface Wind {
   x: number
@@ -121,6 +130,8 @@ export function makePlayer(seat: number, x: number, z: number, yaw: number): Pla
     yaw,
     grounded: true,
     diving: false,
+    sprinting: false,
+    stamina: STAMINA_MAX,
     recoverCd: 0,
     headerCd: 0,
   }
@@ -192,22 +203,32 @@ export function stepPlayer(p: PlayerSim, input: PlayerInputFrame, arena: Arena, 
     p.yaw += shortestAngle(p.yaw, targetYaw) * (1 - Math.exp(-TURN_RATE * dt))
   }
 
+  // sprint costs stamina; running refills it
+  p.sprinting = input.sprint && moving && p.stamina > 0 && !p.diving
+  if (p.sprinting) {
+    p.stamina = Math.max(0, p.stamina - SPRINT_DRAIN * dt)
+  } else {
+    p.stamina = Math.min(STAMINA_MAX, p.stamina + STAMINA_REGEN * dt)
+  }
+  const targetSpeed = p.sprinting ? SPRINT_SPEED : RUN_SPEED
+
   // horizontal: framerate-independent blend toward target velocity.
   // Diving commits — near-zero air control. Recovery stumbles.
   let accel = p.grounded ? ACCEL_GROUND : ACCEL_AIR
   if (p.diving) accel = ACCEL_AIR * 0.12
   else if (recovering) accel = ACCEL_GROUND * 0.25
   const k = 1 - Math.exp(-accel * dt)
-  p.vx += (input.dirX * MOVE_SPEED - p.vx) * k
-  p.vz += (input.dirZ * MOVE_SPEED - p.vz) * k
+  p.vx += (input.dirX * targetSpeed - p.vx) * k
+  p.vz += (input.dirZ * targetSpeed - p.vz) * k
 
   if (input.jump && p.grounded && !recovering) {
     p.vy = JUMP_SPEED
     p.grounded = false
   }
 
-  // DIVE: E while airborne — full-commit forward lunge along facing
-  if (input.dive && !p.grounded && !p.diving) {
+  // DIVE: full-commit forward lunge along facing — costs stamina
+  if (input.dive && !p.grounded && !p.diving && p.stamina >= DIVE_COST) {
+    p.stamina -= DIVE_COST
     const fx = Math.sin(p.yaw)
     const fz = Math.cos(p.yaw)
     p.vx = fx * DIVE_FORCE

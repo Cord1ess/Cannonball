@@ -14,6 +14,8 @@ export interface HudState {
   tickRemaining: number
   zones: readonly HudZone[]
   alarm: boolean
+  /** 0..1 — sprint/dive energy */
+  stamina: number
   locked: boolean
 }
 
@@ -43,10 +45,19 @@ export function createHud(): Hud {
     'position:absolute;inset:0;box-shadow:inset 0 0 90px 24px rgba(217,108,108,0.55);opacity:0;transition:opacity 140ms;'
   root.appendChild(alarm)
 
+  const staminaBar = document.createElement('div')
+  staminaBar.style.cssText =
+    'position:absolute;bottom:64px;left:50%;transform:translateX(-50%);width:220px;height:12px;background:#fffdf5aa;border:2px solid #4a443c;border-radius:6px;overflow:hidden;'
+  const staminaFill = document.createElement('div')
+  staminaFill.style.cssText = 'height:100%;width:100%;background:#f2c078;transition:background 150ms;'
+  staminaBar.appendChild(staminaFill)
+  root.appendChild(staminaBar)
+
   const hint = document.createElement('div')
   hint.style.cssText =
     'position:absolute;bottom:26px;left:50%;transform:translateX(-50%);font-size:16px;color:#4a443c;background:#fffdf5cc;padding:6px 14px;border-radius:8px;'
-  hint.textContent = 'click to grab the mouse — WASD run, Space jump, E mid-air to DIVE into the ball, Q/E lean'
+  hint.textContent =
+    'click to grab the mouse — WASD run, Shift sprint, Space jump, Click/Ctrl mid-air to DIVE, Q/E tilt'
   root.appendChild(hint)
 
   const end = document.createElement('div')
@@ -87,6 +98,8 @@ export function createHud(): Hud {
         bar.style.outline = zone.isPlayer ? '3px solid #4a443c' : 'none'
       }
       alarm.style.opacity = state.alarm ? '1' : '0'
+      staminaFill.style.width = `${Math.max(0, Math.min(100, state.stamina * 100)).toFixed(1)}%`
+      staminaFill.style.background = state.stamina < 0.3 ? '#d96c6c' : '#f2c078'
       hint.style.display = state.locked ? 'none' : 'block'
     },
     showEnd(text: string | null): void {

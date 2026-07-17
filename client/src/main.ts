@@ -84,7 +84,7 @@ function frame(nowMs: number): void {
       dirZ /= len
     }
 
-    sandbox.fixedStep({ dirX, dirZ, jump: jumpQueued, dive: diveQueued })
+    sandbox.fixedStep({ dirX, dirZ, jump: jumpQueued, dive: diveQueued, sprint: input.pressed('sprint') })
     jumpQueued = false
     diveQueued = false
   }
@@ -95,6 +95,7 @@ function frame(nowMs: number): void {
     tickRemaining: sandbox.tickRemaining,
     zones: sandbox.hudZones(),
     alarm: sandbox.ballAlarm(),
+    stamina: sandbox.staminaFrac(),
     locked,
   })
 
@@ -105,4 +106,4 @@ function frame(nowMs: number): void {
 
 requestAnimationFrame(frame)
 
-console.log('[cannonball] M1 sandbox — WASD run, Space jump, E in the air = DIVE (header), Q/E lean, R restart')
+console.log('[cannonball] M1 sandbox — WASD run, Shift sprint, Space jump, Click/Ctrl mid-air = DIVE, Q/E tilt, R restart')

@@ -36,7 +36,8 @@ export const HALFTIME_PAUSE_S = 20
 export const LAUNCH_COUNTDOWN_S = 3
 
 // --- movement (tune in M1 fun-test) -----------------------------------------
-export const MOVE_SPEED = 8
+export const RUN_SPEED = 7 // normal run
+export const SPRINT_SPEED = 10.5 // shift — costs stamina
 export const JUMP_SPEED = 7.5
 export const GRAVITY = 20
 export const ACCEL_GROUND = 14 // 1/s toward target velocity
@@ -45,7 +46,13 @@ export const TURN_RATE = 12 // rad/s — bean turns toward its movement directio
 export const PLAYER_RADIUS = 0.45
 export const PLAYER_HEIGHT = 1.4
 
-// --- dive (E while airborne — the header move) --------------------------------
+// --- stamina -------------------------------------------------------------------
+export const STAMINA_MAX = 100
+export const SPRINT_DRAIN = 22 // per second while sprinting
+export const STAMINA_REGEN = 16 // per second while not sprinting
+export const DIVE_COST = 30 // stamina consumed per dive
+
+// --- dive (while airborne — the header move) -----------------------------------
 export const DIVE_FORCE = 11 // forward lunge speed
 export const DIVE_UP = 1.5 // small float at dive start
 export const DIVE_RECOVERY_S = 0.3 // landing stumble: damped input, no jump

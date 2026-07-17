@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import {
   FIXED_DELTA,
-  MOVE_SPEED,
+  SPRINT_SPEED,
+  STAMINA_MAX,
   TICK_SECONDS_PER_SURVIVOR,
   WIND_BASE_STRENGTH,
   WIND_STEP_PER_ELIMINATION,
@@ -65,6 +66,7 @@ export interface Sandbox {
   hudZones(): HudZone[]
   tickRemaining: number
   ballAlarm(): boolean
+  staminaFrac(): number
 }
 
 export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud): Sandbox {
@@ -175,7 +177,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
       const px = prevPlayer.x + (p.x - prevPlayer.x) * alpha
       const py = prevPlayer.y + (p.y - prevPlayer.y) * alpha
       const pz = prevPlayer.z + (p.z - prevPlayer.z) * alpha
-      const run = Math.min(1, Math.hypot(p.vx, p.vz) / MOVE_SPEED)
+      const run = Math.min(1, Math.hypot(p.vx, p.vz) / SPRINT_SPEED)
       const playerLook = lookAtBall(p)
       beans[0]!.update(dt, {
         x: px,
@@ -185,7 +187,8 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
         run,
         grounded: p.grounded,
         diving: p.diving,
-        lean: p.grounded ? lean : 0,
+        sprinting: p.sprinting,
+        lean, // ground AND air tilt
         lookX: playerLook.x,
         lookY: playerLook.y,
       })
@@ -196,7 +199,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
         beans[seat]!.group.visible = alive[seat] ?? false
         if (!alive[seat]) continue
         const dummyLook = lookAtBall(dummy)
-        const dummyRun = Math.min(1, Math.hypot(dummy.vx, dummy.vz) / MOVE_SPEED)
+        const dummyRun = Math.min(1, Math.hypot(dummy.vx, dummy.vz) / SPRINT_SPEED)
         beans[seat]!.update(dt, {
           x: dummy.x,
           y: dummy.y,
@@ -205,6 +208,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
           run: dummyRun,
           grounded: dummy.grounded,
           diving: dummy.diving,
+          sprinting: dummy.sprinting,
           lean: 0,
           lookX: dummyLook.x,
           lookY: dummyLook.y,
@@ -237,6 +241,10 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
       if (!alive[0]) return false
       const zone = footprintZone(arena, ball.x, ball.z)
       return zone >= 0 && zoneSeat[zone] === 0
+    },
+
+    staminaFrac(): number {
+      return players[0]!.stamina / STAMINA_MAX
     },
   }
 
