@@ -5,7 +5,7 @@ import type { Arena } from '@shared/sim/arena.ts'
 import { yawTowardCenter } from '@shared/sim/arena.ts'
 import { KITS } from '@shared/cosmetics/jerseys.ts'
 import { createGrassField, type GrassField } from './grass.ts'
-import { addInkOutline, disposeHierarchy, INK_WEIGHT, makeToonMaterial } from './materials.ts'
+import { addInkOutline, disposeHierarchy, INK_WEIGHT, makeToonMaterial, toonRamp } from './materials.ts'
 import { PALETTE } from './palette.ts'
 
 /**
@@ -99,15 +99,94 @@ export function createArenaView(radius = 28): ArenaView {
 
   // --- the permanent building --------------------------------------------------
 
-  // floor slab: soil-green top under the grass, stone rim
+  // floor slab: the user's grass_02 tile (deflowered + pastelized offline) as
+  // ground fill, so gaps between 3D blades read as dense turf from above
+  const grassTile = new THREE.TextureLoader().load('/textures/pitch_grass.png')
+  grassTile.wrapS = grassTile.wrapT = THREE.RepeatWrapping
+  grassTile.repeat.set(10, 10)
+  grassTile.colorSpace = THREE.SRGBColorSpace
+  grassTile.anisotropy = 4
   const floor = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.6, SEGMENTS), [
     makeToonMaterial(PALETTE.warmGray), // side
-    makeToonMaterial(0x74ad6b), // top: soil under the pitch, pastel like the blades
+    new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: toonRamp(), map: grassTile }),
     makeToonMaterial(PALETTE.warmGray), // bottom
   ])
   floor.position.y = -0.3
   addInkOutline(floor, INK_WEIGHT.arena)
   group.add(floor)
+
+  // chalk markings baked onto the ground too, so lines stay crisp in the
+  // gaps between blades from a top-down view (redrawn per morph)
+  const markCanvas = document.createElement('canvas')
+  markCanvas.width = markCanvas.height = 1024
+  const markCtx = markCanvas.getContext('2d')
+  const markTex = new THREE.CanvasTexture(markCanvas)
+  markTex.colorSpace = THREE.SRGBColorSpace
+  const markings = new THREE.Mesh(
+    new THREE.CircleGeometry(radius * 0.995, SEGMENTS),
+    new THREE.MeshBasicMaterial({ map: markTex, transparent: true, depthWrite: false }),
+  )
+  markings.rotation.x = -Math.PI / 2
+  markings.position.y = 0.045
+  group.add(markings)
+
+  function redrawMarkings(zoneCount: number): void {
+    if (!markCtx) return
+    const S = 1024
+    const c = S / 2
+    const pxm = S / (radius * 2) // pixels per meter
+    const ctx = markCtx
+    ctx.clearRect(0, 0, S, S)
+
+    // wobbly chalk stroke helper — crayon, never vector
+    const chalkStroke = (points: Array<[number, number]>, width: number): void => {
+      ctx.strokeStyle = 'rgba(246, 242, 226, 0.78)'
+      ctx.lineWidth = width * pxm
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.beginPath()
+      points.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
+      ctx.stroke()
+    }
+
+    // pale neutral wash + its chalk ring
+    ctx.fillStyle = 'rgba(240, 236, 220, 0.32)'
+    ctx.beginPath()
+    ctx.arc(c, c, neutralRadius * pxm, 0, Math.PI * 2)
+    ctx.fill()
+    const ring: Array<[number, number]> = []
+    for (let i = 0; i <= 72; i++) {
+      const a = (i / 72) * Math.PI * 2
+      const rr = neutralRadius + Math.sin(a * 5 + 1.3) * 0.1 + (Math.random() - 0.5) * 0.08
+      ring.push([c + Math.cos(a) * rr * pxm, c + Math.sin(a) * rr * pxm])
+    }
+    chalkStroke(ring, 0.42)
+
+    // zone division lines
+    const span = (Math.PI * 2) / Math.max(2, zoneCount)
+    for (let zone = 0; zone < Math.max(2, zoneCount); zone++) {
+      const boundary = (zone + 0.5) * span
+      const line: Array<[number, number]> = []
+      for (let i = 0; i <= 14; i++) {
+        const rr = neutralRadius + 0.15 + ((radius - 0.5 - neutralRadius) * i) / 14
+        const drift = Math.sin(rr * 1.7 + zone * 2.1) * 0.14 + (Math.random() - 0.5) * 0.1
+        const a = boundary + drift / rr
+        line.push([c + Math.cos(a) * rr * pxm, c + Math.sin(a) * rr * pxm])
+      }
+      chalkStroke(line, 0.42)
+    }
+
+    // faint mow bands matching the blade shader's rings
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'
+    for (let r0 = 2.4; r0 < radius; r0 += 4.8) {
+      ctx.beginPath()
+      ctx.arc(c, c, Math.min(radius, r0 + 2.4) * pxm, 0, Math.PI * 2)
+      ctx.arc(c, c, r0 * pxm, 0, Math.PI * 2, true)
+      ctx.fill()
+    }
+    markTex.needsUpdate = true
+  }
+  redrawMarkings(6)
 
   // THE PITCH — instanced stadium grass; zones/chalk/danger live in its shader
   const grass = createGrassField(radius, neutralRadius)
@@ -290,6 +369,7 @@ export function createArenaView(radius = 28): ArenaView {
 
     setZones(arena: Arena, zoneColors: readonly number[]): void {
       grass.setZones(arena.seats, zoneColors)
+      redrawMarkings(arena.seats)
       recolorCrowd(arena.seats, zoneColors)
       disposeHierarchy(cannonsGroup)
       cannonsGroup.clear()

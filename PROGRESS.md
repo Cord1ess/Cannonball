@@ -95,6 +95,12 @@ draw call, wind gust+flutter in the vertex shader; ZONES LIVE IN THE SHADER — 
 lines, neutral-circle ring, per-zone danger heat, mow bands — so a morph is a uniform write.
 Feedback pass 2: pastel sun-washed greens, ~110k thinner blades (w 0.05), crayon discipline —
 chalk lines wobble + grain like hand strokes, blades darken toward their side edges.
+Feedback pass 3 (top-down gaps): the floor under the blades now wears the user's freestylized
+grass_02 tile, preprocessed ONCE offline (playwright canvas: white-clover flowers masked by
+blue/green ratio > 0.62 — probed, grass tops out ~0.45 — dilated, onion-peel inpainted, then
+pastelized to palette) → `client/public/textures/pitch_grass.png` (the ONLY authored asset;
+source folder `grass_02_1k/` gitignored). Chalk markings ALSO baked onto a ground overlay disc
+(canvas, redrawn per morph) so lines stay crisp in blade gaps from above.
 Wedge tint planes/strip lines/decals/disc meshes deleted (grass replaced them). Crowd: cubes →
 instanced BEAN spectators (torso+arms merged geometry + baked face plates, 2 draws, ~900), FIVE
 tiers + parapets + pennant flags; `recolorCrowd` at every morph dresses each wedge's stands
