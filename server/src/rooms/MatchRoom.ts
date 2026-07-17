@@ -395,7 +395,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     let sprint = false
 
     if (chase && zone >= 0) {
-      const wallAngle = this.#arena.circle ? (zone === 0 ? 0 : Math.PI) : (this.#arena.wallAngles[zone] ?? 0)
+      const wallAngle = this.#arena.zoneAngles[zone] ?? 0
       const wx = Math.cos(wallAngle)
       const wz = Math.sin(wallAngle)
       const behindX = ball.x + wx * 2.4
@@ -543,7 +543,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
         ;[this.#zoneSeat[i], this.#zoneSeat[j]] = [this.#zoneSeat[j]!, this.#zoneSeat[i]!]
       }
     }
-    this.#arena = makeArena(Math.max(this.#zoneSeat.length, this.#zoneSeat.length === 2 ? 2 : 3))
+    this.#arena = makeArena(Math.max(2, this.#zoneSeat.length))
     this.state.zoneSeat.splice(0, this.state.zoneSeat.length)
     for (const seat of this.#zoneSeat) this.state.zoneSeat.push(seat)
   }
@@ -556,7 +556,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       const sim = session.sim
       if (!this.#alive[sim.seat]) continue
       const zone = this.#zoneSeat.indexOf(sim.seat)
-      const angle = this.#arena.circle ? (zone === 0 ? 0 : Math.PI) : (this.#arena.wallAngles[zone] ?? 0)
+      const angle = this.#arena.zoneAngles[zone] ?? 0
       sim.x = Math.cos(angle) * (this.#arena.apothem - 0.6)
       sim.z = Math.sin(angle) * (this.#arena.apothem - 0.6)
       sim.y = WALL_HEIGHT + 0.4
@@ -583,7 +583,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       const sim = session.sim
       if (!this.#alive[sim.seat]) continue
       const zone = this.#zoneSeat.indexOf(sim.seat)
-      const baseAngle = this.#arena.circle ? (zone === 0 ? 0 : Math.PI) : (this.#arena.wallAngles[zone] ?? 0)
+      const baseAngle = this.#arena.zoneAngles[zone] ?? 0
       const landAngle = baseAngle + session.aim
       const tx = Math.cos(landAngle) * this.#arena.apothem * 0.5
       const tz = Math.sin(landAngle) * this.#arena.apothem * 0.5

@@ -77,7 +77,8 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
   const rng = new Random('cannonball-sandbox')
 
   let arena: Arena = makeArena(SEATS)
-  let arenaView: ArenaView | null = null
+  const arenaView: ArenaView = createArenaView(arena.radius)
+  scene.add(arenaView.group)
   let zoneSeat: number[] = []
   const alive: boolean[] = new Array(SEATS).fill(true)
   const meters: number[] = new Array(SEATS).fill(0)
@@ -232,7 +233,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
       ballView.update(bx, by, bz, zoneColorHex)
 
       const interval = TICK_SECONDS_PER_SURVIVOR * survivors
-      arenaView?.setDanger(zoneSeat.map((seat) => (meters[seat] ?? 0) / Math.max(1, interval * 0.5)))
+      arenaView.setDanger(zoneSeat.map((seat) => (meters[seat] ?? 0) / Math.max(1, interval * 0.5)))
 
       camera.update(dt, px, py, pz)
     },
@@ -297,13 +298,8 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
     zoneSeat = []
     for (let seat = 0; seat < SEATS; seat++) if (alive[seat]) zoneSeat.push(seat)
 
-    if (arenaView) {
-      scene.remove(arenaView.group)
-      arenaView.dispose()
-    }
     const zoneColors = zoneSeat.map((seat) => SEAT_COLORS[seat] ?? PALETTE.warmGray)
-    arenaView = createArenaView(arena, zoneColors)
-    scene.add(arenaView.group)
+    arenaView.setZones(arena, zoneColors)
 
     // everyone to their wedge anchor, facing center (cannon launch stand-in)
     for (let zone = 0; zone < zoneSeat.length; zone++) {

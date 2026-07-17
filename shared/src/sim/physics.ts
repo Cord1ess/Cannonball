@@ -203,35 +203,22 @@ export function resetBall(ball: BallSim): void {
 
 // --- walls (shared by ball & players) -----------------------------------------
 
-/** Clamp a point to the arena interior; returns the hit normal or null. */
+/** Clamp a point inside the round colosseum wall; returns the hit normal or null. */
 function collideWalls(
   arena: Arena,
   radius: number,
   p: { x: number; z: number },
 ): { x: number; z: number } | null {
-  if (arena.circle) {
-    const r = Math.hypot(p.x, p.z)
-    const limit = arena.radius - radius
-    if (r > limit && r > 0) {
-      const nx = p.x / r
-      const nz = p.z / r
-      p.x = nx * limit
-      p.z = nz * limit
-      return { x: nx, z: nz }
-    }
-    return null
+  const r = Math.hypot(p.x, p.z)
+  const limit = arena.radius - radius
+  if (r > limit && r > 0) {
+    const nx = p.x / r
+    const nz = p.z / r
+    p.x = nx * limit
+    p.z = nz * limit
+    return { x: nx, z: nz }
   }
-  let hit: { x: number; z: number } | null = null
-  const limit = arena.apothem - radius
-  for (const n of arena.wallNormals) {
-    const d = p.x * n.x + p.z * n.z
-    if (d > limit) {
-      p.x -= n.x * (d - limit)
-      p.z -= n.z * (d - limit)
-      hit = n
-    }
-  }
-  return hit
+  return null
 }
 
 function shortestAngle(from: number, to: number): number {

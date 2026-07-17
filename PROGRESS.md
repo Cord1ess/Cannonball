@@ -3,7 +3,7 @@
 > Session handoff document. Updated at every milestone. Read top-to-bottom to
 > resume: DONE tells you what exists, NEXT tells you what to build.
 
-## STATUS: M0–M4b complete · NEXT UP: M5 (art & world)
+## STATUS: M0–M4b + M5a (colosseum redo) complete · NEXT UP: M5b (light arc, banners, HUD skin)
 
 ---
 
@@ -78,15 +78,27 @@ invalid-id/bot kits/lock), smoke+smoke-bots regressions, playwright lobby+launch
 **M4a AND M4b are NOT yet user-playtested in-browser — first thing next session may be feedback
 on card feel or jersey look.**
 
+### M5a — THE colosseum (user design revision, replaces the morphing polygon)
+**The arena no longer changes shape.** One permanent round stadium; only the PAINTED floor
+divisions morph: 6 wedge sectors → 5 → 4 → 3 → two halves. `shared/src/sim/arena.ts` rewritten:
+`makeArena(n)` always circular (radius 28 constant now — the old polygons shrank with player
+count, this doesn't), `zoneAngles[]` per zone (replaces wallAngles/wallNormals/circle), physics
+wall = circle clamp only. `arenaView.ts` rewritten: static colosseum built ONCE (floor, seamless
+ring wall, 3 stepped audience tiers + tall outer rim, ~400-instance colored crowd, floating-
+island underside, neutral disc + ink ring, decals) + `setZones(arena, colors)` morph layer
+(wedge tints w/ danger heat, painted ink division lines per boundary, CANNONS on the wall crown
+per zone — dark toon barrel angled inward, seat-colored muzzle band; beans park loaded in them
+at launch). online.ts + sandbox.ts keep ONE persistent view and call setZones. Lobby now sits
+inside the colosseum (arena visible from boot). Verified: 56 tests (physics regressions hold on
+the circular wall), all four smokes, playwright lobby/launch/arena screenshots.
+
 ---
 
 ## NEXT (see implementation_plan.md for full detail)
 
-- **M5 art & world:** floating COLOSSEUM (user direction: seamless ring walls, audience tiers on
-  the crown where eliminated players sit, cannons on wall top), day→sunset→dusk light arc +
-  lanterns at duel, shadow-shape decals, banners w/ fake glyphs, HUD paper skin, bean face
-  expression swaps. Camera during lobby/draft currently stares at the ball — give menus a nice
-  camera framing too.
+- **M5b art & world remainder:** day→sunset→dusk light arc + lanterns at duel, banners w/ fake
+  glyphs on the rim, eliminated players seated in the stands, bean face expression swaps, HUD
+  paper skin, menu/draft camera framing (currently stares from spawn).
 - **M6 juice & audio:** hitstop, camera punch, squash-stretch, pooled particles (header burst,
   launch puff, elim poof, confetti), force-scaled SFX over vendored WebAudio (+`toneClip`
   placeholders), one lo-fi loop, autoplay unlock, tab-mute.

@@ -150,7 +150,9 @@ export function createOnlineGame(
   const state = conn.room.state as unknown as NetStateRead
 
   let arena: Arena = makeArena(6)
-  let arenaView: ArenaView | null = null
+  // the colosseum is permanent — only its painted zone layer morphs
+  const arenaView: ArenaView = createArenaView(arena.radius)
+  scene.add(arenaView.group)
   let arenaKey = ''
 
   const ballView: BallView = createBallView()
@@ -255,13 +257,8 @@ export function createOnlineGame(
     const key = `${seats.join(',')}#${colors.join(',')}`
     if (key === arenaKey) return
     arenaKey = key
-    arena = makeArena(Math.max(seats.length, seats.length === 2 ? 2 : 3))
-    if (arenaView) {
-      scene.remove(arenaView.group)
-      arenaView.dispose()
-    }
-    arenaView = createArenaView(arena, colors)
-    scene.add(arenaView.group)
+    arena = makeArena(Math.max(2, seats.length))
+    arenaView.setZones(arena, colors)
   }
 
   function pushSnap(buffer: Snap[], p: NetPlayerRead): void {
@@ -709,7 +706,7 @@ export function createOnlineGame(
         const seat = zoneSeatArr[i] ?? 0
         fracs.push((state.meters?.[seat] ?? 0) / Math.max(1, capacity))
       }
-      arenaView?.setDanger(fracs)
+      arenaView.setDanger(fracs)
 
       // camera: chase while playing/waiting, slow orbit while eliminated
       if (this.spectating()) {
