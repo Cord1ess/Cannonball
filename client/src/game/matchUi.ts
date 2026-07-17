@@ -61,6 +61,8 @@ export function createMatchUi(client: MatchClient): MatchUi {
       showBanner('OVERTIME — first touch of ball-time loses!', 4)
     } else if (event.type === 'volley') {
       showBanner('KICKOFF!', 1.2)
+    } else if (event.type === 'save' && event.seat !== undefined) {
+      showBanner(`P${event.seat + 1} FREE SAVE!`, 1.5)
     } else if (event.type === 'emote' && event.seat !== undefined && event.id !== undefined) {
       const line = document.createElement('div')
       line.style.cssText = `background:#fffdf5cc;border-radius:8px;padding:2px 10px;border-left:6px solid ${seatColor(event.seat)};`

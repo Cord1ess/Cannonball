@@ -7,6 +7,7 @@ export function createGameInput(): Input {
     actions: {
       jump: ['Space'],
       dive: ['Mouse0', 'ControlLeft'], // airborne: dive/header
+      ability: ['Mouse2', 'KeyF'], // drafted ability
       sprint: ['ShiftLeft'],
       restart: ['KeyR'],
       emote1: ['Digit1'],

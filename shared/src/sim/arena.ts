@@ -70,6 +70,40 @@ export function footprintZone(arena: Arena, x: number, z: number): number {
   return Math.round(angle / (tau / arena.seats)) % arena.seats
 }
 
+/**
+ * Zone ownership with per-zone WIDTH multipliers (Slim/Wide Zone cards).
+ * A narrowed wedge leaves neutral escape strips at its edges; a widened
+ * neighbor's span can claim those strips. widths[i] multiplies zone i's
+ * angular half-span (1 = normal).
+ */
+export function footprintZoneWidths(
+  arena: Arena,
+  x: number,
+  z: number,
+  widths: readonly number[],
+): number {
+  const base = footprintZone(arena, x, z)
+  if (base < 0) return -1
+  const n = arena.circle ? 2 : arena.seats
+  const halfBase = Math.PI / n
+  const center = arena.circle ? (base === 0 ? 0 : Math.PI) : (arena.wallAngles[base] ?? 0)
+  const tau = Math.PI * 2
+  let diff = (Math.atan2(z, x) - center) % tau
+  if (diff > Math.PI) diff -= tau
+  if (diff < -Math.PI) diff += tau
+
+  const wBase = widths[base] ?? 1
+  if (Math.abs(diff) <= halfBase * Math.min(wBase, 1)) return base
+
+  // edge strip of a narrowed wedge: can the adjacent zone's widened span claim it?
+  const adjacent = diff > 0 ? (base + 1) % n : (base - 1 + n) % n
+  const wAdj = widths[adjacent] ?? 1
+  const distFromAdjCenter = 2 * halfBase - Math.abs(diff)
+  if (wAdj > 1 && distFromAdjCenter <= halfBase * wAdj) return adjacent
+  if (wBase >= 1) return base
+  return -1 // neutral escape strip
+}
+
 /** A point inside zone `zone` at `frac` of the way from center to wall. */
 export function zoneAnchor(arena: Arena, zone: number, frac: number): { x: number; z: number } {
   const angle = arena.circle ? (zone === 0 ? 0 : Math.PI) : (arena.wallAngles[zone] ?? 0)

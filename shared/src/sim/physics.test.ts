@@ -89,7 +89,7 @@ describe('ball <-> player contacts', () => {
     ball.y = BALL_RADIUS
     const p = makePlayer(0, 0, 0, 0)
     const events = makeEvents()
-    const input = { dirX: 1, dirZ: 0, jump: false, dive: false, sprint: false }
+    const input = { dirX: 1, dirZ: 0, jump: false, dive: false, sprint: false, ability: false }
 
     let lastBallX = ball.x
     let reversals = 0

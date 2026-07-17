@@ -11,6 +11,7 @@ export interface NetInput {
   jump: boolean
   dive: boolean
   sprint: boolean
+  ability: boolean
 }
 
 /** how the client READS the replicated schema (structural, reflection-decoded) */
@@ -36,6 +37,9 @@ export interface NetPlayerRead {
   cardAbility: string
   cardEquipment: string
   cardAdvantage: string
+  activeAdv: string
+  activeCurse: string
+  abilityCd: number
 }
 
 export interface NetHandoutRead {

@@ -86,6 +86,8 @@ renderer.domElement.addEventListener('click', () => {
 
 let jumpQueued = false
 let diveQueued = false
+let abilityQueued = false
+window.addEventListener('contextmenu', (e) => e.preventDefault()) // right-click = ability
 
 function frame(nowMs: number): void {
   requestAnimationFrame(frame)
@@ -96,6 +98,7 @@ function frame(nowMs: number): void {
   if (locked) chase.addMouse(input.pointerDeltaX, input.pointerDeltaY)
   if (input.justPressed('jump')) jumpQueued = true
   if (input.justPressed('dive')) diveQueued = true
+  if (input.justPressed('ability')) abilityQueued = true
   if (input.justPressed('restart') && game.gameOver) game.reset()
   if ('match' in game) {
     for (let e = 0; e < 4; e++) {
@@ -120,9 +123,17 @@ function frame(nowMs: number): void {
       dirZ /= len
     }
 
-    game.fixedStep({ dirX, dirZ, jump: jumpQueued, dive: diveQueued, sprint: input.pressed('sprint') })
+    game.fixedStep({
+      dirX,
+      dirZ,
+      jump: jumpQueued,
+      dive: diveQueued,
+      sprint: input.pressed('sprint'),
+      ability: abilityQueued,
+    })
     jumpQueued = false
     diveQueued = false
+    abilityQueued = false
   }
 
   game.frameUpdate(time.unscaledDelta, time.alpha, input.axis('lean'))
@@ -132,6 +143,7 @@ function frame(nowMs: number): void {
     zones: game.hudZones(),
     alarm: game.ballAlarm(),
     stamina: game.staminaFrac(),
+    ability: game.abilityInfo(),
     locked,
   })
 

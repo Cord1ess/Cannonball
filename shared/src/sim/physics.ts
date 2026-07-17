@@ -42,6 +42,7 @@ import {
   WIND_GUST_PERIOD_S,
 } from '../constants.ts'
 import type { Arena } from './arena.ts'
+import { ABILITIES, DEFAULT_MODS, type PlayerMods } from '../cards/effects.ts'
 
 /**
  * The whole game's physics: hand-rolled arcade simulation, three-free and
@@ -78,6 +79,15 @@ export interface PlayerSim {
   recoverCd: number
   headerCd: number
   knockedCd: number
+  /** M4 modifier stack — neutral by default, set from cards each step */
+  mods: PlayerMods
+  /** drafted ability id ('' = none) */
+  ability: string
+  abilityCd: number
+  /** remaining active time for duration abilities (shield, tractor) */
+  abilityActiveT: number
+  /** one-shot fired this step, consumed by the world step (shove/ballstop) */
+  abilityFired: string
 }
 
 export interface PlayerInputFrame {
@@ -87,9 +97,17 @@ export interface PlayerInputFrame {
   jump: boolean
   dive: boolean
   sprint: boolean
+  ability: boolean
 }
 
-export const ZERO_INPUT: PlayerInputFrame = { dirX: 0, dirZ: 0, jump: false, dive: false, sprint: false }
+export const ZERO_INPUT: PlayerInputFrame = {
+  dirX: 0,
+  dirZ: 0,
+  jump: false,
+  dive: false,
+  sprint: false,
+  ability: false,
+}
 
 export interface Wind {
   x: number
@@ -116,21 +134,28 @@ export interface KnockEvent {
   speed: number
 }
 
+export interface AbilityEvent {
+  seat: number
+  id: string
+}
+
 export interface SimEvents {
   headers: HeaderEvent[]
   shoves: ShoveEvent[]
   knocks: KnockEvent[]
+  abilities: AbilityEvent[]
   bounces: number // wall/floor impacts this step (for SFX later)
 }
 
 export function makeEvents(): SimEvents {
-  return { headers: [], shoves: [], knocks: [], bounces: 0 }
+  return { headers: [], shoves: [], knocks: [], abilities: [], bounces: 0 }
 }
 
 export function clearEvents(events: SimEvents): void {
   events.headers.length = 0
   events.shoves.length = 0
   events.knocks.length = 0
+  events.abilities.length = 0
   events.bounces = 0
 }
 
@@ -155,6 +180,11 @@ export function makePlayer(seat: number, x: number, z: number, yaw: number): Pla
     recoverCd: 0,
     headerCd: 0,
     knockedCd: 0,
+    mods: { ...DEFAULT_MODS },
+    ability: '',
+    abilityCd: 0,
+    abilityActiveT: 0,
+    abilityFired: '',
   }
 }
 
@@ -232,7 +262,7 @@ export function stepPlayer(p: PlayerSim, input: PlayerInputFrame, arena: Arena, 
   } else {
     p.stamina = Math.min(STAMINA_MAX, p.stamina + STAMINA_REGEN * dt)
   }
-  const targetSpeed = p.sprinting ? SPRINT_SPEED : RUN_SPEED
+  const targetSpeed = (p.sprinting ? SPRINT_SPEED : RUN_SPEED) * p.mods.speed
 
   // horizontal: framerate-independent blend toward target velocity.
   // Diving commits — near-zero air control. Recovery stumbles.
@@ -245,8 +275,33 @@ export function stepPlayer(p: PlayerSim, input: PlayerInputFrame, arena: Arena, 
   p.vz += (input.dirZ * targetSpeed - p.vz) * k
 
   if (input.jump && p.grounded && !recovering && !knocked) {
-    p.vy = JUMP_SPEED
+    p.vy = JUMP_SPEED * p.mods.jump
     p.grounded = false
+  }
+
+  // ABILITY (M4): movement abilities apply here (predictable); world
+  // abilities set abilityFired for the world step to consume.
+  if (input.ability && p.abilityCd <= 0 && p.ability !== '' && !knocked) {
+    const spec = ABILITIES[p.ability]
+    if (spec) {
+      p.abilityCd = spec.cooldown * p.mods.cooldown
+      p.abilityActiveT = spec.duration
+      if (p.ability === 'dash') {
+        const fx = Math.sin(p.yaw)
+        const fz = Math.cos(p.yaw)
+        p.vx = fx * 14
+        p.vz = fz * 14
+      } else if (p.ability === 'grapple') {
+        const fx = Math.sin(p.yaw)
+        const fz = Math.cos(p.yaw)
+        p.vx = fx * 16
+        p.vz = fz * 16
+        p.vy = Math.max(p.vy, 5)
+        p.grounded = false
+      } else {
+        p.abilityFired = p.ability
+      }
+    }
   }
 
   // DIVE: full-commit forward lunge along facing — costs stamina
@@ -260,7 +315,7 @@ export function stepPlayer(p: PlayerSim, input: PlayerInputFrame, arena: Arena, 
     p.diving = true
   }
 
-  p.vy -= GRAVITY * dt
+  p.vy -= GRAVITY * p.mods.gravity * dt
 
   p.x += p.vx * dt
   p.y += p.vy * dt
@@ -290,6 +345,8 @@ export function stepPlayer(p: PlayerSim, input: PlayerInputFrame, arena: Arena, 
   if (p.headerCd > 0) p.headerCd -= dt
   if (p.recoverCd > 0) p.recoverCd -= dt
   if (p.knockedCd > 0) p.knockedCd -= dt
+  if (p.abilityCd > 0) p.abilityCd -= dt
+  if (p.abilityActiveT > 0) p.abilityActiveT -= dt
 }
 
 // --- wind (the only escalating force, idea.md §4) -----------------------------------
@@ -375,12 +432,67 @@ export function stepBallWithPlayers(
   dt: number,
   events: SimEvents,
 ): void {
+  // world abilities: one-shots fired this step + tractor beam pull
+  for (const p of players) {
+    if (!alive[p.seat]) continue
+    if (p.abilityFired === 'shove') {
+      p.abilityFired = ''
+      events.abilities.push({ seat: p.seat, id: 'shove' })
+      const bdx = ball.x - p.x
+      const bdz = ball.z - p.z
+      const bdist = Math.hypot(bdx, bdz)
+      if (bdist < 6 && bdist > 1e-4) {
+        ball.vx += (bdx / bdist) * 11
+        ball.vz += (bdz / bdist) * 11
+        ball.vy += 2
+      }
+      for (const other of players) {
+        if (other === p || !alive[other.seat]) continue
+        const dx = other.x - p.x
+        const dz = other.z - p.z
+        const d = Math.hypot(dx, dz)
+        if (d < 4.5 && d > 1e-4) {
+          other.vx += (dx / d) * 8
+          other.vz += (dz / d) * 8
+          other.vy = Math.max(other.vy, 2.5)
+          other.grounded = false
+          events.shoves.push({ fromSeat: p.seat, toSeat: other.seat, major: true })
+        }
+      }
+    } else if (p.abilityFired === 'ballstop') {
+      p.abilityFired = ''
+      events.abilities.push({ seat: p.seat, id: 'ballstop' })
+      const d = Math.hypot(ball.x - p.x, ball.z - p.z)
+      if (d < 5.5) {
+        ball.vx = 0
+        ball.vy = Math.min(ball.vy, 0)
+        ball.vz = 0
+      }
+    } else if (p.abilityFired !== '') {
+      events.abilities.push({ seat: p.seat, id: p.abilityFired })
+      p.abilityFired = ''
+    }
+  }
+
   // worst-case closing speed decides the substep count
   const speed = Math.hypot(ball.vx, ball.vy, ball.vz) + 12
   const substeps = Math.min(BALL_MAX_SUBSTEPS, Math.max(1, Math.ceil((speed * dt) / BALL_SUBSTEP_TRAVEL)))
   const h = dt / substeps
 
   for (let i = 0; i < substeps; i++) {
+    // tractor beam: continuous pull while active
+    for (const p of players) {
+      if (!alive[p.seat] || p.ability !== 'tractor' || p.abilityActiveT <= 0) continue
+      const dx = p.x - ball.x
+      const dy = p.y + 1 - ball.y
+      const dz = p.z - ball.z
+      const d = Math.hypot(dx, dy, dz)
+      if (d > 2.5 && d < 24) {
+        ball.vx += (dx / d) * 14 * h
+        ball.vy += (dy / d) * 6 * h
+        ball.vz += (dz / d) * 14 * h
+      }
+    }
     integrateBall(ball, arena, h, events)
     resolveBallPlayerContacts(ball, players, alive, events)
   }
@@ -420,11 +532,12 @@ function resolveBallPlayerContacts(
 
     // gameplay override: the dive-header
     if (p.diving && p.headerCd <= 0 && dist < contactR + HEADER_MARGIN) {
+      const power = HEADER_POWER * p.mods.header
       const fx = Math.sin(p.yaw)
       const fz = Math.cos(p.yaw)
-      ball.vx = fx * HEADER_POWER
-      ball.vz = fz * HEADER_POWER
-      ball.vy = HEADER_POWER * HEADER_UP_BIAS + Math.max(0, ball.vy * 0.2)
+      ball.vx = fx * power
+      ball.vz = fz * power
+      ball.vy = power * HEADER_UP_BIAS + Math.max(0, ball.vy * 0.2)
       p.headerCd = HEADER_COOLDOWN_S
       p.vx *= 0.25
       p.vz *= 0.25
@@ -456,13 +569,20 @@ function resolveBallPlayerContacts(
     const rvx = ball.vx - p.vx
     const rvy = ball.vy - p.vy
     const rvz = ball.vz - p.vz
+    // shield bubble: the bean is briefly an immovable, extra-bouncy bumper
+    const shielded = p.ability === 'shield' && p.abilityActiveT > 0
+    const invPlayerMass = shielded ? 0.04 : INV_PLAYER_MASS
+    const invMassSum = INV_BALL_MASS + invPlayerMass
+    const restitution = shielded ? 1.1 : BODY_RESTITUTION
+
     const approaching = rvx * nx + rvy * ny + rvz * nz
     if (approaching < 0) {
-      const j = (-(1 + BODY_RESTITUTION) * approaching) / INV_MASS_SUM
-      ball.vx += nx * j * INV_BALL_MASS
-      ball.vy += ny * j * INV_BALL_MASS
-      ball.vz += nz * j * INV_BALL_MASS
-      const playerDv = j * INV_PLAYER_MASS
+      const j = (-(1 + restitution) * approaching) / invMassSum
+      // bumper shell: this body imparts extra impulse to the ball (RL-style)
+      ball.vx += nx * j * INV_BALL_MASS * p.mods.nudge
+      ball.vy += ny * j * INV_BALL_MASS * p.mods.nudge
+      ball.vz += nz * j * INV_BALL_MASS * p.mods.nudge
+      const playerDv = j * invPlayerMass * p.mods.knockTaken
       p.vx -= nx * playerDv
       p.vy -= ny * playerDv
       p.vz -= nz * playerDv
@@ -478,16 +598,16 @@ function resolveBallPlayerContacts(
       const tz = rvz2 - nz * rn2
       const tMag = Math.hypot(tx, ty, tz)
       if (tMag > 1e-4) {
-        const jt = Math.min(tMag / INV_MASS_SUM, BODY_FRICTION_MU * j)
+        const jt = Math.min(tMag / invMassSum, BODY_FRICTION_MU * j)
         const ux = tx / tMag
         const uy = ty / tMag
         const uz = tz / tMag
         ball.vx -= ux * jt * INV_BALL_MASS
         ball.vy -= uy * jt * INV_BALL_MASS
         ball.vz -= uz * jt * INV_BALL_MASS
-        p.vx += ux * jt * INV_PLAYER_MASS
-        p.vy += uy * jt * INV_PLAYER_MASS
-        p.vz += uz * jt * INV_PLAYER_MASS
+        p.vx += ux * jt * invPlayerMass
+        p.vy += uy * jt * invPlayerMass
+        p.vz += uz * jt * invPlayerMass
       }
 
       // clamp launches so they stay readable
@@ -500,7 +620,7 @@ function resolveBallPlayerContacts(
       }
 
       // gameplay layer: a hard hit is a KNOCK — stun + pop + flail
-      if (playerDv > KNOCK_DELTA_V && p.knockedCd <= 0 && !p.diving) {
+      if (playerDv > KNOCK_DELTA_V && p.knockedCd <= 0 && !p.diving && !shielded) {
         p.vy = Math.max(p.vy, BALL_KNOCK_POP)
         p.grounded = false
         p.knockedCd = KNOCK_STUN_S

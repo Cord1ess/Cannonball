@@ -69,6 +69,7 @@ export interface Sandbox {
   tickRemaining: number
   ballAlarm(): boolean
   staminaFrac(): number
+  abilityInfo(): { id: string; cdFrac: number } | null
   readonly debug: DebugHooks
 }
 
@@ -253,6 +254,10 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
 
     staminaFrac(): number {
       return players[0]!.stamina / STAMINA_MAX
+    },
+
+    abilityInfo(): { id: string; cdFrac: number } | null {
+      return null
     },
 
     debug: {

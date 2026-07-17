@@ -31,6 +31,10 @@ export const PlayerState = schema(
     cardAbility: { type: 'string', default: '' },
     cardEquipment: { type: 'string', default: '' },
     cardAdvantage: { type: 'string', default: '' },
+    // active restart cards on this player (expire at the next restart)
+    activeAdv: { type: 'string', default: '' },
+    activeCurse: { type: 'string', default: '' },
+    abilityCd: { type: 'float32', default: 0 },
   },
   'PlayerState',
 )

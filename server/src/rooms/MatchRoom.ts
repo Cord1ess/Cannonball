@@ -20,7 +20,14 @@ import {
   WIND_ENABLED,
   WIND_STEP_PER_ELIMINATION,
 } from '../../../shared/src/constants.ts'
-import { footprintZone, makeArena, yawTowardCenter, zoneAnchor, type Arena } from '../../../shared/src/sim/arena.ts'
+import {
+  footprintZone,
+  footprintZoneWidths,
+  makeArena,
+  yawTowardCenter,
+  zoneAnchor,
+  type Arena,
+} from '../../../shared/src/sim/arena.ts'
 import { accrueBallTime, tickLosers } from '../../../shared/src/sim/meters.ts'
 import {
   clearEvents,
@@ -39,6 +46,7 @@ import {
 } from '../../../shared/src/sim/physics.ts'
 import type { NetInput } from '../../../shared/src/sim/net.ts'
 import { rollDraftOffer, rollRestartPair, type CardPool } from '../../../shared/src/cards/definitions.ts'
+import { computeMods, hasFreeSave, hasMagnetCurse } from '../../../shared/src/cards/effects.ts'
 import { isHalftimeAt, Phase, tickInterval, type PhaseId } from '../../../shared/src/match/phases.ts'
 import { Time } from '../../../vendor/arc/scheduler/time.ts'
 import { Random } from '../../../vendor/arc/scheduler/random.ts'
@@ -56,6 +64,8 @@ import { BallState, HandoutState, MatchState, PlayerState, type MatchStateT } fr
 
 const MAX_SEATS = 6
 const WS_CLOSE_CONSENTED = 4000
+const ADV_IDS = ['overdrive', 'titan', 'slimzone', 'slowmeter', 'bodyguard', 'doubleboost']
+const CURSE_IDS = ['leadboots', 'softheader', 'widezone', 'fastmeter', 'magnet', 'jammed']
 const REVEAL_S = 2 // handout reveal beat after assignment
 
 interface Session {
@@ -97,6 +107,9 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #overtimeSeats: number[] = []
   #handoutTimer = 0
   #activeHandoutIds = new Set<string>()
+  /** active restart cards per seat — expire at the next restart (idea.md §2) */
+  #activeCards: string[][] = Array.from({ length: MAX_SEATS }, () => [])
+  #freeSaves: number[] = new Array(MAX_SEATS).fill(0)
 
   #scale(t: number): number {
     return this.#fast ? t * 0.15 : t
@@ -391,7 +404,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       dirX /= len
       dirZ /= len
     }
-    return { dirX, dirZ, jump, dive, sprint }
+    const ability = chase && this.#rng.next() < 0.008 // occasional ability use
+    return { dirX, dirZ, jump, dive, sprint, ability }
   }
 
   // --- phase transitions -----------------------------------------------------------
@@ -413,6 +427,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.state.winnerSeat = -1
     this.state.halftime = false
     this.#clearHandout()
+    this.#activeCards = Array.from({ length: MAX_SEATS }, () => [])
+    this.#freeSaves.fill(0)
     for (const session of this.#sessions.values()) {
       session.picks = {}
       session.offers = null
@@ -422,7 +438,11 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
         ps.cardAbility = ''
         ps.cardEquipment = ''
         ps.cardAdvantage = ''
+        ps.activeAdv = ''
+        ps.activeCurse = ''
       }
+      session.sim.ability = ''
+      session.sim.abilityCd = 0
     }
     this.#enter(Phase.Lobby, 0)
   }
@@ -477,6 +497,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
         ps.cardEquipment = session.picks.equipment ?? ''
         ps.cardAdvantage = session.picks.advantage ?? ''
       }
+      session.sim.ability = session.picks.ability ?? ''
     }
     this.#morphArena()
     this.#beginLaunch()
@@ -521,6 +542,12 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
 
   /** cannon volley: ballistic velocity toward the aimed landing point */
   #fire(): void {
+    // per-interval effects refresh: one free save if you carry the card
+    for (const session of this.#sessions.values()) {
+      const seat = session.sim.seat
+      this.#freeSaves[seat] = hasFreeSave(this.#cardsOf(session)) ? 1 : 0
+      session.sim.abilityActiveT = 0
+    }
     const flight = this.#fast ? LAUNCH_FLIGHT_S * 0.6 : LAUNCH_FLIGHT_S
     for (const session of this.#sessions.values()) {
       const sim = session.sim
@@ -562,6 +589,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #beginRestart(elimSeat: number): void {
     resetBall(this.#ball)
     this.#meters.fill(0)
+    // handed-out cards expire at the next Restart Kickoff (idea.md §2)
+    for (let seat = 0; seat < MAX_SEATS; seat++) this.#activeCards[seat] = []
     const halftime = !this.#halftimeDone && isHalftimeAt(this.#survivors, this.#seatsAtStart)
     if (halftime) this.#halftimeDone = true
     this.state.halftime = halftime
@@ -604,7 +633,9 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     handout.advTo = advTo
     handout.curseTo = curseTo
     handout.revealed = true
-    // effects land in M4 — for now the cards are pure spectacle
+    // M4: the cards are REAL — attached until the next restart
+    this.#activeCards[advTo] = [...(this.#activeCards[advTo] ?? []), handout.advCardId]
+    this.#activeCards[curseTo] = [...(this.#activeCards[curseTo] ?? []), handout.curseCardId]
     this.#activeHandoutIds = new Set([handout.advCardId, handout.curseCardId])
     // shorten the rest of the pause to the reveal beat
     this.#phaseT = Math.min(this.#phaseT, this.#scale(this.state.halftime ? REVEAL_S * 3 : REVEAL_S))
@@ -670,6 +701,21 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   }
 
   #stepPlay(dt: number): void {
+    // M4: refresh each bean's modifier stack from its cards
+    let highestMeterSeat = -1
+    let highestMeter = -1
+    for (let seat = 0; seat < MAX_SEATS; seat++) {
+      if (this.#alive[seat] && (this.#meters[seat] ?? 0) > highestMeter) {
+        highestMeter = this.#meters[seat] ?? 0
+        highestMeterSeat = seat
+      }
+    }
+    for (const session of this.#sessions.values()) {
+      session.sim.mods = computeMods(this.#cardsOf(session), {
+        meterIsHighest: session.sim.seat === highestMeterSeat && highestMeter > 0,
+      })
+    }
+
     const sims: PlayerSim[] = []
     for (const session of this.#sessions.values()) {
       if (session.isBot) {
@@ -680,7 +726,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
           session.lastInput = next
           session.lastSeq = next.seq
         } else {
-          session.lastInput = { ...session.lastInput, jump: false, dive: false }
+          session.lastInput = { ...session.lastInput, jump: false, dive: false, ability: false }
         }
       }
       // the eliminated don't play (they emote from the stands)
@@ -691,20 +737,61 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
 
     const strength = WIND_BASE_STRENGTH + this.#eliminations * WIND_STEP_PER_ELIMINATION
     if (this.#windOn) stepWind(this.#wind, this.#rng, strength, this.#ball, dt)
+    // Magnet Curse: the ball drifts toward the cursed bean's wedge
+    for (const session of this.#sessions.values()) {
+      const seat = session.sim.seat
+      if (!this.#alive[seat] || !hasMagnetCurse(this.#activeCards[seat] ?? [])) continue
+      const zone = this.#zoneSeat.indexOf(seat)
+      if (zone < 0) continue
+      const anchor = zoneAnchor(this.#arena, zone, 0.6)
+      const dx = anchor.x - this.#ball.x
+      const dz = anchor.z - this.#ball.z
+      const d = Math.hypot(dx, dz)
+      if (d > 1) {
+        this.#ball.vx += (dx / d) * 2.2 * dt
+        this.#ball.vz += (dz / d) * 2.2 * dt
+      }
+    }
     collidePlayers(sims, this.#alive, this.#events)
     stepBallWithPlayers(this.#ball, sims, this.#alive, this.#arena, dt, this.#events)
 
     for (const header of this.#events.headers) this.broadcast('header', { seat: header.seat })
     for (const knock of this.#events.knocks) this.broadcast('knock', { seat: knock.seat })
+    for (const ability of this.#events.abilities) this.broadcast('ability', ability)
     clearEvents(this.#events)
 
-    const zone = footprintZone(this.#arena, this.#ball.x, this.#ball.z)
+    // zone ownership honors Slim/Wide Zone widths (indexed by zone order)
+    const widths = this.#zoneSeat.map((seat) => {
+      for (const session of this.#sessions.values()) {
+        if (session.sim.seat === seat) return session.sim.mods.wedgeWidth
+      }
+      return 1
+    })
+    const zone = footprintZoneWidths(this.#arena, this.#ball.x, this.#ball.z, widths)
 
     if (this.#phase === Phase.Arena) {
-      accrueBallTime(this.#meters, this.#zoneSeat, zone, dt)
       if (zone >= 0) {
         const seat = this.#zoneSeat[zone]
-        if (seat !== undefined) this.#cumulative[seat] = (this.#cumulative[seat] ?? 0) + dt
+        if (seat !== undefined && this.#alive[seat]) {
+          // Free Save / Bodyguard: auto-punt the FIRST ball entering your wedge
+          if ((this.#meters[seat] ?? 0) === 0 && (this.#freeSaves[seat] ?? 0) > 0) {
+            this.#freeSaves[seat] = 0
+            const d = Math.hypot(this.#ball.x, this.#ball.z)
+            if (d > 0.5) {
+              this.#ball.vx = (-this.#ball.x / d) * 15
+              this.#ball.vz = (-this.#ball.z / d) * 15
+              this.#ball.vy = Math.max(this.#ball.vy, 6)
+            }
+            this.broadcast('save', { seat })
+          } else {
+            let rate = 1
+            for (const session of this.#sessions.values()) {
+              if (session.sim.seat === seat) rate = session.sim.mods.meterRate
+            }
+            this.#meters[seat] = (this.#meters[seat] ?? 0) + dt * rate
+            this.#cumulative[seat] = (this.#cumulative[seat] ?? 0) + dt
+          }
+        }
       }
       this.#tickRemaining -= dt
       this.state.tickRemaining = this.#tickRemaining
@@ -761,6 +848,16 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#enter(Phase.Overtime, 0)
   }
 
+  #cardsOf(session: Session): string[] {
+    const seat = session.sim.seat
+    return [
+      session.picks.ability ?? '',
+      session.picks.equipment ?? '',
+      session.picks.advantage ?? '',
+      ...(this.#activeCards[seat] ?? []),
+    ].filter(Boolean)
+  }
+
   #seatOccupied(seat: number): boolean {
     for (const session of this.#sessions.values()) if (session.sim.seat === seat) return true
     return false
@@ -787,6 +884,10 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       ps.stamina = sim.stamina
       ps.alive = this.#alive[sim.seat] ?? false
       ps.lastSeq = session.lastSeq
+      const actives = this.#activeCards[sim.seat] ?? []
+      ps.activeAdv = actives.find((id) => ADV_IDS.includes(id)) ?? ''
+      ps.activeCurse = actives.find((id) => CURSE_IDS.includes(id)) ?? ''
+      ps.abilityCd = Math.max(0, sim.abilityCd)
     }
     const ball = this.state.ball
     ball.x = this.#ball.x

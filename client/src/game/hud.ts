@@ -16,6 +16,7 @@ export interface HudState {
   alarm: boolean
   /** 0..1 — sprint/dive energy */
   stamina: number
+  ability: { id: string; cdFrac: number } | null
   locked: boolean
 }
 
@@ -52,6 +53,19 @@ export function createHud(): Hud {
   staminaFill.style.cssText = 'height:100%;width:100%;background:#f2c078;transition:background 150ms;'
   staminaBar.appendChild(staminaFill)
   root.appendChild(staminaBar)
+
+  const abilityChip = document.createElement('div')
+  abilityChip.style.cssText =
+    'position:absolute;bottom:56px;left:calc(50% + 130px);width:88px;height:26px;background:#fffdf5aa;' +
+    'border:2px solid #4a443c;border-radius:8px;overflow:hidden;font:700 11px system-ui;color:#4a443c;' +
+    'display:none;align-items:center;justify-content:center;'
+  const abilityFill = document.createElement('div')
+  abilityFill.style.cssText = 'position:absolute;inset:0;background:#4fa3d888;transform-origin:left;'
+  const abilityLabel = document.createElement('span')
+  abilityLabel.style.cssText = 'position:relative;'
+  abilityChip.appendChild(abilityFill)
+  abilityChip.appendChild(abilityLabel)
+  root.appendChild(abilityChip)
 
   const hint = document.createElement('div')
   hint.style.cssText =
@@ -100,6 +114,13 @@ export function createHud(): Hud {
       alarm.style.opacity = state.alarm ? '1' : '0'
       staminaFill.style.width = `${Math.max(0, Math.min(100, state.stamina * 100)).toFixed(1)}%`
       staminaFill.style.background = state.stamina < 0.3 ? '#d96c6c' : '#f2c078'
+      if (state.ability) {
+        abilityChip.style.display = 'flex'
+        abilityLabel.textContent = state.ability.cdFrac > 0.01 ? state.ability.id : `${state.ability.id} ✔`
+        abilityFill.style.transform = `scaleX(${(1 - state.ability.cdFrac).toFixed(3)})`
+      } else {
+        abilityChip.style.display = 'none'
+      }
       hint.style.display = state.locked ? 'none' : 'block'
     },
     showEnd(text: string | null): void {

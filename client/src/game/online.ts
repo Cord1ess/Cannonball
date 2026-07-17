@@ -22,6 +22,7 @@ import {
   type PlayerSim,
 } from '@shared/sim/physics.ts'
 import { isPlayPhase, Phase, tickInterval } from '@shared/match/phases.ts'
+import { ABILITIES, computeMods } from '@shared/cards/effects.ts'
 import type { CardPool } from '@shared/cards/definitions.ts'
 import { createArenaView, type ArenaView } from '../render/arenaView.ts'
 import { createBallView, type BallView } from '../render/ballView.ts'
@@ -65,10 +66,11 @@ interface RemoteEntity {
 }
 
 export interface MatchEvent {
-  type: 'elim' | 'overtime' | 'volley' | 'emote'
+  type: 'elim' | 'overtime' | 'volley' | 'emote' | 'save' | 'ability'
   seat?: number
   seats?: number[]
   id?: number
+  abilityId?: string
 }
 
 export interface MatchPlayerInfo {
@@ -115,6 +117,7 @@ export interface OnlineGame {
   readonly tickRemaining: number
   ballAlarm(): boolean
   staminaFrac(): number
+  abilityInfo(): { id: string; cdFrac: number } | null
   spectating(): boolean
   readonly match: MatchClient
   readonly debug: DebugHooks
@@ -257,6 +260,7 @@ export function createOnlineGame(
       localSim.grounded = me.grounded
       localSim.diving = me.diving
       localSim.stamina = me.stamina
+      localSim.abilityCd = me.abilityCd
       if (me.knocked) localSim.knockedCd = Math.max(localSim.knockedCd, 0.1)
 
       let i = 0
@@ -357,6 +361,10 @@ export function createOnlineGame(
   conn.room.onMessage('emote', ({ seat, id }: { seat: number; id: number }) =>
     emitEvent({ type: 'emote', seat, id }),
   )
+  conn.room.onMessage('ability', ({ seat, id }: { seat: number; id: string }) =>
+    emitEvent({ type: 'ability', seat, abilityId: id }),
+  )
+  conn.room.onMessage('save', ({ seat }: { seat: number }) => emitEvent({ type: 'save', seat }))
   conn.room.onMessage('round', () => {})
 
   function blendBallToServer(dt: number): void {
@@ -430,6 +438,15 @@ export function createOnlineGame(
       return state.tickRemaining ?? 0
     },
     reset(): void {},
+    abilityInfo(): { id: string; cdFrac: number } | null {
+      const me = state.players.get(conn.sessionId)
+      if (!me || !me.cardAbility) return null
+      const spec = ABILITIES[me.cardAbility]
+      if (!spec) return null
+      const cd = localSim ? Math.max(localSim.abilityCd, 0) : me.abilityCd
+      return { id: me.cardAbility, cdFrac: Math.min(1, cd / spec.cooldown) }
+    },
+
     spectating(): boolean {
       return (state.phase ?? 0) !== Phase.Lobby && mySeat >= 0 && !aliveOf(mySeat)
     },
@@ -471,6 +488,28 @@ export function createOnlineGame(
       }
       wasPredicting = isPredicting
       if (!isPredicting) return
+
+      // M4: self-prediction uses the SAME modifier stack as the server
+      const meNow = state.players.get(conn.sessionId)
+      if (meNow) {
+        localSim.ability = meNow.cardAbility
+        let highest = -1
+        let highestSeat = -1
+        state.players.forEach((p) => {
+          if (p.alive && (state.meters?.[p.seat] ?? 0) > highest) {
+            highest = state.meters?.[p.seat] ?? 0
+            highestSeat = p.seat
+          }
+        })
+        const myCards = [
+          meNow.cardAbility,
+          meNow.cardEquipment,
+          meNow.cardAdvantage,
+          meNow.activeAdv,
+          meNow.activeCurse,
+        ].filter(Boolean)
+        localSim.mods = computeMods(myCards, { meterIsHighest: highestSeat === mySeat && highest > 0 })
+      }
 
       prevLocal.x = localSim.x
       prevLocal.y = localSim.y
