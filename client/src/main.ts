@@ -5,6 +5,7 @@ import { ChaseCamera } from './game/camera.ts'
 import { createDebugPanel } from './game/debug.ts'
 import { createHud } from './game/hud.ts'
 import { createMatchUi, type MatchUi } from './game/matchUi.ts'
+import { createLeaderboard, type Leaderboard } from './game/leaderboard.ts'
 import { createGameInput } from './game/input.ts'
 import { createOnlineGame, type OnlineGame } from './game/online.ts'
 import { createSandbox, type Sandbox } from './game/sandbox.ts'
@@ -95,7 +96,11 @@ if (wantOffline) {
 
 const debugPanel = createDebugPanel(renderer, scene, game.debug)
 let matchUi: MatchUi | null = null
-if ('match' in game) matchUi = createMatchUi(game.match)
+let leaderboard: Leaderboard | null = null
+if ('match' in game) {
+  matchUi = createMatchUi(game.match)
+  leaderboard = createLeaderboard(game.match)
+}
 
 renderer.domElement.addEventListener('click', () => {
   if (!isPointerLocked(document)) void requestPointerLock(renderer.domElement)
@@ -156,6 +161,8 @@ function frame(nowMs: number): void {
   game.frameUpdate(time.unscaledDelta, time.alpha, input.axis('lean'))
 
   hud.update({
+    // tick timer + zone meters moved to the leaderboard HUD; the plain HUD
+    // now only carries stamina, the ability chip, the danger vignette + hint
     tickRemaining: game.tickRemaining,
     zones: game.hudZones(),
     alarm: game.ballAlarm(),
@@ -165,6 +172,7 @@ function frame(nowMs: number): void {
   })
 
   matchUi?.update()
+  leaderboard?.update()
   debugPanel.update(time.unscaledDelta)
 
   renderer.clear()

@@ -31,14 +31,16 @@ export function createHud(): Hud {
     'position:fixed;inset:0;pointer-events:none;font-family:system-ui,sans-serif;user-select:none;'
   document.body.appendChild(root)
 
+  // timer + per-zone meters are now the leaderboard HUD's job — keep the
+  // elements (update() still writes them) but hide them so nothing double-draws
   const timer = document.createElement('div')
   timer.style.cssText =
-    'position:absolute;top:16px;left:50%;transform:translateX(-50%);font-size:44px;font-weight:800;color:#4a443c;text-shadow:0 1px 0 #fff8;'
+    'position:absolute;top:16px;left:50%;transform:translateX(-50%);font-size:44px;font-weight:800;color:#4a443c;text-shadow:0 1px 0 #fff8;display:none;'
   root.appendChild(timer)
 
   const meterRow = document.createElement('div')
   meterRow.style.cssText =
-    'position:absolute;top:74px;left:50%;transform:translateX(-50%);display:flex;gap:8px;'
+    'position:absolute;top:74px;left:50%;transform:translateX(-50%);display:none;gap:8px;'
   root.appendChild(meterRow)
 
   const alarm = document.createElement('div')

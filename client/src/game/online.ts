@@ -107,6 +107,19 @@ export interface MatchPlayerInfo {
   color: string
 }
 
+export interface LeaderRow {
+  seat: number
+  name: string
+  color: string
+  kitId: string
+  kitAway: boolean
+  /** meter fill 0..1 (how close to elimination) */
+  frac: number
+  /** true if the ball is sitting in this player's zone right now */
+  ballHere: boolean
+  isMe: boolean
+}
+
 export interface MatchClient {
   readonly roomId: string
   phase(): number
@@ -137,6 +150,13 @@ export interface MatchClient {
   myName(): string
   /** identity color for a seat as '#rrggbb' (kit primary, SEAT_COLORS fallback) */
   seatColorHex(seat: number): string
+  /** alive players ranked SAFEST→MOST-AT-RISK, with meter + ball-in-zone flags */
+  leaderboard(): LeaderRow[]
+  /** seconds until the next elimination tick (NaN in duel/overtime) */
+  elimCountdown(): number
+  survivors(): number
+  /** true while the ball sits in MY zone (drives the "get it out" prompt) */
+  ballInMyZone(): boolean
   onEvent(cb: (event: MatchEvent) => void): void
 }
 
@@ -615,6 +635,40 @@ export function createOnlineGame(
     },
     myName: () => state.players.get(conn.sessionId)?.name ?? '',
     seatColorHex: (seat: number) => toHex(seatColors[seat] ?? SEAT_COLORS[seat] ?? 0x888888),
+    leaderboard(): LeaderRow[] {
+      const phase = state.phase ?? 0
+      const capacity =
+        phase === Phase.Duel ? DUEL_METER_CAPACITY_S : tickInterval(state.survivors || 6) * 0.5
+      const bz = footprintZone(arena, ball.x, ball.z)
+      const ballOwner = bz >= 0 && state.zoneSeat ? state.zoneSeat[bz] : -1
+      const rows: LeaderRow[] = []
+      state.players.forEach((p) => {
+        if (!p.alive) return
+        rows.push({
+          seat: p.seat,
+          name: p.name || `Player ${p.seat + 1}`,
+          color: toHex(kitOf(p).primary),
+          kitId: p.kitId,
+          kitAway: p.kitAway,
+          frac: Math.min(1, (state.meters?.[p.seat] ?? 0) / Math.max(1, capacity)),
+          ballHere: p.seat === ballOwner,
+          isMe: p.seat === mySeat,
+        })
+      })
+      // risk = meter, plus a boost if the ball is in your zone right now.
+      // SAFEST first (low risk at top), MOST AT RISK last (bottom).
+      const risk = (r: LeaderRow): number => r.frac + (r.ballHere ? 0.5 : 0)
+      rows.sort((a, b) => risk(a) - risk(b))
+      return rows
+    },
+    elimCountdown(): number {
+      const phase = state.phase ?? 0
+      if (phase === Phase.Duel || phase === Phase.Overtime) return Number.NaN
+      if (phase !== Phase.Arena) return Number.NaN
+      return state.tickRemaining ?? 0
+    },
+    survivors: () => state.survivors ?? 0,
+    ballInMyZone: () => alarmPulse > 0,
     onEvent: (cb) => eventListeners.push(cb),
   }
 
@@ -973,18 +1027,26 @@ export function createOnlineGame(
       info(): Record<string, string | number> {
         const offMag = Math.hypot(renderOffset.x, renderOffset.y, renderOffset.z)
         const corrMag = Math.hypot(ballCorr.x, ballCorr.y, ballCorr.z)
+        const phase = state.phase ?? 0
+        const bz = footprintZone(arena, ball.x, ball.z)
+        const bOwner = bz >= 0 && state.zoneSeat ? state.zoneSeat[bz] : undefined
+        const phaseName = ['lobby', 'draft', 'launch', 'arena', 'overtime', 'restart', 'duel', 'end'][phase] ?? phase
         return {
-          session: conn.sessionId,
+          session: conn.sessionId.slice(0, 6),
           seat: mySeat,
-          phase: state.phase ?? 0,
+          phase: `${phase} ${phaseName}`,
+          survivors: state.survivors ?? 0,
           players: state.players?.size ?? 0,
+          tick: Number.isFinite(state.tickRemaining) ? `${(state.tickRemaining ?? 0).toFixed(1)}s` : 'n/a',
+          myMeter: `${(state.meters?.[mySeat] ?? 0).toFixed(1)}s`,
+          ballZone: bz < 0 ? 'neutral' : `z${bz}→${bOwner === undefined ? '?' : `seat${bOwner}`}${bOwner === mySeat ? ' (MINE!)' : ''}`,
+          gust: currentWind.gust.toFixed(2),
           seq,
           buffered: inputBuffer.length,
-          renderOff: `${offMag.toFixed(3)}m`,
-          ballCorr: `${corrMag.toFixed(3)}m`,
+          renderOff: `${offMag.toFixed(2)}m`,
+          ballCorr: `${corrMag.toFixed(2)}m`,
           patchAge: `${(performance.now() - lastPatchAt).toFixed(0)}ms`,
-          offset: timeOffset === null ? 'n/a' : `${timeOffset.toFixed(3)}s`,
-          ball: `${ball.x.toFixed(1)}, ${ball.z.toFixed(1)} y${ball.y.toFixed(1)}`,
+          ball: `${ball.x.toFixed(1)},${ball.z.toFixed(1)} y${ball.y.toFixed(1)}`,
         }
       },
       ghosts(draw): void {

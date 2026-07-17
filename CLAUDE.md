@@ -46,7 +46,11 @@ Giant ball, wedge zones, tick eliminations, dive-headers, card draft. Solo dev +
   `http://<client>/?server=<server>`. Server resolution order: ?server → saved (localStorage)
   → VITE_SERVER_URL → same-host:2567. Failed connect shows a red bar with an input to paste the
   server address + retry. Vite binds all hosts (`host:true, allowedHosts:true`) for tunnels/LAN.
-- Debug: backquote = panel (skip-phase, live ±bot, freeze ticks, reset round/ball, ball-to-me,
-  wind, elim-me, new room), G = server ghosts.
+- Debug: backquote = grouped panel — FLOW (skip-phase, reset round/lobby, win-me, elim-me),
+  PLAYERS (±bot, clear bots), CLOCK (freeze, ±15s, reset score, slow-mo), BALL/WIND
+  (ball-to-me, reset ball, wind), new room; toggles show on/off, momentary buttons flash;
+  rich live stats. G = server ghosts.
+- Match HUD: `game/leaderboard.ts` — center "next elimination" countdown + right-side risk-ranked
+  leaderboard (bean-cutout icons, meter bars, animated reorder). Old hud.ts timer/meter row hidden.
 - Reload reconnects to the same seat via sessionStorage token + 20s grace.
 - All tuning constants live in `shared/src/constants.ts`; cards in `shared/src/cards/definitions.ts`.

@@ -110,6 +110,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #activeHandoutIds = new Set<string>()
   /** debug: physics runs but the match clock (ticks/eliminations) stands still */
   #frozen = false
+  /** debug: run the whole sim at 0.35x for slow-motion inspection */
+  #slowmo = false
   /** active restart cards per seat — expire at the next restart (idea.md §2) */
   #activeCards: string[][] = Array.from({ length: MAX_SEATS }, () => [])
   #freeSaves: number[] = new Array(MAX_SEATS).fill(0)
@@ -133,7 +135,10 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#registerMessages()
 
     this.setSimulationInterval((deltaMs) => {
-      this.#nowMs += deltaMs
+      // slowmo: advance the accumulator at 0.35x so fewer fixed steps run.
+      // serverTime tracks fixedElapsed, which the client mirrors, so both
+      // sides stay in sync — the whole match just runs in slow motion.
+      this.#nowMs += this.#slowmo ? deltaMs * 0.35 : deltaMs
       this.#time.advance(this.#nowMs)
       const steps = this.#time.consumeFixedSteps()
       for (let i = 0; i < steps; i++) {
@@ -274,6 +279,45 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
           break
         case 'freeze':
           this.#frozen = !this.#frozen
+          break
+        case 'addTime':
+          this.#tickRemaining += this.#scale(15)
+          this.state.tickRemaining = this.#tickRemaining
+          break
+        case 'subTime':
+          this.#tickRemaining = Math.max(1, this.#tickRemaining - this.#scale(15))
+          this.state.tickRemaining = this.#tickRemaining
+          break
+        case 'resetScore':
+          this.#meters.fill(0)
+          this.#cumulative.fill(0)
+          for (let s = 0; s < MAX_SEATS; s++) this.state.meters[s] = 0
+          break
+        case 'resetLobby':
+          this.#toLobby()
+          break
+        case 'winMe':
+          if (session && this.#alive[session.sim.seat] && this.#phase !== Phase.Lobby) {
+            // eliminate everyone else -> I win
+            for (let s = 0; s < MAX_SEATS; s++) {
+              if (s !== session.sim.seat && this.#alive[s]) this.#alive[s] = false
+            }
+            this.state.winnerSeat = session.sim.seat
+            this.#enter(Phase.End, 0)
+          }
+          break
+        case 'clearBots':
+          for (const [id, s] of [...this.#sessions.entries()]) {
+            if (!s.isBot) continue
+            this.#sessions.delete(id)
+            this.state.players.delete(id)
+            this.#alive[s.sim.seat] = false
+          }
+          if (this.#phase === Phase.Lobby) this.#resolveKits()
+          else this.#morphArena()
+          break
+        case 'slowmo':
+          this.#slowmo = !this.#slowmo
           break
       }
       console.log(`[room ${this.roomId}] debug: ${message?.cmd}`)
