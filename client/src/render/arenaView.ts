@@ -104,12 +104,26 @@ export function createArenaView(radius = 28): ArenaView {
   // (grassBase -> grassTip) and rendered UNLIT like the blades, so ground
   // and blades can never drift apart in color.
   const groundCanvas = document.createElement('canvas')
-  groundCanvas.width = groundCanvas.height = 2
+  groundCanvas.width = groundCanvas.height = 64
   {
+    // placeholder until the tile arrives: rough strokes, never flat color
     const seed = groundCanvas.getContext('2d')
     if (seed) {
       seed.fillStyle = `#${PALETTE.grassBase.toString(16).padStart(6, '0')}`
-      seed.fillRect(0, 0, 2, 2)
+      seed.fillRect(0, 0, 64, 64)
+      seed.strokeStyle = `#${PALETTE.grassTip.toString(16).padStart(6, '0')}`
+      seed.lineCap = 'round'
+      for (let i = 0; i < 60; i++) {
+        const x = Math.random() * 64
+        const y = Math.random() * 64
+        seed.globalAlpha = 0.25 + Math.random() * 0.3
+        seed.lineWidth = 1 + Math.random()
+        seed.beginPath()
+        seed.moveTo(x, y)
+        seed.lineTo(x + (Math.random() - 0.5) * 5, y - 3 - Math.random() * 4)
+        seed.stroke()
+      }
+      seed.globalAlpha = 1
     }
   }
   const groundTex = new THREE.CanvasTexture(groundCanvas)
@@ -148,7 +162,7 @@ export function createArenaView(radius = 28): ArenaView {
       ctx.putImageData(id, 0, 0)
       groundTex.needsUpdate = true
     }
-    img.src = '/textures/pitch_grass.png'
+    img.src = '/textures/pitch_grass.jpg'
   }
   // dual-scale sampling: a MACRO tile (strokes sized like the 3D blades, reads
   // right from afar) blended with a rotated FINE tile (keeps the ground crisp
