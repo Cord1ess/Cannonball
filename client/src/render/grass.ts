@@ -97,20 +97,20 @@ const VERT = /* glsl */ `
     p.x += s * curl * t * t;
     p.z += c * curl * t * t;
 
-    // --- wind = BREATHING ambient sway + swirling FEATHERED gust cells ------
-    // 1) ambient sway — a slow rolling BREATH: a low-frequency envelope makes
-    //    the whole field surge and ease so it never sits static, plus two
-    //    layered waves + per-blade jitter so it isn't one clean sine
-    float breath = 0.5 + 0.5 * sin(uTime * 0.35 + root.x * 0.03); // 0..1 slow swell
-    float amb = uTime * 1.05 + root.x * 0.14 + root.y * 0.1;
-    float ambSway = sin(amb) * 0.55 + sin(amb * 0.41 + 1.7) * 0.4 + sin(amb * 1.9 + 0.6) * 0.18;
-    float jitter = sin(uTime * 5.0 + aSeed.x * 25.13) * 0.5 + sin(uTime * 3.1 + aSeed.x * 11.7) * 0.35;
-    float ambAmt = (0.12 + breath * 0.14) + ambSway * (0.16 + breath * 0.12) + jitter * 0.06;
+    // --- wind = BREATHING ambient sway + large feathered gust cells --------
+    // 1) ambient sway — STRONGER so the idle field visibly breathes: a slow
+    //    swell envelope + layered waves + per-blade jitter (never a clean sine)
+    float breath = 0.5 + 0.5 * sin(uTime * 0.3 + root.x * 0.03); // 0..1 slow swell
+    float amb = uTime * 1.15 + root.x * 0.14 + root.y * 0.1;
+    float ambSway = sin(amb) * 0.6 + sin(amb * 0.41 + 1.7) * 0.45 + sin(amb * 1.9 + 0.6) * 0.22;
+    float jitter = sin(uTime * 5.0 + aSeed.x * 25.13) * 0.55 + sin(uTime * 3.1 + aSeed.x * 11.7) * 0.4;
+    float ambAmt = (0.2 + breath * 0.22) + ambSway * (0.26 + breath * 0.18) + jitter * 0.08;
     p.xz += uWindDir * ambAmt * t * t;
 
-    // 2) GUST CELLS: each pushes the grass along ITS OWN travel direction
-    //    (uGustDir[gi]) — the cells sweep a CURVED path around the stadium, so
-    //    the grass bends the way the gust is actually blowing. Feathered edges.
+    // 2) GUST CELLS: large, FEATHERED fronts that roll along a curved arc. The
+    //    falloff is a soft gaussian (no hard core → no "sharp object" look),
+    //    with a per-blade noisy edge so the gust boundary is ragged/organic,
+    //    and the push follows each gust's own travel direction (uGustDir).
     for (int gi = 0; gi < ${MAX_GUSTS}; gi++) {
       if (gi >= uGustCount) break;
       vec2 gc = uGusts[gi].xy;
@@ -120,12 +120,20 @@ const VERT = /* glsl */ `
       // delay: compare a bit upwind (of THIS gust) so the push trails its front
       vec2 delayed = root - gDir * grad * 0.3;
       float gd = distance(delayed, gc);
-      float infl = (1.0 - smoothstep(grad * 0.12, grad * 1.2, gd)) * gstr;
-      infl = infl * infl * (3.0 - 2.0 * infl); // soft both edges
-      if (infl > 0.0) {
-        float bend = infl * 1.2 * t * t;
+      // ragged edge: wander the effective distance per-blade so the front is
+      // feathered/organic, not a clean circle
+      float gf = float(gi);
+      float edgeNoise = sin(root.x * 0.5 + gf * 2.1) * 0.14 + sin(root.y * 0.6 - gf * 1.3) * 0.12;
+      float nd = gd / (grad * (1.0 + edgeNoise));
+      // soft gaussian bell — gentle everywhere, long tail, no sharp core
+      float infl = exp(-nd * nd * 1.6) * gstr;
+      if (infl > 0.003) {
+        // a slow rolling ripple within the gust so the front feels like moving
+        // air, not a static push — travels along the gust direction over time
+        float roll = 0.85 + 0.15 * sin(dot(delayed, gDir) * 0.4 - uTime * 2.0);
+        float bend = infl * 1.35 * roll * t * t;
         p.xz += gDir * bend;
-        p.y *= 1.0 - infl * 0.16 * t;
+        p.y *= 1.0 - infl * 0.18 * t;
       }
     }
 

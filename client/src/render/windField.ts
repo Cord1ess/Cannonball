@@ -21,6 +21,9 @@ export interface GustCell {
   orbitR: number // distance from arena center
   angle: number // current angular position (radians)
   angVel: number // angular velocity (signed: +ccw / -cw)
+  wobPhase: number // sideways-weave phase
+  wobRate: number // weave speed
+  wobAmp: number // weave amplitude (meters of radial wander)
   age: number
   life: number
   peak: number
@@ -48,6 +51,9 @@ export function createWindField(rng: () => number = Math.random): WindField {
     orbitR: 0,
     angle: 0,
     angVel: 0,
+    wobPhase: 0,
+    wobRate: 0,
+    wobAmp: 0,
     age: 0,
     life: 0,
     peak: 0,
@@ -65,22 +71,30 @@ export function createWindField(rng: () => number = Math.random): WindField {
     const cell = cells.find((c) => !c.active)
     if (!cell) return
     // orbit somewhere between the neutral disc and the wall
-    cell.orbitR = ARENA_R * (0.35 + rng() * 0.55)
+    cell.orbitR = ARENA_R * (0.3 + rng() * 0.55)
     cell.angle = rng() * Math.PI * 2
-    // angular speed so the linear speed along the arc is reasonable (~14-26 m/s)
-    const linSpeed = 14 + rng() * 12
+    // LARGER gusts that roll SLOWLY across the field (~6-13 m/s along the arc)
+    const linSpeed = 6 + rng() * 7
     cell.angVel = (swirlSign * linSpeed) / cell.orbitR
-    cell.radius = 5 + rng() * 7
-    cell.peak = 0.6 + rng() * 0.5
+    cell.radius = 13 + rng() * 12 // large sweeping fronts, not small blobs
+    cell.peak = 0.7 + rng() * 0.5
     cell.strength = 0
     cell.age = 0
-    cell.life = 1.8 + rng() * 1.8
+    cell.life = 3.5 + rng() * 3.0 // long-lived so they roll slowly through
+    // wobble: a gentle sideways weave superimposed on the orbit
+    cell.wobPhase = rng() * Math.PI * 2
+    cell.wobRate = 0.6 + rng() * 0.7
+    cell.wobAmp = ARENA_R * (0.04 + rng() * 0.05)
     cell.active = true
   }
 
   function placeOnArc(c: GustCell): void {
-    c.x = Math.cos(c.angle) * c.orbitR
-    c.z = Math.sin(c.angle) * c.orbitR
+    // radial wobble: the gust weaves in and out as it rolls, so its path isn't
+    // a perfect circle — a bit of organic wander
+    const wob = Math.sin(c.wobPhase) * c.wobAmp
+    const r = c.orbitR + wob
+    c.x = Math.cos(c.angle) * r
+    c.z = Math.sin(c.angle) * r
     // travel direction = tangent to the circle (perpendicular to the radius),
     // signed by the orbit direction → the gust curves around the bowl
     const tx = -Math.sin(c.angle)
@@ -113,6 +127,7 @@ export function createWindField(rng: () => number = Math.random): WindField {
         if (!c.active) continue
         c.age += dt
         c.angle += c.angVel * dt // sweep along the arc
+        c.wobPhase += c.wobRate * dt // weave in/out as it rolls
         placeOnArc(c)
         const f = c.age / c.life
         if (f >= 1) {
