@@ -5,6 +5,32 @@
 
 ## STATUS: M0–M5a + M5b day→night arc · NEXT UP: rest of M5b (banners, elim-in-stands, faces)
 
+### M5b — STADIUM REVAMP pass 1 (structure + animated crowd)
+- ANIMATED CROWD (`render/crowd.ts`): ~1000+ fans, ALL animation in the VERTEX SHADER from
+  per-instance seeds (bob, both-arms-up cheer, one-arm wave+waggle, head look L/R, blink) — ONE
+  InstancedMesh, ~zero per-frame CPU (only uTime written). Fans are little beans (body + separate
+  head, tagged per-part via `aPart` so the shader swings arms around the shoulder + turns the head).
+  Crayon INK BORDER is a second instanced inverted-hull pass sharing the SAME animation (rides the
+  moving arms). Faces = a third instanced quad (eyes + shader blink). recolor() fills each wedge's
+  stands with its owner-seat supporters. Draws: fill + outline + faces = 3 for the whole crowd.
+  GOTCHAS fixed: declare every uniform you reference in the shader source (uLight was missing →
+  vanished the crowd); do NOT put `precision mediump float;` in a custom frag when the vertex uses
+  default highp (uOutline precision mismatch → no compile).
+- STADIUM STRUCTURE (arenaView.ts) rebuilt: pitch → a continuous perimeter DISPLAY-BOARD ring at
+  the field edge (dark LED screen face toward the pitch; the digital signs mount here later) → a
+  SHORT + THIN protective NET (keeps the ball in, doesn't wall the view) → raked SEATING that climbs
+  steeply DIRECTLY from the fence (no flat track/concourse gap) with radial walk AISLES (10) and
+  COLOURFUL art-style seat bands (teal/coral/butter/sage/rose/sky cycled up the rake) — replaces the
+  flat off-white cylinders. New STADIUM palette (warm frame, taupe rails, colourful seatTones).
+- CANNONS moved to the TOPMOST rim (above the audience), barrel tipped down-and-inward so they aim
+  into the pitch, never out over the crowd (matches the future trajectory rule).
+- Rim crown gained WAVING team FLAGS (24, waved in the vertex shader — one uniform/frame) and FOUR
+  tall FLOODLIGHT TOWERS at the corners (pole + lamp bank of bright cells).
+- Verified: typecheck + 56 tests, 0 shader errors, day + crowd closeups screenshotted (fans read as
+  outlined beans with heads, colourful bowl). Perf: crowd is GPU-only, one InstancedMesh set.
+  NOTE staged delivery — user validates feel/perf on real hardware; polish (fan feel, tower beams,
+  night lights bang-on, sign content) is pass 2.
+
 ### M5b — smooth night flow, bigger sun, real 3D clouds (feedback pass 2)
 - NIGHT TRANSITION is now ONE smooth monotonic flow. Bug was: every non-play phase (draft/kickoff/
   RESTART/duel) forced day, so night snapped back to day between rounds then jumped forward. Fix:
