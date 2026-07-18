@@ -62,10 +62,10 @@ const NIGHT = {
   fogNear: 40,
   fogFar: 200,
   skyTint: new THREE.Color(0x39466f), // multiply the day sky down to night blue
-  // GROUND: multiply the (already fine-tuned, bright) ground texture DOWN at
-  // night so it stops glowing. This ONLY touches the material color multiplier
-  // — the texture + its remap pipeline are never modified.
-  groundTint: new THREE.Color(0x4a5566),
+  // GROUND: the pitch is FLOODLIT at night, so only a gentle cool-down (not a
+  // dark multiply) — it stays lit under the tower lights. ONLY the material
+  // colour multiplier is touched; the texture + remap pipeline are untouched.
+  groundTint: new THREE.Color(0xc2c8c0),
   discColor: new THREE.Color(0xdfe6ff), // a pale moon
   discSize: 44, // still a large, clear moon
 }

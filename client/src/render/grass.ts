@@ -293,13 +293,13 @@ const FRAG = /* glsl */ `
     float shadowMask = getShadowMask();
     col *= mix(1.0, shadowMask, 0.45);
 
-    // NIGHT FALL: the grass is unlit, so the day->night arc is applied here.
-    // Deepen + cool the turf and pull it toward a dusky blue moonlit shade;
-    // tips keep a sliver more light than roots so blades still read at night.
+    // NIGHT FALL: the pitch is FLOODLIT at night by the tower lights, so the
+    // turf stays LIT (a touch cooler + slightly deeper than day) rather than
+    // going dark moonlit — reads as a proper night match under the lights.
     if (uNight > 0.001) {
-      vec3 moon = col * vec3(0.34, 0.42, 0.62); // cool, dim moonlit turf
-      moon *= 0.55 + 0.45 * vT;                 // tips catch a little moonlight
-      col = mix(col, moon, uNight);
+      vec3 lit = col * vec3(0.82, 0.9, 0.86); // floodlit turf, faintly cooled
+      lit *= 0.78 + 0.22 * vT;                // subtle root shade
+      col = mix(col, lit, uNight);
     }
 
     gl_FragColor = vec4(col, 1.0);

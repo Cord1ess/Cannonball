@@ -1,6 +1,5 @@
 import * as THREE from 'three'
 import { BALL_RADIUS } from '@shared/constants.ts'
-import { ballTexture } from './textures.ts'
 import { addInkOutline, INK_WEIGHT, toonRamp } from './materials.ts'
 
 /**
@@ -21,10 +20,23 @@ export interface BallView {
 export function createBallView(): BallView {
   const group = new THREE.Group()
 
-  const ball = new THREE.Mesh(
-    new THREE.SphereGeometry(BALL_RADIUS, 40, 28),
-    new THREE.MeshToonMaterial({ gradientMap: toonRamp(), map: ballTexture() }),
-  )
+  // downloaded football texture set (base colour + normal). Loaded async and
+  // swapped onto the material once ready; a plain cream fill shows until then.
+  const loader = new THREE.TextureLoader()
+  const mat = new THREE.MeshToonMaterial({ gradientMap: toonRamp(), color: 0xf5f0e2 })
+  loader.load('/textures/ball_basecolor.png', (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.anisotropy = 4
+    mat.map = tex
+    mat.color.setHex(0xffffff)
+    mat.needsUpdate = true
+  })
+  loader.load('/textures/ball_normal.png', (tex) => {
+    mat.normalMap = tex
+    mat.normalScale.set(0.6, 0.6)
+    mat.needsUpdate = true
+  })
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 48, 32), mat)
   ball.castShadow = true
   addInkOutline(ball, INK_WEIGHT.character)
   group.add(ball)
