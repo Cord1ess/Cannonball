@@ -50,73 +50,44 @@ const ARM_X = 0.52
 const FACE_Y = 0.98
 const FACE_Z = 0.34
 
-function stack(rows: ReadonlyArray<readonly [number, number]>, y0: number): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = []
-  let y = y0
-  for (const [w, h] of rows) {
-    const box = new THREE.BoxGeometry(w, h, w * 0.8)
-    box.translate(0, y + h / 2, 0)
-    parts.push(box)
-    y += h
-  }
-  const merged = mergeGeometries(parts)
-  for (const p of parts) p.dispose()
-  return merged
-}
-
-/** a fan built from the PLAYER BEAN silhouette, parts tagged for GPU animation. */
+/** a fan built from the PLAYER BEAN silhouette (all raw boxes, one merge), each
+ *  box tagged with its animation PART. Same proportions as createBean(). */
 function crowdGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = []
-  const tag = (g: THREE.BufferGeometry, part: number): THREE.BufferGeometry => {
+  // a single tagged box at (x, yCenter, z) of size (w, h, d)
+  const box = (w: number, h: number, d: number, x: number, yc: number, z: number, part: number): void => {
+    const g = new THREE.BoxGeometry(w, h, d)
+    g.translate(x, yc, z)
     const n = g.getAttribute('position').count
     const a = new Float32Array(n)
     a.fill(part)
     g.setAttribute('aPart', new THREE.BufferAttribute(a, 1))
-    return g
+    parts.push(g)
   }
 
-  // shorts + feet + body torso = the player bean's body stack (all PART_BODY,
-  // they sway/bob together). Same rows/heights as createBean().
-  const shorts = stack(
-    [
-      [0.72, 0.16],
-      [0.82, 0.18],
-    ],
-    0.12,
-  )
-  parts.push(tag(shorts, PART_BODY))
-  for (const side of [-1, 1]) {
-    const foot = new THREE.BoxGeometry(0.24, 0.12, 0.32)
-    foot.translate(side * 0.2, 0.06, 0.02)
-    parts.push(tag(foot, PART_BODY))
+  // BODY stack (torso rows) — same widths/heights as the player bean body.
+  // rows: [w,h] stacked from y0=0.46 upward; the TOP row is the head.
+  const bodyRows: ReadonlyArray<readonly [number, number]> = [
+    [0.88, 0.22],
+    [0.86, 0.26],
+    [0.76, 0.26],
+  ]
+  let y = 0.46
+  for (const [w, h] of bodyRows) {
+    box(w, h, w * 0.8, 0, y + h / 2, 0, PART_BODY)
+    y += h
   }
-  const body = stack(
-    [
-      [0.88, 0.22],
-      [0.86, 0.26],
-      [0.76, 0.26],
-      [0.58, 0.2],
-    ],
-    0.46,
-  )
-  // the top body box (y≈1.2..1.4) reads as the head — tag it PART_HEAD so it
-  // can turn to look around (the face plate rides it). The rest is PART_BODY.
-  parts.push(tag(body, PART_BODY))
-  const head = new THREE.BoxGeometry(0.5, 0.42, 0.5) // a defined head cube on top
-  head.translate(0, 1.2, 0)
-  parts.push(tag(head, PART_HEAD))
+  // shorts (below the torso) + feet
+  box(0.72, 0.16, 0.72 * 0.8, 0, 0.12 + 0.08, 0, PART_BODY)
+  box(0.82, 0.18, 0.82 * 0.8, 0, 0.28 + 0.09, 0, PART_BODY)
+  box(0.24, 0.12, 0.32, -0.2, 0.06, 0.02, PART_BODY)
+  box(0.24, 0.12, 0.32, 0.2, 0.06, 0.02, PART_BODY)
+  // HEAD: the top box of the stack (its own part → turns to look)
+  box(0.58, 0.22, 0.58 * 0.8, 0, y + 0.11, 0, PART_HEAD)
 
-  // arms — pivot at the SHOULDER (y = SHOULDER_Y), matching the player bean, so
-  // the shader swings them up around that joint.
-  for (const [side, part] of [
-    [-1, PART_ARM_L],
-    [1, PART_ARM_R],
-  ] as const) {
-    const arm = new THREE.BoxGeometry(0.16, 0.44, 0.2)
-    // box spans down from the shoulder: shift so y=0 is the shoulder joint
-    arm.translate(side * ARM_X, SHOULDER_Y - 0.22, 0)
-    parts.push(tag(arm, part))
-  }
+  // arms — pivot at the SHOULDER (y = SHOULDER_Y). Box centre 0.22 below it.
+  box(0.16, 0.44, 0.2, -ARM_X, SHOULDER_Y - 0.22, 0, PART_ARM_L)
+  box(0.16, 0.44, 0.2, ARM_X, SHOULDER_Y - 0.22, 0, PART_ARM_R)
 
   const merged = mergeGeometries(parts)
   for (const p of parts) p.dispose()
@@ -183,9 +154,10 @@ const ANIM_GLSL = /* glsl */ `
       p = rotY(p - pivR, wag) + pivR;
       p.y += bob;
     } else {
-      // HEAD: bob + turn to look around
+      // HEAD: bob + turn to look around, pivoting at the NECK (just below head)
+      vec3 neck = vec3(0.0, 1.2, 0.0);
+      p = rotY(p - neck, look) + neck;
       p.y += bob;
-      p = rotY(p, look);
     }
     return p;
   }
@@ -263,7 +235,7 @@ export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly num
   // second cheap animated material would be overkill — bake open eyes, they
   // read fine at stand distance and the head already turns/bobs.
   const faceGeo = new THREE.PlaneGeometry(0.34, 0.28)
-  faceGeo.translate(0, 1.22, 0.26) // on the front of the head cube (centre ~y1.2)
+  faceGeo.translate(0, 1.31, 0.26) // on the front of the head box (centre ~y1.31)
   const faceMat = makeFaceMaterial()
   const faces = new THREE.InstancedMesh(faceGeo, faceMat, count)
   faces.frustumCulled = false
@@ -364,7 +336,8 @@ function makeFaceMaterial(): THREE.ShaderMaterial {
         // blink: a quick eye close a few times a minute, per-fan phase
         float bl = sin(t * 3.3 + aSeed.x * 20.0);
         vBlink = step(0.985, bl);
-        vec3 p = rotY(position, look);
+        vec3 neck = vec3(0.0, 1.2, 0.0);
+        vec3 p = rotY(position - neck, look) + neck; // turn with the head
         p.y += bob;
         vUv = uv;
         gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(p, 1.0);
