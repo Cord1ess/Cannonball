@@ -42,13 +42,32 @@ export class ChaseCamera {
     return Math.cos(this.yaw)
   }
 
-  /** eliminated spectators drift around the arena rim */
+  /** eliminated spectators drift around the arena rim — raised + angled down a
+   *  bit for a proper broadcast overview (not the old shallow, low sweep) */
   updateOrbit(dt: number, radius: number, height: number): void {
-    this.yaw += dt * 0.12
+    this.yaw += dt * 0.1
     this.#pos.set(Math.cos(this.yaw) * radius, height, Math.sin(this.yaw) * radius)
     this.#camera.position.copy(this.#pos)
-    this.#look.set(0, 1, 0)
+    // look at a point a touch above the pitch so it reads angled DOWN toward the
+    // action but not straight at the floor — a lifted, tilted broadcast angle
+    this.#look.set(0, 3.5, 0)
     this.#camera.lookAt(this.#look)
+  }
+
+  /** spectate FOLLOW: a chase cam behind a chosen player, so you see their view */
+  followPlayer(dt: number, tx: number, ty: number, tz: number, tyaw: number): void {
+    const dist = 9
+    const fx = Math.sin(tyaw)
+    const fz = Math.cos(tyaw)
+    const wantX = tx - fx * dist
+    const wantY = ty + 5.0
+    const wantZ = tz - fz * dist
+    // smooth toward the target boom so switching players glides, never snaps
+    this.#pos.lerp(new THREE.Vector3(wantX, wantY, wantZ), Math.min(1, dt * 5))
+    this.#camera.position.copy(this.#pos)
+    this.#look.set(tx, ty + 1.4, tz)
+    this.#camera.lookAt(this.#look)
+    this.yaw = tyaw // keep yaw in sync so a return to orbit is seamless
   }
 
   update(dt: number, tx: number, ty: number, tz: number): void {

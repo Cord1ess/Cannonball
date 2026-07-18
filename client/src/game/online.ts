@@ -180,6 +180,12 @@ export interface OnlineGame {
   staminaFrac(): number
   abilityInfo(): { id: string; cdFrac: number } | null
   spectating(): boolean
+  /** spectate: toggle orbit overview <-> follow-a-player */
+  spectateToggleMode(): void
+  /** spectate: cycle to the next alive player to follow */
+  spectateNext(): void
+  /** spectate: current mode + followed player's name (for the HUD hint) */
+  spectateInfo(): { mode: 'orbit' | 'follow'; name: string }
   /** local bean pose for the PIP selfie cam (null in sandbox) */
   selfView?(): SelfView
   readonly match: MatchClient
@@ -228,6 +234,10 @@ export function createOnlineGame(
   const prevLocal = { x: 0, y: 0, z: 0 }
   let myAim = 0
   let aimSendCd = 0
+
+  // --- spectate (eliminated players) -----------------------------------------------
+  let specMode: 'orbit' | 'follow' = 'orbit'
+  let specTargetSeat = -1 // seat of the player being followed
 
   // --- remotes / ball / time -------------------------------------------------------
   const remotes = new Map<string, RemoteEntity>()
@@ -343,6 +353,29 @@ export function createOnlineGame(
       if (p.seat === seat) alive = p.alive
     })
     return alive
+  }
+
+  /** seats of all currently-alive players, sorted, for spectate cycling */
+  function aliveFollowSeats(): number[] {
+    const seats: number[] = []
+    state.players.forEach((p) => {
+      if (p.alive) seats.push(p.seat)
+    })
+    return seats.sort((a, b) => a - b)
+  }
+
+  /** the render pose (x,y,z,yaw) of the seat being followed, from its remote */
+  function followTargetPose(): { x: number; y: number; z: number; yaw: number } | null {
+    for (const r of remotes.values()) {
+      if (r.seat === specTargetSeat) {
+        return { x: r.stub.x, y: r.stub.y, z: r.stub.z, yaw: r.stub.yaw }
+      }
+    }
+    // fallback: the local player (if somehow still alive & followed)
+    if (specTargetSeat === mySeat && localSim) {
+      return { x: localSim.x, y: localSim.y, z: localSim.z, yaw: localSim.yaw }
+    }
+    return null
   }
 
   function playerNameOf(seat: number): string {
@@ -720,6 +753,26 @@ export function createOnlineGame(
       return (state.phase ?? 0) !== Phase.Lobby && mySeat >= 0 && !aliveOf(mySeat)
     },
 
+    // spectate: toggle ORBIT overview <-> FOLLOW a player's chase view
+    spectateToggleMode(): void {
+      specMode = specMode === 'orbit' ? 'follow' : 'orbit'
+      if (specMode === 'follow' && !aliveOf(specTargetSeat)) this.spectateNext()
+    },
+    // spectate: cycle to the next alive player to follow (also flips to follow)
+    spectateNext(): void {
+      const alive = aliveFollowSeats()
+      if (alive.length === 0) return
+      specMode = 'follow'
+      const idx = alive.indexOf(specTargetSeat)
+      specTargetSeat = alive[(idx + 1) % alive.length]!
+    },
+    spectateInfo(): { mode: 'orbit' | 'follow'; name: string } {
+      return {
+        mode: specMode,
+        name: specMode === 'follow' && specTargetSeat >= 0 ? playerNameOf(specTargetSeat) : '',
+      }
+    },
+
     selfView(): SelfView {
       return { ...selfPose }
     },
@@ -1038,9 +1091,19 @@ export function createOnlineGame(
         label.setVisible(true)
       }
 
-      // camera: chase while playing/waiting, slow orbit while eliminated
+      // camera: chase while playing/waiting; while eliminated, spectate in
+      // ORBIT (raised broadcast overview) or FOLLOW (chase a chosen player)
       if (this.spectating()) {
-        camera.updateOrbit(dt, arena.radius + 14, 14)
+        let followed = false
+        if (specMode === 'follow') {
+          if (!aliveOf(specTargetSeat)) this.spectateNext() // target died → next
+          const pose = followTargetPose()
+          if (pose) {
+            camera.followPlayer(dt, pose.x, pose.y, pose.z, pose.yaw)
+            followed = true
+          }
+        }
+        if (!followed) camera.updateOrbit(dt, arena.radius + 16, 20)
       } else {
         camera.update(dt, selfX, selfY, selfZ)
       }

@@ -14,6 +14,8 @@ export function createGameInput(): Input {
       emote2: ['Digit2'],
       emote3: ['Digit3'],
       emote4: ['Digit4'],
+      specMode: ['KeyV'], // spectate: toggle orbit <-> follow-a-player
+      specNext: ['Space'], // spectate: cycle to the next player to follow
     },
     axes: {
       moveX: { negative: ['KeyA'], positive: ['KeyD'] },

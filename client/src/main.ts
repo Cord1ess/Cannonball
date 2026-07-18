@@ -66,6 +66,14 @@ pipTab.style.cssText =
 pipFrame.appendChild(pipTab)
 document.body.appendChild(pipFrame)
 
+// spectate control hint (shown only while eliminated/spectating)
+const specHint = document.createElement('div')
+specHint.style.cssText =
+  'position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#1c1a18cc;' +
+  'color:#fbf6e8;font:600 13px system-ui;padding:8px 16px;border-radius:10px;z-index:20;' +
+  'display:none;pointer-events:none;letter-spacing:0.3px;'
+document.body.appendChild(specHint)
+
 // --- scene ------------------------------------------------------------------------
 
 const scene = new THREE.Scene()
@@ -178,6 +186,11 @@ function frame(nowMs: number): void {
     for (let e = 0; e < 4; e++) {
       if (input.justPressed(`emote${e + 1}`)) game.match.emote(e)
     }
+    // spectate controls (only do anything while eliminated/spectating)
+    if ('spectateToggleMode' in game && game.spectateToggleMode) {
+      if (input.justPressed('specMode')) game.spectateToggleMode()
+      if (input.justPressed('specNext')) game.spectateNext?.()
+    }
   }
 
   const steps = time.consumeFixedSteps()
@@ -227,6 +240,18 @@ function frame(nowMs: number): void {
   matchUi?.update()
   leaderboard?.update()
   debugPanel.update(time.unscaledDelta)
+
+  // spectate control hint
+  if ('spectating' in game && game.spectating() && 'spectateInfo' in game) {
+    const info = game.spectateInfo()
+    specHint.style.display = 'block'
+    specHint.innerHTML =
+      info.mode === 'follow'
+        ? `👁 Watching <b>${info.name}</b> &nbsp;·&nbsp; <b>Space</b> next player &nbsp;·&nbsp; <b>V</b> overview`
+        : `👁 Overview &nbsp;·&nbsp; <b>V</b> or <b>Space</b> to follow a player`
+  } else {
+    specHint.style.display = 'none'
+  }
 
   renderer.clear()
   renderer.render(scene, camera3)
