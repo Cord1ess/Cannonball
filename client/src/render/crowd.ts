@@ -43,7 +43,28 @@ const PART_ARM_L = 1
 const PART_ARM_R = 2
 const PART_HEAD = 3
 
-/** a tiny seated/standing fan: torso stack + head + two arms, each tagged. */
+// EXACT player-bean proportions (see render/bean.ts) so fans ARE the players,
+// just crowd-animated. Feet at y=0 → the fan stands on the seat surface.
+const SHOULDER_Y = 1.0 // arm pivot, matches the player bean
+const ARM_X = 0.52
+const FACE_Y = 0.98
+const FACE_Z = 0.34
+
+function stack(rows: ReadonlyArray<readonly [number, number]>, y0: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = []
+  let y = y0
+  for (const [w, h] of rows) {
+    const box = new THREE.BoxGeometry(w, h, w * 0.8)
+    box.translate(0, y + h / 2, 0)
+    parts.push(box)
+    y += h
+  }
+  const merged = mergeGeometries(parts)
+  for (const p of parts) p.dispose()
+  return merged
+}
+
+/** a fan built from the PLAYER BEAN silhouette, parts tagged for GPU animation. */
 function crowdGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = []
   const tag = (g: THREE.BufferGeometry, part: number): THREE.BufferGeometry => {
@@ -54,37 +75,46 @@ function crowdGeometry(): THREE.BufferGeometry {
     return g
   }
 
-  // torso: a taller, narrower bean body so a fan reads as a little person,
-  // not a flat cap. Fall-Guys-ish: rounded-ish stack that tapers a touch.
-  const torsoRows: ReadonlyArray<readonly [number, number]> = [
-    [0.44, 0.26],
-    [0.46, 0.28],
-    [0.4, 0.22],
-  ]
-  let y = 0.28
-  for (const [rw, rh] of torsoRows) {
-    const box = new THREE.BoxGeometry(rw, rh, rw * 0.82)
-    box.translate(0, y + rh / 2, 0)
-    parts.push(tag(box, PART_BODY))
-    y += rh
+  // shorts + feet + body torso = the player bean's body stack (all PART_BODY,
+  // they sway/bob together). Same rows/heights as createBean().
+  const shorts = stack(
+    [
+      [0.72, 0.16],
+      [0.82, 0.18],
+    ],
+    0.12,
+  )
+  parts.push(tag(shorts, PART_BODY))
+  for (const side of [-1, 1]) {
+    const foot = new THREE.BoxGeometry(0.24, 0.12, 0.32)
+    foot.translate(side * 0.2, 0.06, 0.02)
+    parts.push(tag(foot, PART_BODY))
   }
-  const shoulderY = y - 0.06
-  // a little neck gap, then a clearly SEPARATE head (its own part → turns/looks)
-  y += 0.06
-  const head = new THREE.BoxGeometry(0.34, 0.34, 0.32)
-  head.translate(0, y + 0.17, 0.02)
+  const body = stack(
+    [
+      [0.88, 0.22],
+      [0.86, 0.26],
+      [0.76, 0.26],
+      [0.58, 0.2],
+    ],
+    0.46,
+  )
+  // the top body box (y≈1.2..1.4) reads as the head — tag it PART_HEAD so it
+  // can turn to look around (the face plate rides it). The rest is PART_BODY.
+  parts.push(tag(body, PART_BODY))
+  const head = new THREE.BoxGeometry(0.5, 0.42, 0.5) // a defined head cube on top
+  head.translate(0, 1.2, 0)
   parts.push(tag(head, PART_HEAD))
 
-  // arms — pivot at the SHOULDER (top), so the shader can swing them up by
-  // rotating around the shoulder joint. Translate so the shoulder sits at y=0
-  // of the arm's local space, then offset to the shoulder world position.
+  // arms — pivot at the SHOULDER (y = SHOULDER_Y), matching the player bean, so
+  // the shader swings them up around that joint.
   for (const [side, part] of [
     [-1, PART_ARM_L],
     [1, PART_ARM_R],
   ] as const) {
-    const arm = new THREE.BoxGeometry(0.12, 0.46, 0.14)
-    // pivot at top of arm: shift down so y=0 is the shoulder
-    arm.translate(side * 0.29, shoulderY - 0.23, 0)
+    const arm = new THREE.BoxGeometry(0.16, 0.44, 0.2)
+    // box spans down from the shoulder: shift so y=0 is the shoulder joint
+    arm.translate(side * ARM_X, SHOULDER_Y - 0.22, 0)
     parts.push(tag(arm, part))
   }
 
@@ -139,16 +169,18 @@ const ANIM_GLSL = /* glsl */ `
       p.y += bob;
       p.x += sin(t * 1.3) * 0.02;
     } else if (part < 1.5) {
-      // LEFT ARM: raise on cheer (both arms), else rest
+      // LEFT ARM: raise on cheer (both arms), pivoting at the SHOULDER joint
       float raise = cheer * 2.4;                       // radians up around shoulder
-      p = rotX(p - vec3(-0.29, 0.0, 0.0), -raise) + vec3(-0.29, 0.0, 0.0);
+      vec3 pivL = vec3(-0.52, 1.0, 0.0);
+      p = rotX(p - pivL, -raise) + pivL;
       p.y += bob;
     } else if (part < 2.5) {
       // RIGHT ARM: raise on cheer AND does the solo wave when not cheering
       float raise = max(cheer * 2.4, wave * 1.9 * (1.0 - cheer));
       float wag = (1.0 - cheer) * wave * sin(t * 9.0) * 0.5; // hand waggle at the top
-      p = rotX(p - vec3(0.29, 0.0, 0.0), -raise) + vec3(0.29, 0.0, 0.0);
-      p = rotY(p - vec3(0.29, 0.0, 0.0), wag) + vec3(0.29, 0.0, 0.0);
+      vec3 pivR = vec3(0.52, 1.0, 0.0);
+      p = rotX(p - pivR, -raise) + pivR;
+      p = rotY(p - pivR, wag) + pivR;
       p.y += bob;
     } else {
       // HEAD: bob + turn to look around
@@ -230,8 +262,8 @@ export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly num
   // face plates: one instanced quad, blinks handled by a tiny y-squash in a
   // second cheap animated material would be overkill — bake open eyes, they
   // read fine at stand distance and the head already turns/bobs.
-  const faceGeo = new THREE.PlaneGeometry(0.26, 0.22)
-  faceGeo.translate(0, 1.27, 0.2) // on the front of the head (head center ~1.27)
+  const faceGeo = new THREE.PlaneGeometry(0.34, 0.28)
+  faceGeo.translate(0, 1.22, 0.26) // on the front of the head cube (centre ~y1.2)
   const faceMat = makeFaceMaterial()
   const faces = new THREE.InstancedMesh(faceGeo, faceMat, count)
   faces.frustumCulled = false

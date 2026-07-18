@@ -575,7 +575,9 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const seats: CrowdSeat[] = []
   for (let row = 0; row < ROWS; row++) {
     const rr = rowTops[row]!.r
-    const y = rowTops[row]!.y + 0.05
+    // feet on the TREAD TOP (riser extrudes up to y+ROW_RISE) — not the base,
+    // else fans sink a full row height below the seat surface.
+    const y = rowTops[row]!.y + ROW_RISE + 0.02
     const perRow = Math.floor((Math.PI * 2 * rr) / 0.72) // denser packing
     for (let i = 0; i < perRow; i++) {
       const a = ((i + Math.random() * 0.3) / perRow) * Math.PI * 2
