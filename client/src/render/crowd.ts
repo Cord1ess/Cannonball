@@ -358,7 +358,7 @@ export function createCrowd(seats: readonly CrowdSeat[], fanKits: readonly KitCo
   // BANNERS: a sparse set of fans hold up a large team banner. We pick roughly
   // 1 in 26 fans (deterministic by pick) to be a banner holder.
   const bannerIdx: number[] = [] // which fan holds each banner
-  for (let i = 0; i < count; i++) if (((seats[i]!.pick * 331) % 1) < 0.038) bannerIdx.push(i)
+  for (let i = 0; i < count; i++) if (((seats[i]!.pick * 331) % 1) < 0.015) bannerIdx.push(i)
   const bannerCount = Math.max(1, bannerIdx.length)
   const bannerGeo = bannerGeometry()
   const bannerMat = bannerMaterial()
