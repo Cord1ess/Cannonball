@@ -114,7 +114,6 @@ const FAN_COLORS: readonly number[] = [
 
 /** Stadium art-style palette — warm, colourful, in-style (no flat off-white). */
 const STADIUM = {
-  wall: 0x5f7a6b, // deep muted green pitch-edge wall (sits with the grass, not pale)
   frame: 0x8a7a5c, // deeper warm structural frame (boards/kicker/rim base)
   rail: 0x5c5346, // dark taupe rails/posts
   aisle: 0xc9bfa2, // walkway strips (toned down from bright off-white)
@@ -396,17 +395,37 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const gustScratch: GustCell[] = []
   const streakScratch: StreakCell[] = []
 
-  // seamless ring wall the players bounce off (short kickboard at pitch edge)
-  const wall = new THREE.Mesh(ringGeometry(radius, radius + 0.9, WALL_HEIGHT), makeToonMaterial(STADIUM.wall))
-  wall.castShadow = true
-  wall.receiveShadow = true
-  addInkOutline(wall, INK_WEIGHT.arena)
-  group.add(wall)
+  // NO pitch-edge wall ring — the physics bounce is a pure circle clamp, so the
+  // cosmetic wall is gone. Order is now: field -> NET -> display board.
 
-  // --- DISPLAY BOARD ring: a continuous perimeter display all around the pitch
-  // right at the field edge (the digital signs mount here later). One solid ring
-  // wall with a dark screen face toward the pitch — no gaps, reads as an LED band.
-  const BOARD_INNER = radius + 0.95
+  // --- protective NET right at the field edge: SHORT + THIN, reads as a fence
+  // keeping the ball in without walling off the view -------------------------
+  const NET_R = radius + 0.45
+  const NET_H = 4.6 // short
+  const netGeo = new THREE.CylinderGeometry(NET_R, NET_R, NET_H, SEGMENTS, 1, true)
+  const netMat = new THREE.MeshBasicMaterial({
+    map: netTexture(),
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    opacity: 0.42,
+  })
+  const net = new THREE.Mesh(netGeo, netMat)
+  net.position.y = WALL_HEIGHT + NET_H / 2 - 0.2
+  net.renderOrder = 3
+  group.add(net)
+  // thin top rail so the net reads as a real fence
+  const rail = new THREE.Mesh(
+    new THREE.TorusGeometry(NET_R, 0.035, 5, SEGMENTS),
+    makeToonMaterial(STADIUM.rail),
+  )
+  rail.rotation.x = Math.PI / 2
+  rail.position.y = WALL_HEIGHT + NET_H - 0.2
+  group.add(rail)
+
+  // --- DISPLAY BOARD ring: a continuous perimeter display BEHIND the net (the
+  // digital signs mount here later). Solid ring with a dark screen face inward.
+  const BOARD_INNER = radius + 1.15
   const BOARD_H = 1.3
   const boardBack = new THREE.Mesh(
     ringGeometry(BOARD_INNER, BOARD_INNER + 0.28, BOARD_H),
@@ -422,31 +441,6 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   )
   screen.position.y = WALL_HEIGHT - 0.2 + BOARD_H / 2
   group.add(screen)
-
-  // --- protective NET right behind the display: SHORT + THIN, reads as a fence
-  // keeping the ball in without walling off the view -------------------------
-  const NET_R = radius + 1.35
-  const NET_H = 4.6 // shorter
-  const netGeo = new THREE.CylinderGeometry(NET_R, NET_R, NET_H, SEGMENTS, 1, true)
-  const netMat = new THREE.MeshBasicMaterial({
-    map: netTexture(),
-    transparent: true,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-    opacity: 0.42,
-  })
-  const net = new THREE.Mesh(netGeo, netMat)
-  net.position.y = WALL_HEIGHT + NET_H / 2 - 0.2
-  net.renderOrder = 3
-  group.add(net)
-  // thin top rail so the net reads as a real fence (thinner than before)
-  const rail = new THREE.Mesh(
-    new THREE.TorusGeometry(NET_R, 0.035, 5, SEGMENTS),
-    makeToonMaterial(STADIUM.rail),
-  )
-  rail.rotation.x = Math.PI / 2
-  rail.position.y = WALL_HEIGHT + NET_H - 0.2
-  group.add(rail)
 
   // --- the STANDS: raked seating rising DIRECTLY from behind the net (no gap,
   // no flat track ring) — the rake climbs STEEPLY right from the fence -------
