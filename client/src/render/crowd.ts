@@ -68,20 +68,32 @@ function crowdGeometry(): THREE.BufferGeometry {
     // (a box) we also skip; eyes/face come from our own face-plate instance.
     if (pos.count < 8) return // planes (eyes, blob) have few verts → skip
 
-    // DE-INDEX to a flat position list — guarantees every part geometry has the
-    // exact same attribute shape (position + aPart, non-indexed), so the merge
-    // is always clean (mixing indexed/non-indexed was what exploded the mesh).
+    // DE-INDEX so every part has the same attribute shape (position + normal +
+    // aPart, non-indexed) → the merge is always clean (mixing indexed/non-indexed
+    // was one bug; a MISSING normal attribute the shader reads was the other →
+    // NaN normals smeared the mesh). Keep normals; strip uv/groups.
     const flat = geo.index ? geo.toNonIndexed() : geo.clone()
     const fpos = flat.getAttribute('position') as THREE.BufferAttribute
     // bake this mesh's LOCAL transform so the part sits where the bean draws it
     obj.updateMatrix()
+    const nrmMat = new THREE.Matrix3().getNormalMatrix(obj.matrix)
     for (let i = 0; i < fpos.count; i++) {
       tmp.set(fpos.getX(i), fpos.getY(i), fpos.getZ(i)).applyMatrix4(obj.matrix)
       fpos.setXYZ(i, tmp.x, tmp.y, tmp.z)
     }
-    // strip everything except position, then tag the animation part per vertex
+    let fnrm = flat.getAttribute('normal') as THREE.BufferAttribute | undefined
+    if (!fnrm) {
+      flat.computeVertexNormals()
+      fnrm = flat.getAttribute('normal') as THREE.BufferAttribute
+    } else {
+      for (let i = 0; i < fnrm.count; i++) {
+        tmp.set(fnrm.getX(i), fnrm.getY(i), fnrm.getZ(i)).applyMatrix3(nrmMat).normalize()
+        fnrm.setXYZ(i, tmp.x, tmp.y, tmp.z)
+      }
+    }
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', fpos)
+    g.setAttribute('normal', fnrm)
     const partArr = new Float32Array(fpos.count)
     const isArm = Math.abs(obj.position.x) > 0.35 && obj.position.y > 0.6 // arm meshes
     for (let i = 0; i < fpos.count; i++) {
