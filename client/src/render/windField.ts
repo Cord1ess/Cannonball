@@ -64,7 +64,6 @@ export function createWindField(rng: () => number = Math.random): WindField {
   // a slowly-rotating "prevailing" heading (used only for the streak fallback)
   let prevailing = rng() * Math.PI * 2
   // overall swirl direction of the bowl: mostly one way, occasionally flips
-  let swirlSign = rng() < 0.5 ? 1 : -1
   let spawnCd = 0.4
 
   function spawn(): void {
@@ -73,10 +72,13 @@ export function createWindField(rng: () => number = Math.random): WindField {
     // orbit somewhere between the neutral disc and the wall
     cell.orbitR = ARENA_R * (0.3 + rng() * 0.55)
     cell.angle = rng() * Math.PI * 2
-    // LARGER gusts that roll SLOWLY across the field (~6-13 m/s along the arc)
+    // per-gust RANDOM motion: some curve clockwise, some anti-clockwise, some
+    // travel near-straight. Independent sign + a straight-line bias per gust.
     const linSpeed = 6 + rng() * 7
-    cell.angVel = (swirlSign * linSpeed) / cell.orbitR
-    cell.radius = 13 + rng() * 12 // large sweeping fronts, not small blobs
+    const spin = rng() < 0.5 ? 1 : -1 // this gust's own rotation, not the bowl's
+    const straightness = rng() // 0 = tight curve .. 1 = near straight
+    cell.angVel = (spin * linSpeed) / (cell.orbitR + straightness * ARENA_R * 4)
+    cell.radius = 6 + rng() * 6 // small feathered fronts, not field-wide folds
     cell.peak = 0.7 + rng() * 0.5
     cell.strength = 0
     cell.age = 0
@@ -113,7 +115,6 @@ export function createWindField(rng: () => number = Math.random): WindField {
     },
     step(dt: number): readonly GustCell[] {
       prevailing += 0.02 * dt
-      if (rng() < 0.002) swirlSign *= -1 // rare bowl-swirl reversal
 
       spawnCd -= dt
       if (spawnCd <= 0) {
