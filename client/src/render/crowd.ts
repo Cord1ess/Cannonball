@@ -4,26 +4,22 @@ import { createBean } from './bean.ts'
 import { toonRamp } from './materials.ts'
 
 /**
- * The stadium CROWD (M5b revamp): a lively animated audience that costs ~nothing
- * per frame. ALL animation runs in the VERTEX SHADER from per-instance seeds —
- * one InstancedMesh, one draw call, thousands of fans, ZERO per-frame CPU work
- * (the only uniform written each frame is the global clock). Same technique as
- * the grass field.
+ * The stadium CROWD: supporters that ARE the playable bean — same geometry, the
+ * team jersey colour, sitting in the stands cheering with emotes (idle bob,
+ * both-arms-up cheer, one-arm wave, look left/right, jump). ALL animation runs
+ * in the vertex shader from a per-instance seed, so one InstancedMesh animates
+ * the whole stand with ~zero per-frame CPU (only the clock uniform is written).
  *
- * Each fan animates a mix of: idle bob, a two-arms-up JUMP/cheer, a one-arm
- * WAVE, a head LOOK left/right, and an eye BLINK — all phase-offset per seed so
- * the stand reads as chaotic and alive, never a synchronised Mexican wave.
- *
- * The art-style crayon BORDER is baked cheaply as a second instanced inverted-
- * hull pass that shares the exact same vertex animation (so the outline tracks
- * the moving arms/head) — no per-fan CPU cost, one extra draw.
+ * The fan geometry is EXTRACTED from a real createBean() (not rebuilt), with its
+ * mesh parts tagged so the shader can swing the arms / turn the head. A second
+ * instanced inverted-hull pass gives the crayon outline, riding the same anim.
  */
 
 export interface Crowd {
   readonly group: THREE.Group
-  /** recolor stands so each wedge fills with its owner-seat's supporters */
+  /** fill each wedge's stand with its owner-seat's team colour (+ neutrals) */
   recolor(zoneCount: number, zoneColors: readonly number[]): void
-  /** advance the GPU animation clock (one uniform write) */
+  /** advance the GPU animation clock (one uniform write, no CPU animation) */
   update(dt: number): void
   dispose(): void
 }
@@ -34,75 +30,71 @@ export interface CrowdSeat {
   y: number
   yaw: number
   scale: number
-  angle: number // arena angle for wedge recolor
-  pick: number // stable random for color choice
+  angle: number // arena angle, for the wedge recolor
+  pick: number // stable per-fan random (colour choice + seed)
 }
 
-// PART ids baked into a vertex attribute so the shader animates each part:
-const PART_BODY = 0
-const PART_ARM_L = 1
-const PART_ARM_R = 2
-const PART_HEAD = 3
+// per-vertex animation part id, baked into the geometry:
+const PART_BODY = 0.0
+const PART_ARM_L = 1.0
+const PART_ARM_R = 2.0
+const PART_HEAD = 3.0
 
-// The player bean is a HEADLESS bean with its face on the upper body (Fall-Guys
-// style). Arms hang from the shoulder; the upper body does the "look" turn.
-const HEAD_MIN_Y = 0.9 // body verts above this turn together as the "head"
+// the bean's shoulder joint (arms hang here) — read off createBean's rig.
+const SHOULDER = 1.0
+const ARM_X = 0.52
+// verts above this height belong to the "head" region (upper body + face) that
+// turns to look around. The bean is headless-style; its face sits on the torso.
+const HEAD_Y = 1.05
 
-/** Build the crowd fan geometry by EXTRACTING it straight from the real player
- *  bean (createBean). No guessing/rebuilding: we walk the bean's solid meshes,
- *  bake their transforms, and tag each vertex with its animation PART (arms by
- *  x-sign at the shoulder, head by height, everything else body). Attributes are
- *  normalised to position+aPart only so the merge is always clean. */
-function crowdGeometry(): THREE.BufferGeometry {
-  const bean = createBean(0xffffff) // a plain (number) bean → solid toon boxes
+/**
+ * Extract the fan geometry straight from a real player bean. Walk its solid
+ * meshes, bake each mesh transform into world-local vertices, KEEP normals
+ * (the shader needs them — missing normals = NaN = exploded mesh), and tag each
+ * vertex with its animation part. All parts share {position, normal, aPart},
+ * non-indexed, so the merge is always clean.
+ */
+function beanGeometry(): THREE.BufferGeometry {
+  const bean = createBean(0xffffff)
   const parts: THREE.BufferGeometry[] = []
-  const tmp = new THREE.Vector3()
+  const v = new THREE.Vector3()
 
   bean.group.traverse((obj) => {
-    if (!(obj instanceof THREE.Mesh)) return
-    if (obj.name === 'ink-hull') return // outline hulls: we bake our own
-    const geo = obj.geometry as THREE.BufferGeometry
-    const pos = geo.getAttribute('position') as THREE.BufferAttribute | undefined
-    if (!pos) return
-    // skip the flat blob shadow + the eye planes (2 verts wide) — the face plate
-    // (a box) we also skip; eyes/face come from our own face-plate instance.
-    if (pos.count < 8) return // planes (eyes, blob) have few verts → skip
+    if (!(obj instanceof THREE.Mesh) || obj.name === 'ink-hull') return
+    const src = obj.geometry as THREE.BufferGeometry
+    if (!src.getAttribute('position')) return
 
-    // DE-INDEX so every part has the same attribute shape (position + normal +
-    // aPart, non-indexed) → the merge is always clean (mixing indexed/non-indexed
-    // was one bug; a MISSING normal attribute the shader reads was the other →
-    // NaN normals smeared the mesh). Keep normals; strip uv/groups.
-    const flat = geo.index ? geo.toNonIndexed() : geo.clone()
-    const fpos = flat.getAttribute('position') as THREE.BufferAttribute
-    // bake this mesh's LOCAL transform so the part sits where the bean draws it
+    const flat = src.index ? src.toNonIndexed() : src.clone()
+    const pos = flat.getAttribute('position') as THREE.BufferAttribute
     obj.updateMatrix()
-    const nrmMat = new THREE.Matrix3().getNormalMatrix(obj.matrix)
-    for (let i = 0; i < fpos.count; i++) {
-      tmp.set(fpos.getX(i), fpos.getY(i), fpos.getZ(i)).applyMatrix4(obj.matrix)
-      fpos.setXYZ(i, tmp.x, tmp.y, tmp.z)
+    const nMat = new THREE.Matrix3().getNormalMatrix(obj.matrix)
+    for (let i = 0; i < pos.count; i++) {
+      v.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(obj.matrix)
+      pos.setXYZ(i, v.x, v.y, v.z)
     }
-    let fnrm = flat.getAttribute('normal') as THREE.BufferAttribute | undefined
-    if (!fnrm) {
+    let nrm = flat.getAttribute('normal') as THREE.BufferAttribute | undefined
+    if (!nrm) {
       flat.computeVertexNormals()
-      fnrm = flat.getAttribute('normal') as THREE.BufferAttribute
+      nrm = flat.getAttribute('normal') as THREE.BufferAttribute
     } else {
-      for (let i = 0; i < fnrm.count; i++) {
-        tmp.set(fnrm.getX(i), fnrm.getY(i), fnrm.getZ(i)).applyMatrix3(nrmMat).normalize()
-        fnrm.setXYZ(i, tmp.x, tmp.y, tmp.z)
+      for (let i = 0; i < nrm.count; i++) {
+        v.set(nrm.getX(i), nrm.getY(i), nrm.getZ(i)).applyMatrix3(nMat).normalize()
+        nrm.setXYZ(i, v.x, v.y, v.z)
       }
     }
+
     const g = new THREE.BufferGeometry()
-    g.setAttribute('position', fpos)
-    g.setAttribute('normal', fnrm)
-    const partArr = new Float32Array(fpos.count)
-    const isArm = Math.abs(obj.position.x) > 0.35 && obj.position.y > 0.6 // arm meshes
-    for (let i = 0; i < fpos.count; i++) {
-      if (isArm) partArr[i] = obj.position.x < 0 ? PART_ARM_L : PART_ARM_R
-      else if (fpos.getY(i) > HEAD_MIN_Y) partArr[i] = PART_HEAD
-      else partArr[i] = PART_BODY
+    g.setAttribute('position', pos)
+    g.setAttribute('normal', nrm)
+    // classify this mesh's part: arms are the shoulder-height side meshes; the
+    // rest is body, except verts high enough to be the "head" region.
+    const isArm = Math.abs(obj.position.x) > 0.35 && obj.position.y > 0.6
+    const part = new Float32Array(pos.count)
+    for (let i = 0; i < pos.count; i++) {
+      if (isArm) part[i] = obj.position.x < 0 ? PART_ARM_L : PART_ARM_R
+      else part[i] = pos.getY(i) > HEAD_Y ? PART_HEAD : PART_BODY
     }
-    g.setAttribute('aPart', new THREE.BufferAttribute(partArr, 1))
-    flat.dispose()
+    g.setAttribute('aPart', new THREE.BufferAttribute(part, 1))
     parts.push(g)
   })
 
@@ -112,122 +104,149 @@ function crowdGeometry(): THREE.BufferGeometry {
   return merged
 }
 
-/** cream face plate with two ink eyes, baked into a small texture (blink in shader) */
-function faceTexture(): THREE.CanvasTexture {
-  const s = 64
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = s
-  const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, s, s)
-  ctx.fillStyle = '#1c1a18'
-  ctx.fillRect(s * 0.32 - 3, s * 0.4, 6, 12)
-  ctx.fillRect(s * 0.68 - 3, s * 0.4, 6, 12)
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.colorSpace = THREE.SRGBColorSpace
-  return tex
-}
-
-// --- the animated vertex program, shared by the fill + the outline hull -------
-// aSeed: x = phase, y = which behaviours this fan favours, z = wave/jump speed,
-//        w = look bias.  uTime is the only per-frame uniform.
-const ANIM_GLSL = /* glsl */ `
-  attribute float aPart;
-  attribute vec4 aSeed;      // phase, behaviour, speed, lookBias
-  attribute vec3 aColor;
-  varying vec3 vColor;
-  varying float vPart;
-  varying float vShade;      // for the toon-ish rim + face fade
-  uniform float uTime;
-
-  // rotate a point around the origin on the given axis-plane
+// The shared emote animation — pure function of the per-instance seed + clock.
+// seed: x=phase, y=behaviour mix, z=speed, w=look bias.
+const ANIM = /* glsl */ `
   vec3 rotX(vec3 p, float a){ float c=cos(a),s=sin(a); return vec3(p.x, c*p.y - s*p.z, s*p.y + c*p.z); }
   vec3 rotY(vec3 p, float a){ float c=cos(a),s=sin(a); return vec3(c*p.x + s*p.z, p.y, -s*p.x + c*p.z); }
 
-  vec3 animate(vec3 pos, float part, vec4 seed, out float shade){
-    float t = uTime * (0.7 + seed.z * 0.9) + seed.x * 6.2831;
-    // behaviour weights from seed.y: some fans mostly cheer, some mostly wave
-    float cheer = smoothstep(0.55, 1.0, sin(t * 0.7 + seed.y * 5.0) * 0.5 + 0.5); // bursts of both-arms-up
-    float wave  = 0.5 + 0.5 * sin(t * 2.2 + seed.y * 3.0);                         // continuous 1-arm wave
-    float bob   = sin(t * 1.6) * 0.03 + cheer * 0.14;                              // stand up on the cheer
-    float look  = sin(t * 0.5 + seed.w * 6.2831) * 0.5;                            // head turn L/R
-    shade = 0.86 + 0.14 * (0.5 + 0.5 * sin(t*1.6));
+  vec3 emote(vec3 pos, float part, vec4 seed){
+    float t = uTime * (0.8 + seed.z * 0.7) + seed.x * 6.2831;
+    // a fan cycles slowly between emotes; which one depends on the seed
+    float phase = sin(t * 0.5 + seed.y * 6.2831);
+    float cheer = smoothstep(0.4, 0.9, phase);              // BOTH ARMS UP
+    float wave  = smoothstep(0.4, 0.9, -phase) * (0.5 + 0.5*sin(t*3.0)); // ONE-ARM WAVE
+    float jump  = max(0.0, sin(t * 1.7 + seed.y * 3.0));    // little JUMPS
+    jump = jump * jump * jump * 0.35 * step(0.6, seed.w);   // only some fans jump
+    float look  = sin(t * 0.6 + seed.w * 6.2831) * 0.5;     // head turn L/R
+    float bob   = sin(t * 2.0) * 0.03 + cheer * 0.1;
 
     vec3 p = pos;
     if (part < 0.5) {
-      // BODY: bob up on cheers, a tiny sway
-      p.y += bob;
+      // BODY: bob + jump lift + a tiny sway
+      p.y += bob + jump;
       p.x += sin(t * 1.3) * 0.02;
     } else if (part < 1.5) {
-      // LEFT ARM: raise on cheer (both arms), pivoting at the SHOULDER joint
-      float raise = cheer * 2.4;                       // radians up around shoulder
-      vec3 pivL = vec3(-0.52, 1.0, 0.0);
-      p = rotX(p - pivL, -raise) + pivL;
-      p.y += bob;
+      // LEFT ARM: up on cheer, pivot at the shoulder
+      vec3 piv = vec3(-${ARM_X.toFixed(2)}, ${SHOULDER.toFixed(2)}, 0.0);
+      p = rotX(p - piv, -cheer * 2.5) + piv;
+      p.y += bob + jump;
     } else if (part < 2.5) {
-      // RIGHT ARM: raise on cheer AND does the solo wave when not cheering
-      float raise = max(cheer * 2.4, wave * 1.9 * (1.0 - cheer));
-      float wag = (1.0 - cheer) * wave * sin(t * 9.0) * 0.5; // hand waggle at the top
-      vec3 pivR = vec3(0.52, 1.0, 0.0);
-      p = rotX(p - pivR, -raise) + pivR;
-      p = rotY(p - pivR, wag) + pivR;
-      p.y += bob;
+      // RIGHT ARM: up on cheer, OR the solo wave when not cheering
+      vec3 piv = vec3(${ARM_X.toFixed(2)}, ${SHOULDER.toFixed(2)}, 0.0);
+      float raise = max(cheer * 2.5, wave * 2.0);
+      p = rotX(p - piv, -raise) + piv;
+      float wag = wave * sin(t * 10.0) * 0.4;
+      p = rotY(p - piv, wag) + piv;
+      p.y += bob + jump;
     } else {
-      // HEAD: bob + turn to look around, pivoting at the NECK (just below head)
-      vec3 neck = vec3(0.0, 0.9, 0.0);
+      // HEAD region: bob/jump + turn to look around (pivot at the neck)
+      vec3 neck = vec3(0.0, ${HEAD_Y.toFixed(2)}, 0.0);
       p = rotY(p - neck, look) + neck;
-      p.y += bob;
+      p.y += bob + jump;
     }
     return p;
   }
 `
 
-function makeAnimatedMaterial(outline: boolean): THREE.ShaderMaterial {
+function bodyMaterial(outline: boolean): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     side: outline ? THREE.BackSide : THREE.FrontSide,
     uniforms: {
       uTime: { value: 0 },
       uInk: { value: new THREE.Color(0x2c2824) },
-      uOutline: { value: outline ? 1 : 0 },
       uRamp: { value: toonRamp() },
       uLight: { value: new THREE.Vector3(0.4, 0.9, 0.3).normalize() },
     },
     vertexShader: /* glsl */ `
-      ${ANIM_GLSL}
-      uniform float uOutline;
+      attribute float aPart;
+      attribute vec4 aSeed;
+      attribute vec3 aColor;
+      uniform float uTime;
       uniform vec3 uLight;
+      varying vec3 vColor;
+      varying float vLit;
+      ${ANIM}
       void main() {
-        float shade;
-        vec3 animated = animate(position, aPart, aSeed, shade);
-        // OUTLINE pass: push the animated vertex out along its normal for the
-        // inverted-hull crayon border, riding the SAME animation as the fill
-        vec3 nrm = normalize(normalMatrix * normal);
-        vec4 mv = modelViewMatrix * instanceMatrix * vec4(animated, 1.0);
-        if (uOutline > 0.5) {
-          vec4 nv = modelViewMatrix * instanceMatrix * vec4(animated + normal * 0.001, 1.0);
-          vec3 mvN = normalize(nv.xyz - mv.xyz);
-          mv.xyz += mvN * 0.035;
-        }
+        vec3 pos = emote(position, aPart, aSeed);
+        vec3 nrm = normalize(mat3(instanceMatrix) * normal);
+        ${outline
+          ? '// push out along the normal for the crayon outline hull\n        pos += normal * 0.04;'
+          : ''}
         vColor = aColor;
-        vPart = aPart;
-        vShade = shade * (0.5 + 0.5 * clamp(dot(nrm, uLight), 0.0, 1.0));
-        gl_Position = projectionMatrix * mv;
+        vLit = clamp(dot(nrm, uLight), 0.0, 1.0);
+        gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(pos, 1.0);
+      }
+    `,
+    fragmentShader: outline
+      ? /* glsl */ `
+        uniform vec3 uInk;
+        void main() { gl_FragColor = vec4(uInk, 1.0); }
+      `
+      : /* glsl */ `
+        uniform sampler2D uRamp;
+        varying vec3 vColor;
+        varying float vLit;
+        void main() {
+          float lit = texture2D(uRamp, vec2(clamp(0.35 + vLit * 0.6, 0.02, 0.98), 0.5)).r;
+          gl_FragColor = vec4(vColor * mix(0.8, 1.0, lit), 1.0);
+        }
+      `,
+  })
+}
+
+// a small face plate (cream box front) + two ink eyes, instanced onto the head,
+// riding the same emote so eyes track the head turn/bob.
+function faceGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = []
+  const tag = (g: THREE.BufferGeometry, isEye: number): THREE.BufferGeometry => {
+    const n = g.getAttribute('position').count
+    const a = new Float32Array(n).fill(isEye)
+    g.setAttribute('aEye', new THREE.BufferAttribute(a, 1))
+    return g
+  }
+  // face plate: a thin cream box on the front of the upper body (matches bean)
+  const plate = new THREE.BoxGeometry(0.5, 0.42, 0.05)
+  plate.translate(0, 0.98, 0.33)
+  parts.push(tag(plate, 0))
+  for (const side of [-1, 1]) {
+    const eye = new THREE.BoxGeometry(0.08, 0.16, 0.03)
+    eye.translate(side * 0.11, 0.98, 0.362)
+    parts.push(tag(eye, 1))
+  }
+  const merged = mergeGeometries(parts)
+  for (const p of parts) p.dispose()
+  return merged
+}
+
+function faceMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 } },
+    vertexShader: /* glsl */ `
+      attribute float aEye;
+      attribute vec4 aSeed;
+      uniform float uTime;
+      varying float vEye;
+      varying float vBlink;
+      ${ANIM}
+      void main() {
+        float t = uTime * (0.8 + aSeed.z * 0.7) + aSeed.x * 6.2831;
+        vBlink = step(0.96, sin(t * 3.1 + aSeed.x * 18.0));
+        vEye = aEye;
+        vec3 pos = emote(position, ${PART_HEAD.toFixed(1)}, aSeed); // rides the head
+        gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(pos, 1.0);
       }
     `,
     fragmentShader: /* glsl */ `
-      uniform vec3 uInk;
-      uniform float uOutline;
-      uniform sampler2D uRamp;
-      varying vec3 vColor;
-      varying float vPart;
-      varying float vShade;
+      varying float vEye;
+      varying float vBlink;
       void main() {
-        if (uOutline > 0.5) { gl_FragColor = vec4(uInk, 1.0); return; }
-        // 2-step toon shade like the rest of the world
-        float lit = texture2D(uRamp, vec2(clamp(vShade, 0.02, 0.98), 0.5)).r;
-        vec3 col = vColor * mix(0.82, 1.0, lit);
-        // the head reads a touch paler (a face/skin hint) so heads pop
-        if (vPart > 2.5) col = mix(col, vec3(0.98, 0.95, 0.88), 0.55);
-        gl_FragColor = vec4(col, 1.0);
+        if (vEye > 0.5) {
+          if (vBlink > 0.5) discard;          // eyes shut on a blink
+          gl_FragColor = vec4(0.11, 0.10, 0.09, 1.0);
+        } else {
+          gl_FragColor = vec4(0.98, 0.96, 0.90, 1.0); // cream face plate
+        }
       }
     `,
   })
@@ -238,27 +257,21 @@ export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly num
   group.name = 'crowd'
   const count = seats.length
 
-  const geo = crowdGeometry()
-  const fillMat = makeAnimatedMaterial(false)
-  const outlineMat = makeAnimatedMaterial(true)
+  const bodyGeo = beanGeometry()
+  const faceGeo = faceGeometry()
+  const fillMat = bodyMaterial(false)
+  const outlineMat = bodyMaterial(true)
+  const fMat = faceMaterial()
 
-  const fill = new THREE.InstancedMesh(geo, fillMat, count)
-  const outline = new THREE.InstancedMesh(geo, outlineMat, count)
-  fill.frustumCulled = false
-  outline.frustumCulled = false
-  fill.castShadow = false
-  fill.receiveShadow = false
+  const fill = new THREE.InstancedMesh(bodyGeo, fillMat, count)
+  const outline = new THREE.InstancedMesh(bodyGeo, outlineMat, count)
+  const faces = new THREE.InstancedMesh(faceGeo, fMat, count)
+  for (const im of [fill, outline, faces]) im.frustumCulled = false
+  outline.renderOrder = 0
+  fill.renderOrder = 1
+  faces.renderOrder = 2
 
-  // face plates: one instanced quad, blinks handled by a tiny y-squash in a
-  // second cheap animated material would be overkill — bake open eyes, they
-  // read fine at stand distance and the head already turns/bobs.
-  const faceGeo = new THREE.PlaneGeometry(0.34, 0.28)
-  faceGeo.translate(0, 0.98, 0.37) // on the bean's face plate (y=0.98, z front)
-  const faceMat = makeFaceMaterial()
-  const faces = new THREE.InstancedMesh(faceGeo, faceMat, count)
-  faces.frustumCulled = false
-
-  // per-instance transforms + seeds + colors
+  // per-instance transforms + seed + colour
   const seed = new Float32Array(count * 4)
   const colorArr = new Float32Array(count * 3)
   const m = new THREE.Matrix4()
@@ -275,9 +288,9 @@ export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly num
     outline.setMatrixAt(i, m)
     faces.setMatrixAt(i, m)
     seed[i * 4] = s.pick
-    seed[i * 4 + 1] = ((s.pick * 41.3) % 1)
-    seed[i * 4 + 2] = ((s.pick * 7.7) % 1)
-    seed[i * 4 + 3] = ((s.pick * 3.1) % 1)
+    seed[i * 4 + 1] = (s.pick * 41.3) % 1
+    seed[i * 4 + 2] = (s.pick * 7.7) % 1
+    seed[i * 4 + 3] = (s.pick * 3.1) % 1
     col.setHex(fanColors[Math.floor(s.pick * 997) % fanColors.length]!)
     colorArr[i * 3] = col.r
     colorArr[i * 3 + 1] = col.g
@@ -287,18 +300,12 @@ export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly num
   }
   const seedAttr = new THREE.InstancedBufferAttribute(seed, 4)
   const colorAttr = new THREE.InstancedBufferAttribute(colorArr, 3)
-  geo.setAttribute('aSeed', seedAttr)
-  geo.setAttribute('aColor', colorAttr)
-  // the face quad shares the same per-instance seed (for the head bob/turn)
-  faceGeo.setAttribute('aSeed', seedAttr)
-
+  bodyGeo.setAttribute('aSeed', seedAttr)
+  bodyGeo.setAttribute('aColor', colorAttr)
+  faceGeo.setAttribute('aSeed', seedAttr) // faces share the seed (ride the head)
   fill.instanceMatrix.needsUpdate = true
   outline.instanceMatrix.needsUpdate = true
   faces.instanceMatrix.needsUpdate = true
-  // outline draws first (behind), then fill, then faces on top
-  outline.renderOrder = 0
-  fill.renderOrder = 1
-  faces.renderOrder = 2
   group.add(outline, fill, faces)
 
   return {
@@ -308,7 +315,8 @@ export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly num
       for (let i = 0; i < count; i++) {
         const zone = Math.floor(((angles[i]! + span / 2) % (Math.PI * 2)) / span) % Math.max(2, zoneCount)
         const home = zoneColors[zone]
-        if (home !== undefined && picks[i]! < 0.62) col.setHex(home)
+        // home fans wear their team's jersey colour; a scatter stays neutral
+        if (home !== undefined && picks[i]! < 0.68) col.setHex(home)
         else col.setHex(fanColors[Math.floor(picks[i]! * 997) % fanColors.length]!)
         colorArr[i * 3] = col.r
         colorArr[i * 3 + 1] = col.g
@@ -320,59 +328,14 @@ export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly num
       const t = (fillMat.uniforms.uTime!.value as number) + dt
       fillMat.uniforms.uTime!.value = t
       outlineMat.uniforms.uTime!.value = t
-      faceMat.uniforms.uTime!.value = t
+      fMat.uniforms.uTime!.value = t
     },
     dispose(): void {
-      geo.dispose()
+      bodyGeo.dispose()
       faceGeo.dispose()
       fillMat.dispose()
       outlineMat.dispose()
-      faceMat.dispose()
+      fMat.dispose()
     },
   }
-}
-
-/** face material: the eye plate, riding the head's bob/turn via the shared seed */
-function makeFaceMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    transparent: true,
-    uniforms: {
-      uTime: { value: 0 },
-      uMap: { value: faceTexture() },
-    },
-    vertexShader: /* glsl */ `
-      attribute vec4 aSeed;
-      uniform float uTime;
-      varying vec2 vUv;
-      varying float vBlink;
-      vec3 rotY(vec3 p, float a){ float c=cos(a),s=sin(a); return vec3(c*p.x + s*p.z, p.y, -s*p.x + c*p.z); }
-      void main() {
-        float t = uTime * (0.7 + fract(aSeed.z) * 0.9) + aSeed.x * 6.2831;
-        float cheer = smoothstep(0.55, 1.0, sin(t * 0.7 + aSeed.y * 5.0) * 0.5 + 0.5);
-        float bob = sin(t * 1.6) * 0.03 + cheer * 0.14;
-        float look = sin(t * 0.5 + aSeed.w * 6.2831) * 0.5;
-        // blink: a quick eye close a few times a minute, per-fan phase
-        float bl = sin(t * 3.3 + aSeed.x * 20.0);
-        vBlink = step(0.985, bl);
-        vec3 neck = vec3(0.0, 0.9, 0.0);
-        vec3 p = rotY(position - neck, look) + neck; // turn with the head
-        p.y += bob;
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(p, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform sampler2D uMap;
-      varying vec2 vUv;
-      varying float vBlink;
-      void main() {
-        vec4 tx = texture2D(uMap, vUv);
-        if (tx.a < 0.5) discard;
-        // BLINK: during the brief blink window keep only a thin mid-line of the
-        // eye (a closed-eye dash) and hide the rest — reads as an eye shutting.
-        if (vBlink > 0.5 && abs(vUv.y - 0.5) > 0.06) discard;
-        gl_FragColor = vec4(0.11, 0.10, 0.09, 1.0);
-      }
-    `,
-  })
 }
