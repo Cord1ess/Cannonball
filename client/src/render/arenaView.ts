@@ -100,7 +100,7 @@ function netTexture(): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-  tex.repeat.set(80, 3) // fine mesh around the ring, short (a couple rows tall)
+  tex.repeat.set(80, 5) // fine mesh around the ring, a few rows tall
   return tex
 }
 
@@ -113,7 +113,7 @@ const FAN_COLORS: readonly number[] = [
 
 /** Stadium art-style palette — warm, colourful, in-style (no flat off-white). */
 const STADIUM = {
-  frame: 0x8a7a5c, // deeper warm structural frame (boards/kicker/rim base)
+  frame: 0xcbb489, // warm SANDY structural frame (apron/plinth/rim base)
   rail: 0x5c5346, // dark taupe rails/posts
   aisle: 0xc9bfa2, // walkway strips (toned down from bright off-white)
   // seat-block tones cycled up the rake: teal/coral/butter/sage/rose/sky bands
@@ -404,8 +404,9 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const ROW_RISE = 0.82 // taller riser than tread → the bowl rakes up hard
   const AISLES = 10 // radial walkways cut through the seating
   const AISLE_HALF = 0.075 // half-angular-width of each aisle
-  const DISPLAY_H = 1.6 // height of the display wall the first seat row sits on
-  const STANDS_BASE = DISPLAY_H // first seat row rests on top of the display wall
+  const PLINTH_H = 1.15 // low sandy stand the display sits on (lifts ads off the ground)
+  const DISPLAY_BAND = 1.5 // the ad band height on top of the plinth
+  const STANDS_BASE = PLINTH_H + DISPLAY_BAND // first seat row rests on top of the display
 
   // --- APRON: extend the ground out from the grass to under the stands so the
   // net + display + first seats have SOLID ground to sit on (no floating/hole)
@@ -418,7 +419,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
 
   // --- protective NET right at the field edge, standing UP FROM THE GROUND ----
   const NET_R = radius + 0.4
-  const NET_H = 4.4 // short
+  const NET_H = 6.2 // taller
   const netGeo = new THREE.CylinderGeometry(NET_R, NET_R, NET_H, SEGMENTS, 1, true)
   const netMat = new THREE.MeshBasicMaterial({
     map: netTexture(),
@@ -439,22 +440,31 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   rail.position.y = NET_H
   group.add(rail)
 
-  // --- DISPLAY WALL right behind the net: a solid ring from the GROUND up to
-  // the first seat row, spanning net->stands so there's no gap; dark screen
-  // band on the pitch-facing side (the digital signs mount here later) --------
+  // --- DISPLAY behind the net: a low sandy PLINTH from the ground, then the
+  // raised ad BAND on top (so the ads sit at a viewable height, not on the
+  // floor). Together they span net->stands and rise to the first seat row.
   const DISPLAY_INNER = radius + 0.7
-  const boardWall = new THREE.Mesh(
-    ringGeometry(DISPLAY_INNER, STANDS_INNER + 0.05, DISPLAY_H),
+  // 1) plinth: solid sandy stand, ground -> PLINTH_H
+  const plinth = new THREE.Mesh(
+    ringGeometry(DISPLAY_INNER, STANDS_INNER + 0.05, PLINTH_H),
     makeToonMaterial(STADIUM.frame),
   )
+  addInkOutline(plinth, INK_WEIGHT.arena)
+  group.add(plinth)
+  // 2) display band frame on top of the plinth, PLINTH_H -> STANDS_BASE
+  const boardWall = new THREE.Mesh(
+    ringGeometry(DISPLAY_INNER, STANDS_INNER + 0.05, DISPLAY_BAND),
+    makeToonMaterial(STADIUM.frame),
+  )
+  boardWall.position.y = PLINTH_H
   addInkOutline(boardWall, INK_WEIGHT.arena)
   group.add(boardWall)
-  // dark LED screen band on the inner (pitch-facing) face
+  // 3) the dark LED ad screen on the inner (pitch-facing) face of the band
   const screen = new THREE.Mesh(
-    new THREE.CylinderGeometry(DISPLAY_INNER - 0.02, DISPLAY_INNER - 0.02, DISPLAY_H * 0.82, SEGMENTS, 1, true),
+    new THREE.CylinderGeometry(DISPLAY_INNER - 0.02, DISPLAY_INNER - 0.02, DISPLAY_BAND * 0.86, SEGMENTS, 1, true),
     new THREE.MeshBasicMaterial({ color: 0x2b3038, side: THREE.BackSide }),
   )
-  screen.position.y = DISPLAY_H * 0.5
+  screen.position.y = PLINTH_H + DISPLAY_BAND * 0.5
   group.add(screen)
 
   // each seating row is a stepped ring (riser + tread) — the classic rake.
