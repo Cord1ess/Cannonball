@@ -78,6 +78,15 @@ export function createZoneLabel(): ZoneLabel {
     },
     setVisible(v: boolean): void {
       mesh.visible = v
+      // when hidden, BLANK the texture too so a stale name can never linger on
+      // the ground for a frame if the mesh is ever momentarily shown again
+      if (!v && lastKey !== '') {
+        lastKey = ''
+        canvas.width = 1
+        canvas.height = 1
+        ctx.clearRect(0, 0, 1, 1)
+        tex.needsUpdate = true
+      }
     },
     dispose(): void {
       geo.dispose()

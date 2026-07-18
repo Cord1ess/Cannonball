@@ -48,7 +48,7 @@ const DAY = {
   skyTint: new THREE.Color(0xffffff), // no tint over the painted day sky
   groundTint: new THREE.Color(0xffffff), // ground shows at its authored value
   discColor: new THREE.Color(0xfff6d8),
-  discSize: 26,
+  discSize: 62, // a big bright sun
 }
 
 const NIGHT = {
@@ -67,7 +67,7 @@ const NIGHT = {
   // — the texture + its remap pipeline are never modified.
   groundTint: new THREE.Color(0x4a5566),
   discColor: new THREE.Color(0xdfe6ff), // a pale moon
-  discSize: 16,
+  discSize: 44, // still a large, clear moon
 }
 
 // SUN ARC: the sun rides an east->overhead->west path parameterised by frac.
@@ -102,24 +102,28 @@ export function createDayNight(
 ): DayNight {
   let target = 0
   let frac = 0
+  let stepProgress = 0 // the discrete elimination-driven progress (monotonic)
   let nightfallFired = false
   let nightfallCb: (() => void) | null = null
   const skyMat = sky.material as THREE.MeshBasicMaterial
   const fog = scene.fog as THREE.Fog | null
 
-  // the VISIBLE sun disc — a soft additive sprite far out on the sky dome, so
-  // players see it climb/sink as the day turns. Cosmetic; not the light itself.
+  // the VISIBLE sun disc — a BIG bright solid core with a soft glow halo around
+  // it, an additive sprite far out on the sky dome so players see it climb/sink
+  // as the day turns. Cosmetic; not the light itself.
   const discCanvas = document.createElement('canvas')
-  discCanvas.width = discCanvas.height = 128
+  discCanvas.width = discCanvas.height = 256
   {
     const c = discCanvas.getContext('2d')!
-    const g = c.createRadialGradient(64, 64, 0, 64, 64, 64)
+    const g = c.createRadialGradient(128, 128, 0, 128, 128, 128)
+    // a fat, near-solid disc (bright out to ~0.42) then a wide soft glow falloff
     g.addColorStop(0, 'rgba(255,255,255,1)')
-    g.addColorStop(0.35, 'rgba(255,255,255,0.95)')
-    g.addColorStop(0.6, 'rgba(255,255,255,0.35)')
+    g.addColorStop(0.42, 'rgba(255,255,255,1)')
+    g.addColorStop(0.52, 'rgba(255,255,255,0.7)')
+    g.addColorStop(0.72, 'rgba(255,255,255,0.25)')
     g.addColorStop(1, 'rgba(255,255,255,0)')
     c.fillStyle = g
-    c.fillRect(0, 0, 128, 128)
+    c.fillRect(0, 0, 256, 256)
   }
   const discTex = new THREE.CanvasTexture(discCanvas)
   discTex.colorSpace = THREE.SRGBColorSpace
@@ -187,21 +191,44 @@ export function createDayNight(
     },
     setMatchProgress(survivors: number, seatsAtStart: number): void {
       if (seatsAtStart < 2) {
+        stepProgress = 0
         target = 0
         return
       }
       const nightAt = nightAtSurvivors(seatsAtStart)
       const denom = Math.max(1, seatsAtStart - nightAt) // elims needed for night
       const done = seatsAtStart - survivors // elims so far
-      target = Math.max(0, Math.min(1, done / denom))
+      const p = Math.max(0, Math.min(1, done / denom))
+      // a DROP to ~0 means a new match (lobby) — allow the reset back to day.
+      // otherwise the arc is MONOTONIC during a match: night never walks back.
+      if (p < 0.02) {
+        stepProgress = 0
+        target = 0
+      } else {
+        stepProgress = Math.max(stepProgress, p)
+      }
     },
     setTarget(frac2: number): void {
-      target = Math.max(0, Math.min(1, frac2))
+      stepProgress = Math.max(0, Math.min(1, frac2))
+      target = stepProgress
     },
     onNightfall(cb: () => void): void {
       nightfallCb = cb
     },
     update(dt: number): void {
+      // CONTINUOUS flow: between eliminations the stepped progress is flat, which
+      // would make the sky freeze then jump. So the effective target CREEPS from
+      // the last step toward the NEXT one over time — the sun keeps visibly
+      // moving and night keeps deepening a little every second, no plateaus, no
+      // snaps. Capped so a round can't push past the elimination it's heading to.
+      if (stepProgress > 0.001 && stepProgress < 0.999) {
+        const nextStepCreep = Math.min(0.16, 1 - stepProgress) // how far into the gap
+        target = Math.min(stepProgress + nextStepCreep, target + dt * 0.012)
+        target = Math.max(target, stepProgress) // never regress below the step
+      } else {
+        target = stepProgress
+      }
+
       if (Math.abs(target - frac) < 0.0005) {
         if (frac !== target) {
           frac = target

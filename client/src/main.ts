@@ -13,6 +13,7 @@ import { connect, currentServerUrl, saveServerUrl } from './net/connection.ts'
 import { createGrainOverlay } from './render/grain.ts'
 import { PALETTE } from './render/palette.ts'
 import { makeSky } from './render/sky.ts'
+import { createClouds } from './render/clouds.ts'
 import type { WorldLighting } from './render/arenaView.ts'
 
 /**
@@ -89,6 +90,9 @@ scene.add(sun)
 scene.add(sun.target) // the arc aims the sun at the arena center each frame
 const sky = makeSky()
 scene.add(sky)
+// real 3D bubbly toon clouds drifting in the sky (random each session, alive)
+const clouds = createClouds()
+scene.add(clouds.group)
 // bundle the world lighting the day->night arc drives (owned here, passed
 // into the game so its arenaView can ease it toward night as players drop)
 const lighting: WorldLighting = { scene, sun, hemi, sky }
@@ -207,6 +211,7 @@ function frame(nowMs: number): void {
   }
 
   game.frameUpdate(time.unscaledDelta, time.alpha, input.axis('lean'))
+  clouds.update(time.unscaledDelta)
 
   hud.update({
     // tick timer + zone meters moved to the leaderboard HUD; the plain HUD

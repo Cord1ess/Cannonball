@@ -158,8 +158,9 @@ export function grainTexture(size = 256): THREE.CanvasTexture {
 }
 
 /**
- * Trait 2.5 — the painted sky: flat teal with hand-cut lighter cloud masses
- * and a soft cream horizon band. NOT a gradient, NOT geometry.
+ * Trait 2.5 — the painted sky: flat teal with a soft cream horizon band. NOT a
+ * gradient, NOT geometry. Clouds are NO LONGER painted here — they're real 3D
+ * bubbly toon clouds now (render/clouds.ts), so the dome is just the backdrop.
  */
 export function skyTexture(w = 1024, h = 512): THREE.CanvasTexture {
   const [canvas, ctx] = makeCanvas(w, h)
@@ -172,27 +173,6 @@ export function skyTexture(w = 1024, h = 512): THREE.CanvasTexture {
   horizon.addColorStop(1, 'rgba(238, 244, 226, 0.85)')
   ctx.fillStyle = horizon
   ctx.fillRect(0, h * 0.38, w, h * 0.62)
-
-  // big hand-cut cloud masses in the upper sky
-  ctx.fillStyle = '#c6eadd'
-  const cloudMass = (cx: number, cy: number, scale: number): void => {
-    for (let i = 0; i < 12; i++) {
-      const rx = (26 + Math.random() * 60) * scale
-      const ry = rx * (0.32 + Math.random() * 0.25)
-      const x = cx + (Math.random() - 0.5) * 170 * scale
-      const y = cy + (Math.random() - 0.5) * 46 * scale
-      ctx.beginPath()
-      ctx.ellipse((x + w) % w, y, rx, ry, 0, 0, Math.PI * 2)
-      ctx.fill()
-    }
-  }
-  for (let i = 0; i < 6; i++) {
-    cloudMass(Math.random() * w, h * (0.1 + Math.random() * 0.22), 0.8 + Math.random() * 0.9)
-  }
-  // a few small distant clouds near the horizon
-  for (let i = 0; i < 4; i++) {
-    cloudMass(Math.random() * w, h * (0.36 + Math.random() * 0.05), 0.35)
-  }
 
   return toTexture(canvas)
 }

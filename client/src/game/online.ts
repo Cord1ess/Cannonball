@@ -981,12 +981,15 @@ export function createOnlineGame(
       arenaView.setDanger(fracs)
 
       // DAY -> NIGHT arc: driven by MATCH PROGRESS (elims done / elims-to-night)
-      // so it always opens in day and moves to night regardless of start count.
-      // Forced back to full day in the lobby/pre-match (progress 0).
-      if (isPlayPhase(state.phase ?? 0)) {
-        arenaView.setMatchProgress(state.survivors || 6, state.seatsAtStart || state.survivors || 6)
-      } else {
+      // as ONE continuous, monotonic flow across the whole match. Only the LOBBY
+      // (a genuinely new match) resets to day — every mid-match phase (draft,
+      // kickoff, restart, duel...) keeps the progress, so night never snaps back
+      // to day between rounds. survivors is already decremented in those phases,
+      // so the arc keeps advancing smoothly toward night.
+      if ((state.phase ?? 0) === Phase.Lobby) {
         arenaView.setMatchProgress(state.seatsAtStart || 6, state.seatsAtStart || 6) // day
+      } else {
+        arenaView.setMatchProgress(state.survivors || 6, state.seatsAtStart || state.survivors || 6)
       }
 
       // OWN-ZONE ALARM: ball sitting in MY wedge -> blink that wedge + prompt
