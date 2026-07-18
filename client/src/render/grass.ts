@@ -62,6 +62,9 @@ export interface GrassField {
 }
 
 const VERT = /* glsl */ `
+  #include <common>
+  #include <shadowmap_pars_vertex>
+
   attribute vec4 aData;   // x, z, yaw, heightScale
   attribute vec2 aSeed;   // phase, colorVar
 
@@ -173,12 +176,23 @@ const VERT = /* glsl */ `
 
     vec3 world = vec3(root.x + p.x, p.y, root.y + p.z);
     vWorldXZ = world.xz;
+
+    // shadow reception: shadowmap_vertex needs a world-space vec4 in scope.
+    // our verts are ALREADY world-space (mesh has identity transform), so this
+    // is world directly — it fills vDirectionalShadowCoord[] for the fragment.
+    vec4 worldPosition = vec4(world, 1.0);
+    #include <shadowmap_vertex>
+
     gl_Position = projectionMatrix * modelViewMatrix * vec4(world, 1.0);
   }
 `
 
 const FRAG = /* glsl */ `
-  precision highp float;
+  #include <common>
+  #include <packing>
+  #include <lights_pars_begin>        // declares 'uniform bool receiveShadow'
+  #include <shadowmap_pars_fragment>  // directionalShadowMap + getShadow
+  #include <shadowmask_pars_fragment> // getShadowMask()
 
   uniform vec3 uBase;
   uniform vec3 uTip;
@@ -270,6 +284,13 @@ const FRAG = /* glsl */ `
     // trodden blades read a touch darker (pressed, in shadow)
     col *= 1.0 - vFlat * 0.22;
 
+    // CAST SHADOWS: one shadow-map read per fragment (no per-blade cost, grass
+    // never self-casts). Beans/ball/props darken the turf they stand on. The
+    // sun's arc rotates + lengthens these across the match. Softened so the
+    // stylised pitch never goes muddy — a gentle contact darkening, not black.
+    float shadowMask = getShadowMask();
+    col *= mix(1.0, shadowMask, 0.45);
+
     // NIGHT FALL: the grass is unlit, so the day->night arc is applied here.
     // Deepen + cool the turf and pull it toward a dusky blue moonlit shade;
     // tips keep a sliver more light than roots so blades still read at night.
@@ -323,34 +344,45 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
   const gusts = Array.from({ length: MAX_GUSTS }, () => new THREE.Vector4(0, 0, 0, 0))
   const gustDirs = Array.from({ length: MAX_GUSTS }, () => new THREE.Vector2(1, 0))
   const zoneColors = Array.from({ length: MAX_ZONES }, () => new THREE.Color(PALETTE.grassBase))
+  // Merge three's light/shadow uniforms so the renderer has slots to populate
+  // the directional shadow map into (with lights:true below). UniformsUtils.merge
+  // DEEP-CLONES, so we merge only the lights lib + scalar placeholders here, then
+  // RE-ASSIGN our live object uniforms afterwards — the setters mutate those same
+  // objects each frame, so they must be the identical references the shader reads.
   const material = new THREE.ShaderMaterial({
     vertexShader: VERT,
     fragmentShader: FRAG,
     side: THREE.DoubleSide,
-    uniforms: {
-      uTime: { value: 0 },
-      uWindDir: { value: windDir },
-      uBase: { value: new THREE.Color(PALETTE.grassBase) },
-      uTip: { value: new THREE.Color(PALETTE.grassTip) },
-      uChalk: { value: new THREE.Color(PALETTE.chalk) },
-      uZoneCount: { value: 6 },
-      uNeutralR: { value: neutralRadius },
-      uRadius: { value: radius },
-      uZoneColors: { value: zoneColors },
-      uDanger: { value: new Array(MAX_ZONES).fill(0) },
-      uAlarmZone: { value: -1 },
-      uAlarmPulse: { value: 0 },
-      uNight: { value: 0 },
-      uBodies: { value: bodies },
-      uBodyCount: { value: 0 },
-      uGusts: { value: gusts },
-      uGustDir: { value: gustDirs },
-      uGustCount: { value: 0 },
-    },
+    lights: true, // routes this material through the shadow-uniform upload path
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.lights,
+      {
+        uTime: { value: 0 },
+        uNeutralR: { value: neutralRadius },
+        uRadius: { value: radius },
+        uZoneCount: { value: 6 },
+        uDanger: { value: new Array(MAX_ZONES).fill(0) },
+        uAlarmZone: { value: -1 },
+        uAlarmPulse: { value: 0 },
+        uNight: { value: 0 },
+        uBodyCount: { value: 0 },
+        uGustCount: { value: 0 },
+      },
+    ]),
   })
+  // live object uniforms (kept OUT of the merge so we hold the real references)
+  material.uniforms.uWindDir = { value: windDir }
+  material.uniforms.uBase = { value: new THREE.Color(PALETTE.grassBase) }
+  material.uniforms.uTip = { value: new THREE.Color(PALETTE.grassTip) }
+  material.uniforms.uChalk = { value: new THREE.Color(PALETTE.chalk) }
+  material.uniforms.uZoneColors = { value: zoneColors }
+  material.uniforms.uBodies = { value: bodies }
+  material.uniforms.uGusts = { value: gusts }
+  material.uniforms.uGustDir = { value: gustDirs }
 
   const mesh = new THREE.Mesh(geo, material)
   mesh.frustumCulled = false // one field, always on screen
+  mesh.receiveShadow = true // r0.185: drives the `receiveShadow` uniform getShadowMask reads
 
   return {
     mesh,

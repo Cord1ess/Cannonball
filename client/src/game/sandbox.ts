@@ -247,7 +247,7 @@ export function createSandbox(
 
       const interval = TICK_SECONDS_PER_SURVIVOR * survivors
       arenaView.setDanger(zoneSeat.map((seat) => (meters[seat] ?? 0) / Math.max(1, interval * 0.5)))
-      arenaView.setSurvivors(survivors) // day -> night as the sandbox thins out
+      arenaView.setMatchProgress(survivors, SEATS) // day -> night as it thins out
 
       // grass parts around the player + ball (sandbox test path)
       const bodies = []

@@ -26,6 +26,13 @@ const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.autoClear = false
+// ONE directional shadow map, soft PCF — beans/ball/props cast onto the pitch.
+// Grass + ground receive it in-shader (cheap: one shadow-map read/fragment, no
+// per-blade self-shadow). Fitted tight to the arena so 2048² stays crisp.
+renderer.shadowMap.enabled = true
+// NB r0.185: PCFShadowMap is the SOFT Vogel-disk path; PCFSoftShadowMap falls
+// through to hard BASIC. So PCFShadowMap here = the soft shadows we want.
+renderer.shadowMap.type = THREE.PCFShadowMap
 document.body.appendChild(renderer.domElement)
 
 const camera3 = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 600)
@@ -64,9 +71,22 @@ const scene = new THREE.Scene()
 scene.fog = new THREE.Fog(PALETTE.horizonCream, 60, 240)
 const hemi = new THREE.HemisphereLight(0xdcefe8, 0xcbbfa6, 0.95)
 scene.add(hemi)
-const sun = new THREE.DirectionalLight(0xfff3e0, 0.85)
-sun.position.set(6, 10, 4)
+const sun = new THREE.DirectionalLight(0xfff3e0, 1.35)
+sun.position.set(60, 120, 40)
+sun.castShadow = true
+sun.shadow.mapSize.set(2048, 2048)
+// fit the shadow camera tight to the pitch (radius ~28) + a margin for beans
+// launched onto the wall crown, so 2048² stays crisp on the play area
+sun.shadow.camera.left = -40
+sun.shadow.camera.right = 40
+sun.shadow.camera.top = 40
+sun.shadow.camera.bottom = -40
+sun.shadow.camera.near = 40
+sun.shadow.camera.far = 360
+sun.shadow.bias = -0.0004
+sun.shadow.normalBias = 0.02
 scene.add(sun)
+scene.add(sun.target) // the arc aims the sun at the arena center each frame
 const sky = makeSky()
 scene.add(sky)
 // bundle the world lighting the day->night arc drives (owned here, passed

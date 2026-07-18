@@ -32,10 +32,12 @@ export interface ArenaView {
   readonly group: THREE.Group
   /** repaint the floor divisions + cannons + home-fan sections */
   setZones(arena: Arena, zoneColors: readonly number[]): void
-  /** survivor count → target of the day->night arc (full night at <=3) */
-  setSurvivors(survivors: number): void
-  /** debug: force full night on/off, overriding the survivor-driven arc */
+  /** match progress → day->night arc target (elims done / elims-to-night) */
+  setMatchProgress(survivors: number, seatsAtStart: number): void
+  /** debug: force full night on/off, overriding the progress-driven arc */
   debugForceNight(on: boolean): void
+  /** register the one-shot nightfall pop (future light-prop + audio bang) */
+  onNightfall(cb: () => void): void
   /** meterFrac per zone [0..1] heats that wedge's grass */
   setDanger(fracs: readonly number[]): void
   /** blink one zone red (ball in your own wedge); zone=-1 off, pulse 0..1 */
@@ -258,11 +260,13 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const grass = createGrassField(radius, neutralRadius)
   group.add(grass.mesh)
 
-  // day -> night arc: eases the sun/hemi/fog/sky + the unlit grass toward
-  // night as survivors thin out (full night at 3). Null in contexts that
-  // didn't pass scene lighting (kept working for older call sites).
+  // day -> night arc: a visible sun arcs across the sky and eases the light,
+  // hemi, fog, sky, the unlit grass, and the unlit GROUND toward night as the
+  // match progresses. Passes floorTopMat so night can multiply the (fine-tuned,
+  // bright) ground texture DOWN so it stops glowing — only the color multiplier
+  // is touched, never the texture or its remap. Null when no lighting passed.
   const dayNight: DayNight | null = lighting
-    ? createDayNight(lighting.scene, lighting.sun, lighting.hemi, lighting.sky, grass)
+    ? createDayNight(lighting.scene, lighting.sun, lighting.hemi, lighting.sky, grass, floorTopMat)
     : null
 
   // wind: localized travelling GUST CELLS drive both the grass bend and the
@@ -279,6 +283,8 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
 
   // seamless ring wall the players bounce off
   const wall = new THREE.Mesh(ringGeometry(radius, radius + 1.8, WALL_HEIGHT), makeToonMaterial(PALETTE.warmGray))
+  wall.castShadow = true
+  wall.receiveShadow = true
   addInkOutline(wall, INK_WEIGHT.arena)
   group.add(wall)
 
@@ -448,7 +454,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   }
 
   let elapsed = 0
-  let forceNight = false // debug override of the survivor-driven arc
+  let forceNight = false // debug override of the progress-driven arc
 
   return {
     group,
@@ -463,13 +469,17 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
       }
     },
 
-    setSurvivors(survivors: number): void {
-      if (!forceNight) dayNight?.setSurvivors(survivors)
+    setMatchProgress(survivors: number, seatsAtStart: number): void {
+      if (!forceNight) dayNight?.setMatchProgress(survivors, seatsAtStart)
     },
 
     debugForceNight(on: boolean): void {
       forceNight = on
       dayNight?.setTarget(on ? 1 : 0)
+    },
+
+    onNightfall(cb: () => void): void {
+      dayNight?.onNightfall(cb)
     },
 
     setDanger(fracs: readonly number[]): void {

@@ -34,6 +34,14 @@ export interface WindField {
   /** a broad "prevailing" direction, for the ambient streaks fallback */
   readonly dirX: number
   readonly dirZ: number
+  /**
+   * Returns the FULL fixed-size cell pool every frame — index == a STABLE slot,
+   * NOT a compacted list of live cells. This matters: consumers (grass uniforms,
+   * streak instances) bind to a physical gust by its slot index, so a gust must
+   * keep the same index for its whole life. Inactive slots have strength 0 (and
+   * consumers skip them). Returning a compacted `live` array reshuffled indices
+   * every frame → clusters teleported between unrelated gusts (the glitch).
+   */
   step(dt: number): readonly GustCell[]
 }
 
@@ -59,7 +67,6 @@ export function createWindField(rng: () => number = Math.random): WindField {
     peak: 0,
     active: false,
   }))
-  const live: GustCell[] = []
 
   // a slowly-rotating "prevailing" heading (used only for the streak fallback)
   let prevailing = rng() * Math.PI * 2
@@ -123,9 +130,13 @@ export function createWindField(rng: () => number = Math.random): WindField {
         spawnCd = 1.2 + rng() * 2.2
       }
 
-      live.length = 0
+      // advance every ACTIVE cell IN PLACE — the slot (array index) is stable
+      // for the cell's whole life, so consumers never see a gust jump slots.
       for (const c of cells) {
-        if (!c.active) continue
+        if (!c.active) {
+          c.strength = 0 // inactive slot: consumers skip it (strength 0)
+          continue
+        }
         c.age += dt
         c.angle += c.angVel * dt // sweep along the arc
         c.wobPhase += c.wobRate * dt // weave in/out as it rolls
@@ -136,10 +147,12 @@ export function createWindField(rng: () => number = Math.random): WindField {
           c.strength = 0
           continue
         }
-        c.strength = Math.sin(f * Math.PI) * c.peak // ease in→out
-        live.push(c)
+        // sin bell: strength eases 0 -> peak -> 0, so a gust fades IN on spawn
+        // (f=0 -> 0) and OUT on death (f=1 -> 0). No pop, no teleport.
+        c.strength = Math.sin(f * Math.PI) * c.peak
       }
-      return live
+      // return the WHOLE pool (stable slots), not a compacted live list
+      return cells
     },
   }
 }

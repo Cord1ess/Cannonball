@@ -116,6 +116,8 @@ export function createBean(appearance: number | KitColors): Bean {
       ? new THREE.MeshToonMaterial({ gradientMap: toonRamp(), map: jerseyTexture(kit) })
       : makeToonMaterial(teamColor),
   )
+  shorts.castShadow = true
+  body.castShadow = true
   addInkOutline(shorts, INK_WEIGHT.character)
   addInkOutline(body, INK_WEIGHT.character)
   rig.add(shorts, body)

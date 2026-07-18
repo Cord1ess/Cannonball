@@ -980,10 +980,14 @@ export function createOnlineGame(
       }
       arenaView.setDanger(fracs)
 
-      // DAY -> NIGHT arc: driven by live survivors during a match (full night at
-      // 3), forced back to full day in the lobby/pre-match so a fresh match
-      // always opens in daylight.
-      arenaView.setSurvivors(isPlayPhase(state.phase ?? 0) ? (state.survivors || 6) : 6)
+      // DAY -> NIGHT arc: driven by MATCH PROGRESS (elims done / elims-to-night)
+      // so it always opens in day and moves to night regardless of start count.
+      // Forced back to full day in the lobby/pre-match (progress 0).
+      if (isPlayPhase(state.phase ?? 0)) {
+        arenaView.setMatchProgress(state.survivors || 6, state.seatsAtStart || state.survivors || 6)
+      } else {
+        arenaView.setMatchProgress(state.seatsAtStart || 6, state.seatsAtStart || 6) // day
+      }
 
       // OWN-ZONE ALARM: ball sitting in MY wedge -> blink that wedge + prompt
       const ballZone = footprintZone(arena, ball.x, ball.z)
@@ -1004,14 +1008,18 @@ export function createOnlineGame(
           label.setVisible(false)
           continue
         }
-        const seat = zoneSeatArr[i] ?? 0
-        // no ground label on MY OWN zone — my head tag already names me, and a
-        // duplicate on my own turf reads as clutter
-        if (seat === mySeat) {
+        // NB default to -1, NOT 0 — a missing seat entry defaulting to 0 would
+        // masquerade as seat 0 and could paint the wrong (or my) name.
+        const seat = zoneSeatArr[i] ?? -1
+        const owner = seat >= 0 ? playerNameOf(seat) : ''
+        // NEVER a ground label on MY OWN zone — my head tag already names me.
+        // Guard by seat AND by name (catches stale mySeat / seat-default cases)
+        // AND hide empty/unknown owners entirely.
+        const myName = state.players?.get?.(conn.sessionId)?.name || (mySeat >= 0 ? `Player ${mySeat + 1}` : '')
+        if (seat < 0 || seat === mySeat || (owner !== '' && owner === myName)) {
           label.setVisible(false)
           continue
         }
-        const owner = playerNameOf(seat)
         label.set(owner, toHex(seatColors[seat] ?? 0x888888))
         const a = zoneAnchor(arena, i, 0.62) // mid-wedge, flat on the grass
         label.place(a.x, a.z)

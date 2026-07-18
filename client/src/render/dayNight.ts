@@ -2,23 +2,33 @@ import * as THREE from 'three'
 import type { GrassField } from './grass.ts'
 
 /**
- * The day -> night light arc (M5b). Drives the sun, hemisphere fill, fog,
- * sky-dome tint, and the (unlit) grass toward night as the match thins out.
+ * The day -> night light arc (M5b). Drives a VISIBLE sun that arcs across the
+ * sky (high + bright sharp daytime -> sinking to the horizon -> set), plus the
+ * directional light, hemisphere fill, fog, sky-dome tint, the (unlit) grass,
+ * and the (unlit) ground toward night as the match progresses.
  *
- * The arc is survivor-driven: full daylight at the start of a match, easing to
- * FULL NIGHT by the time three players remain (and it stays night through the
- * duel). Stadium light PROPS come later — this is just the sky/lighting mood.
+ * Timing is MATCH-PROGRESS driven, not raw survivor count: night is reached as
+ * a fraction of the eliminations that will happen this match, so a match ALWAYS
+ * opens in daylight and moves toward night regardless of the starting count.
+ *  - 6 players start -> full night by the time 3 remain
+ *  - 3 or 2 players start -> day-to-night stretched across the whole match
+ * (see NIGHT_AT_SURVIVORS below for the exact mapping).
  *
  * nightFrac is eased toward its target every frame so the fall of night is a
- * slow dusk, never a snap when someone is eliminated.
+ * gradual dusk that also keeps creeping between eliminations (the sun visibly
+ * moves), never a snap. Stadium light PROPS + the audio "bang" when they switch
+ * on come later — `onNightfall` fires once when night is essentially reached so
+ * that pop can hang off it.
  */
 
 export interface DayNight {
-  /** set the TARGET night level from survivor count (full night at <=3) */
-  setSurvivors(survivors: number): void
-  /** set the target directly, 0 = day .. 1 = night (for debug/menus) */
+  /** target night level from match progress (elims done / elims-to-night) */
+  setMatchProgress(survivors: number, seatsAtStart: number): void
+  /** set the target directly, 0 = day .. 1 = night (debug / menus) */
   setTarget(frac: number): void
-  /** ease toward the target and repaint the world; call every frame */
+  /** register a one-shot callback for when night is essentially reached */
+  onNightfall(cb: () => void): void
+  /** ease toward the target, move the sun, and repaint the world; every frame */
   update(dt: number): void
   /** current eased night fraction (0..1) */
   readonly night: number
@@ -26,34 +36,61 @@ export interface DayNight {
 
 // two keyframes we lerp between; everything is authored as day and night pairs
 const DAY = {
-  sunColor: new THREE.Color(0xfff3e0),
-  sunIntensity: 0.85,
-  sunPos: new THREE.Vector3(6, 10, 4),
+  // sharp, bright daytime — a strong key light with crisp shadows
+  sunColor: new THREE.Color(0xfff4e2),
+  sunIntensity: 1.35,
   hemiSky: new THREE.Color(0xdcefe8),
   hemiGround: new THREE.Color(0xcbbfa6),
-  hemiIntensity: 0.95,
+  hemiIntensity: 0.8,
   fog: new THREE.Color(0xeef4e2), // horizonCream
   fogNear: 60,
   fogFar: 240,
   skyTint: new THREE.Color(0xffffff), // no tint over the painted day sky
+  groundTint: new THREE.Color(0xffffff), // ground shows at its authored value
+  discColor: new THREE.Color(0xfff6d8),
+  discSize: 26,
 }
 
 const NIGHT = {
   // low, cool moonlight raking from the side
   sunColor: new THREE.Color(0x9fb4e6),
-  sunIntensity: 0.42,
-  sunPos: new THREE.Vector3(-9, 2.2, -5),
+  sunIntensity: 0.4,
   hemiSky: new THREE.Color(0x39476e),
   hemiGround: new THREE.Color(0x222a3c),
-  hemiIntensity: 0.6,
+  hemiIntensity: 0.55,
   fog: new THREE.Color(0x2a3350), // deep dusk blue
   fogNear: 40,
   fogFar: 200,
   skyTint: new THREE.Color(0x39466f), // multiply the day sky down to night blue
+  // GROUND: multiply the (already fine-tuned, bright) ground texture DOWN at
+  // night so it stops glowing. This ONLY touches the material color multiplier
+  // — the texture + its remap pipeline are never modified.
+  groundTint: new THREE.Color(0x4a5566),
+  discColor: new THREE.Color(0xdfe6ff), // a pale moon
+  discSize: 16,
 }
 
-const SURVIVOR_NIGHT = 3 // full night at this many survivors
-const SURVIVOR_DAY = 6 // full day at this many (or more) survivors
+// SUN ARC: the sun rides an east->overhead->west path parameterised by frac.
+// At day (frac 0) it's HIGH and to one side (sharp long-ish shadows, not flat
+// noon). As night falls it sinks toward the horizon and swings across, so the
+// shadows lengthen + rotate visibly. Distance keeps it out on the sky dome.
+const SUN_DIST = 220
+function sunDirection(frac: number, out: THREE.Vector3): THREE.Vector3 {
+  // azimuth swings ~120° across the match; altitude falls from high to horizon
+  const az = -0.6 + frac * 2.0 // radians, east-ish -> west-ish
+  const alt = (0.95 - frac * 0.85) * (Math.PI / 2) // ~54° high -> ~5° low
+  const cosA = Math.cos(alt)
+  out.set(Math.cos(az) * cosA, Math.sin(alt), Math.sin(az) * cosA)
+  return out
+}
+
+// full night for the DRIVER when this many survivors remain. 6p -> 3, but small
+// lobbies stretch to the end: max(1, start-3) means 3p/2p reach night at 1 left.
+function nightAtSurvivors(seatsAtStart: number): number {
+  return Math.max(1, seatsAtStart - 3)
+}
+
+const scratchDir = new THREE.Vector3()
 
 export function createDayNight(
   scene: THREE.Scene,
@@ -61,17 +98,63 @@ export function createDayNight(
   hemi: THREE.HemisphereLight,
   sky: THREE.Mesh,
   grass: GrassField,
+  groundMat: THREE.MeshBasicMaterial | null,
 ): DayNight {
   let target = 0
   let frac = 0
+  let nightfallFired = false
+  let nightfallCb: (() => void) | null = null
   const skyMat = sky.material as THREE.MeshBasicMaterial
   const fog = scene.fog as THREE.Fog | null
 
+  // the VISIBLE sun disc — a soft additive sprite far out on the sky dome, so
+  // players see it climb/sink as the day turns. Cosmetic; not the light itself.
+  const discCanvas = document.createElement('canvas')
+  discCanvas.width = discCanvas.height = 128
+  {
+    const c = discCanvas.getContext('2d')!
+    const g = c.createRadialGradient(64, 64, 0, 64, 64, 64)
+    g.addColorStop(0, 'rgba(255,255,255,1)')
+    g.addColorStop(0.35, 'rgba(255,255,255,0.95)')
+    g.addColorStop(0.6, 'rgba(255,255,255,0.35)')
+    g.addColorStop(1, 'rgba(255,255,255,0)')
+    c.fillStyle = g
+    c.fillRect(0, 0, 128, 128)
+  }
+  const discTex = new THREE.CanvasTexture(discCanvas)
+  discTex.colorSpace = THREE.SRGBColorSpace
+  const discMat = new THREE.SpriteMaterial({
+    map: discTex,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false, // always on the sky, behind everything
+    blending: THREE.AdditiveBlending,
+    fog: false,
+  })
+  const disc = new THREE.Sprite(discMat)
+  disc.renderOrder = -1 // with the sky dome
+  scene.add(disc)
+
   function apply(): void {
     const f = frac
+
+    // move the light + the visible disc along the arc
+    sunDirection(f, scratchDir)
+    sun.position.copy(scratchDir).multiplyScalar(SUN_DIST)
+    if (sun.target) {
+      sun.target.position.set(0, 0, 0)
+      sun.target.updateMatrixWorld()
+    }
+    disc.position.copy(scratchDir).multiplyScalar(SUN_DIST * 1.1)
+    const size = DAY.discSize + (NIGHT.discSize - DAY.discSize) * f
+    disc.scale.setScalar(size)
+    discMat.color.copy(DAY.discColor).lerp(NIGHT.discColor, f)
+    // the disc dims + warms (reddens toward the horizon) as it sets, then reads
+    // as a cool moon at full night
+    discMat.opacity = 1.0 - f * 0.35
+
     sun.color.copy(DAY.sunColor).lerp(NIGHT.sunColor, f)
     sun.intensity = DAY.sunIntensity + (NIGHT.sunIntensity - DAY.sunIntensity) * f
-    sun.position.copy(DAY.sunPos).lerp(NIGHT.sunPos, f)
 
     hemi.color.copy(DAY.hemiSky).lerp(NIGHT.hemiSky, f)
     hemi.groundColor.copy(DAY.hemiGround).lerp(NIGHT.hemiGround, f)
@@ -84,7 +167,16 @@ export function createDayNight(
     }
 
     skyMat.color.copy(DAY.skyTint).lerp(NIGHT.skyTint, f)
+    if (groundMat) groundMat.color.copy(DAY.groundTint).lerp(NIGHT.groundTint, f)
     grass.setNight(f)
+
+    // one-shot nightfall pop hook (for the future light-prop + audio "bang")
+    if (!nightfallFired && f > 0.92) {
+      nightfallFired = true
+      nightfallCb?.()
+    } else if (nightfallFired && f < 0.6) {
+      nightfallFired = false // re-arm if we swing back to day (rematch/debug)
+    }
   }
 
   apply()
@@ -93,13 +185,21 @@ export function createDayNight(
     get night() {
       return frac
     },
-    setSurvivors(survivors: number): void {
-      // 6+ players = full day, 3 or fewer = full night, linear between
-      const t = (SURVIVOR_DAY - survivors) / (SURVIVOR_DAY - SURVIVOR_NIGHT)
-      target = Math.max(0, Math.min(1, t))
+    setMatchProgress(survivors: number, seatsAtStart: number): void {
+      if (seatsAtStart < 2) {
+        target = 0
+        return
+      }
+      const nightAt = nightAtSurvivors(seatsAtStart)
+      const denom = Math.max(1, seatsAtStart - nightAt) // elims needed for night
+      const done = seatsAtStart - survivors // elims so far
+      target = Math.max(0, Math.min(1, done / denom))
     },
     setTarget(frac2: number): void {
       target = Math.max(0, Math.min(1, frac2))
+    },
+    onNightfall(cb: () => void): void {
+      nightfallCb = cb
     },
     update(dt: number): void {
       if (Math.abs(target - frac) < 0.0005) {
@@ -109,8 +209,9 @@ export function createDayNight(
         }
         return
       }
-      // exponential ease — dusk falls gradually, never a snap on elimination
-      frac += (target - frac) * Math.min(1, dt * 0.55)
+      // exponential ease — dusk falls gradually, never a snap on elimination;
+      // frame-rate independent (dt-scaled), clamped so a huge dt can't overshoot
+      frac += (target - frac) * Math.min(1, dt * 0.5)
       apply()
     },
   }

@@ -19,6 +19,7 @@ export function createBallView(): BallView {
   const group = new THREE.Group()
 
   const ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 36, 24), makeToonMaterial(PALETTE.ballCream))
+  ball.castShadow = true
   addInkOutline(ball, INK_WEIGHT.character)
   group.add(ball)
 
