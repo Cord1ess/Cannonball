@@ -111,7 +111,7 @@ const ANIM = /* glsl */ `
   vec3 rotY(vec3 p, float a){ float c=cos(a),s=sin(a); return vec3(c*p.x + s*p.z, p.y, -s*p.x + c*p.z); }
 
   vec3 emote(vec3 pos, float part, vec4 seed){
-    float t = uTime * (0.8 + seed.z * 0.7) + seed.x * 6.2831;
+    float t = uTime * (1.8 + seed.z * 1.4) + seed.x * 6.2831;
     // a fan cycles slowly between emotes; which one depends on the seed
     float phase = sin(t * 0.5 + seed.y * 6.2831);
     float cheer = smoothstep(0.4, 0.9, phase);              // BOTH ARMS UP
@@ -230,7 +230,7 @@ function faceMaterial(): THREE.ShaderMaterial {
       varying float vBlink;
       ${ANIM}
       void main() {
-        float t = uTime * (0.8 + aSeed.z * 0.7) + aSeed.x * 6.2831;
+        float t = uTime * (1.8 + aSeed.z * 1.4) + aSeed.x * 6.2831;
         vBlink = step(0.96, sin(t * 3.1 + aSeed.x * 18.0));
         vEye = aEye;
         vec3 pos = emote(position, ${PART_HEAD.toFixed(1)}, aSeed); // rides the head
