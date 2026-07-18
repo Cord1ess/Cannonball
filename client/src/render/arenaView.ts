@@ -409,7 +409,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const ROW_DEPTH = 0.95 // shallower tread → steeper climb, no flat track
   const ROW_RISE = 0.82 // taller riser than tread → the bowl rakes up hard
   const AISLES = 10 // radial walkways cut through the seating
-  const AISLE_HALF = 0.075 // half-angular-width of each aisle
+  const AISLE_HALF = 0.04 // half-angular-width of each aisle (thin)
   const PLINTH_H = 1.15 // low sandy stand the display sits on (lifts ads off the ground)
   const DISPLAY_BAND = 1.5 // the ad band height on top of the plinth
   const STANDS_BASE = PLINTH_H + DISPLAY_BAND // first seat row rests on top of the display
@@ -559,7 +559,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   for (let row = 0; row < ROWS; row++) {
     const rr = rowTops[row]!.r
     const y = rowTops[row]!.y + 0.05
-    const perRow = Math.floor((Math.PI * 2 * rr) / 0.95)
+    const perRow = Math.floor((Math.PI * 2 * rr) / 0.72) // denser packing
     for (let i = 0; i < perRow; i++) {
       const a = ((i + Math.random() * 0.3) / perRow) * Math.PI * 2
       // skip fans sitting in an aisle
@@ -567,10 +567,10 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
       for (let k = 0; k < AISLES; k++) {
         const mid = (k / AISLES) * Math.PI * 2
         let d = Math.abs(((a - mid + Math.PI * 3) % (Math.PI * 2)) - Math.PI)
-        if (d < AISLE_HALF + 0.03) inAisle = true
+        if (d < AISLE_HALF + 0.012) inAisle = true
       }
       if (inAisle) continue
-      if (Math.random() > 0.9) continue // a few empty seats read organic
+      if (Math.random() > 0.97) continue // only the odd empty seat
       const x = Math.cos(a) * (rr + (Math.random() - 0.5) * 0.5)
       const z = Math.sin(a) * (rr + (Math.random() - 0.5) * 0.5)
       seats.push({
