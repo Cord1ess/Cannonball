@@ -5,6 +5,36 @@
 
 ## STATUS: M0–M5a + M5b day→night arc · NEXT UP: rest of M5b (banners, elim-in-stands, faces)
 
+### M5b — real sun, shadows, ground darkening, wind glitch fix (feedback pass)
+- REAL VISIBLE SUN: a soft additive sprite disc (`dayNight.ts`) that ARCS across the sky —
+  high + bright sharp daytime (day sun intensity 1.35) sinking to the horizon and setting as
+  night falls (`sunDirection(frac)`: azimuth swings ~120°, altitude ~54°→~5°). The sun's light +
+  the disc share the arc, so shadows visibly rotate + lengthen across the match.
+- NIGHT DRIVER is now MATCH PROGRESS, not raw survivors: `setMatchProgress(survivors, seatsAtStart)`
+  → target = elimsDone / (seatsAtStart − nightAt), where `nightAt = max(1, seatsAtStart−3)`. So 6p
+  reaches full night at 3 left; 3p/2p stretch the day→night fall across the whole match; ALWAYS
+  opens in day. Lobby/pre-match forced to day. `onNightfall` one-shot hook reserved for the future
+  light-prop + audio "bang" pop.
+- SHADOWS (single 2048² PCF, industry-optimal for mass grass): `renderer.shadowMap.type =
+  PCFShadowMap` (NB r0.185: PCFShadowMap IS the soft Vogel-disk path; PCFSoftShadowMap falls
+  through to hard BASIC). One DirectionalLight caster fitted tight to the pitch (±40, near/far
+  40/360). Casters: bean body+shorts, ball, wall (`castShadow`). The GRASS RECEIVES in-shader —
+  `#include <shadowmap_pars_vertex/_fragment>` + `lights_pars_begin` + `shadowmask_pars_fragment`,
+  `getShadowMask()` × 0.45 into the blade color; ONE shadow-map read per fragment, NO per-blade
+  self-shadow, NO extra draw. Material needs `lights: true` + merged `UniformsLib.lights` (live
+  object uniforms kept OUT of the deep-cloning merge, re-assigned after) + `mesh.receiveShadow=true`.
+  Verified: 0 shader errors, contact + long raking shadows visible day and night.
+- GROUND DARKENS at night: `floorTopMat.color` multiplied toward 0x4a5566 as night falls so the
+  (fine-tuned, bright) pitch tile stops glowing. ONLY the material color multiplier is touched —
+  the texture + its remap pipeline are NEVER modified (still locked, see the ground note).
+- OWN-ZONE GROUND TAG removed for good: guarded by seat AND name (catches stale mySeat / the
+  seat-default-to-0 case) AND unknown owners; the head tag still names you.
+- WIND GLITCH fixed at the ROOT: `windField.step()` returned a COMPACTED `live` array whose indices
+  reshuffled every frame as cells spawned/died — so streak clusters + grass gust patches (bound by
+  index) teleported between unrelated gusts. Now step() returns the FULL fixed pool (index == a
+  STABLE slot, strength 0 when inactive); consumers skip strength-0 slots. With the existing sin-bell
+  strength envelope (0→peak→0) gusts now only fade in on spawn + out on death, never jump.
+
 ### M5b — day → night light arc (first M5b piece, done)
 Survivor-driven: the pitch opens in full daylight and eases toward a dusky moonlit NIGHT,
 reaching FULL night by the time 3 players remain (stays night through the duel). Reset to day
