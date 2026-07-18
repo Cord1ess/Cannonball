@@ -125,13 +125,15 @@ const VERT = /* glsl */ `
       float gf = float(gi);
       float edgeNoise = sin(root.x * 0.5 + gf * 2.1) * 0.14 + sin(root.y * 0.6 - gf * 1.3) * 0.12;
       float nd = gd / (grad * (1.0 + edgeNoise));
-      // soft gaussian bell — gentle everywhere, long tail, no sharp core
-      float infl = exp(-nd * nd * 1.6) * gstr;
+      // gaussian with a firmer body (feathered edge kept via the ragged nd):
+      // tighter exponent so the gust has a defined core, not a flat wash
+      float infl = exp(-nd * nd * 2.6) * gstr;
       if (infl > 0.003) {
-        // a slow rolling ripple within the gust so the front feels like moving
-        // air, not a static push — travels along the gust direction over time
-        float roll = 0.85 + 0.15 * sin(dot(delayed, gDir) * 0.4 - uTime * 2.0);
-        float bend = infl * 1.35 * roll * t * t;
+        // per-blade TURBULENCE so blades thrash/ripple through the gust rather
+        // than all lying down uniformly — a fast flutter + a travelling ripple
+        float turb = sin(uTime * 11.0 + aSeed.x * 40.0) * 0.35
+                   + sin(dot(delayed, gDir) * 0.9 - uTime * 5.0) * 0.4;
+        float bend = infl * 1.5 * (0.75 + 0.45 * turb) * t * t;
         p.xz += gDir * bend;
         p.y *= 1.0 - infl * 0.18 * t;
       }
