@@ -118,7 +118,7 @@ const ANIM = /* glsl */ `
     float wave  = smoothstep(0.4, 0.9, -phase) * (0.5 + 0.5*sin(t*3.0)); // ONE-ARM WAVE
     float jump  = max(0.0, sin(t * 1.7 + seed.y * 3.0));    // little JUMPS
     jump = jump * jump * jump * 0.35 * step(0.6, seed.w);   // only some fans jump
-    float look  = sin(t * 0.6 + seed.w * 6.2831) * 0.5;     // head turn L/R
+    float look  = sin(t * 0.6 + seed.w * 6.2831) * 0.28;     // head turn L/R
     float bob   = sin(t * 2.0) * 0.03 + cheer * 0.1;
 
     vec3 p = pos;
@@ -205,13 +205,14 @@ function faceGeometry(): THREE.BufferGeometry {
     g.setAttribute('aEye', new THREE.BufferAttribute(a, 1))
     return g
   }
-  // face plate: a thin cream box on the front of the upper body (matches bean)
+  // face plate: a thin cream box, pushed a touch PROUD of the body front so it
+  // never z-fights / clips into the torso colour when the head turns.
   const plate = new THREE.BoxGeometry(0.5, 0.42, 0.05)
-  plate.translate(0, 0.98, 0.33)
+  plate.translate(0, 0.98, 0.4)
   parts.push(tag(plate, 0))
   for (const side of [-1, 1]) {
     const eye = new THREE.BoxGeometry(0.08, 0.16, 0.03)
-    eye.translate(side * 0.11, 0.98, 0.362)
+    eye.translate(side * 0.11, 0.98, 0.43)
     parts.push(tag(eye, 1))
   }
   const merged = mergeGeometries(parts)
@@ -221,6 +222,10 @@ function faceGeometry(): THREE.BufferGeometry {
 
 function faceMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
+    // bias the face toward the camera so it always wins over the body it sits on
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
     uniforms: { uTime: { value: 0 } },
     vertexShader: /* glsl */ `
       attribute float aEye;

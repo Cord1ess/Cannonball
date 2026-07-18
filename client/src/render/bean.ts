@@ -162,16 +162,7 @@ export function createBean(appearance: number | KitColors): Bean {
     rig.add(eye)
   }
 
-  // blob shadow (on group so it never inherits rig tilt)
-  const blobMat = new THREE.MeshBasicMaterial({
-    color: PALETTE.shadowShape,
-    transparent: true,
-    opacity: 0.55,
-    depthWrite: false,
-  })
-  const blob = new THREE.Mesh(new THREE.CircleGeometry(0.5, 20), blobMat)
-  blob.rotation.x = -Math.PI / 2
-  group.add(blob)
+  // (no fake blob shadow — the real cast shadow grounds the bean now)
 
   // --- animation state -----------------------------------------------------------
 
@@ -307,9 +298,6 @@ export function createBean(appearance: number | KitColors): Bean {
         eye.scale.y = eyeScaleY
       }
 
-      // blob shadow stays on the floor, fades with height
-      blob.position.y = 0.03 - pose.y
-      blobMat.opacity = Math.max(0.12, 0.55 - pose.y * 0.18)
     },
     dispose(): void {
       disposeHierarchy(group)
