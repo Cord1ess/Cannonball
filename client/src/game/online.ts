@@ -36,7 +36,7 @@ import {
   createMemorySaveStore,
   type SaveStore,
 } from '@vendor/platform/save-data.ts'
-import { createArenaView, type ArenaView } from '../render/arenaView.ts'
+import { createArenaView, type ArenaView, type WorldLighting } from '../render/arenaView.ts'
 import type { GrassBody } from '../render/grass.ts'
 import type { WindMark } from '../render/windMarks.ts'
 import { createBallView, type BallView } from '../render/ballView.ts'
@@ -191,18 +191,21 @@ export function createOnlineGame(
   camera: ChaseCamera,
   _hud: Hud,
   conn: Connection,
+  lighting?: WorldLighting,
 ): OnlineGame {
   const state = conn.room.state as unknown as NetStateRead
 
   let arena: Arena = makeArena(6)
   // the colosseum is permanent — only its painted zone layer morphs
-  const arenaView: ArenaView = createArenaView(arena.radius)
+  const arenaView: ArenaView = createArenaView(arena.radius, lighting)
   scene.add(arenaView.group)
   camera.setArenaRadius(arena.radius) // keep the chase cam inside the wall
   let arenaKey = ''
 
   const ballView: BallView = createBallView()
   scene.add(ballView.group)
+
+  let nightDebug = false // debug: forced night preview (client-only)
 
   // --- local player ------------------------------------------------------------
   let mySeat = -1
@@ -977,6 +980,11 @@ export function createOnlineGame(
       }
       arenaView.setDanger(fracs)
 
+      // DAY -> NIGHT arc: driven by live survivors during a match (full night at
+      // 3), forced back to full day in the lobby/pre-match so a fresh match
+      // always opens in daylight.
+      arenaView.setSurvivors(isPlayPhase(state.phase ?? 0) ? (state.survivors || 6) : 6)
+
       // OWN-ZONE ALARM: ball sitting in MY wedge -> blink that wedge + prompt
       const ballZone = footprintZone(arena, ball.x, ball.z)
       const myZoneUnderBall =
@@ -1048,6 +1056,13 @@ export function createOnlineGame(
     debug: {
       label: 'online',
       send(cmd: string): void {
+        // nightCycle is a CLIENT-ONLY visual preview of the day->night arc —
+        // handled locally, never sent to the server (it changes no game state).
+        if (cmd === 'nightCycle') {
+          nightDebug = !nightDebug
+          arenaView.debugForceNight(nightDebug)
+          return
+        }
         conn.send('debug', { cmd })
       },
       info(): Record<string, string | number> {

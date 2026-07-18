@@ -5,6 +5,7 @@ import type { Arena } from '@shared/sim/arena.ts'
 import { yawTowardCenter } from '@shared/sim/arena.ts'
 import { KITS } from '@shared/cosmetics/jerseys.ts'
 import { createGrassField, type GrassBody, type GrassField, type GustCell } from './grass.ts'
+import { createDayNight, type DayNight } from './dayNight.ts'
 import { createWindField, type WindField } from './windField.ts'
 import { createWindStreaks, type StreakCell, type WindStreaks } from './windStreaks.ts'
 import { createWindMarks, type WindMark, type WindMarks } from './windMarks.ts'
@@ -19,10 +20,22 @@ import { PALETTE } from './palette.ts'
  * heat) + a cannon rebuild + a crowd recolor — no geometry churn.
  */
 
+/** the scene lighting the day->night arc drives (owned by main.ts). */
+export interface WorldLighting {
+  scene: THREE.Scene
+  sun: THREE.DirectionalLight
+  hemi: THREE.HemisphereLight
+  sky: THREE.Mesh
+}
+
 export interface ArenaView {
   readonly group: THREE.Group
   /** repaint the floor divisions + cannons + home-fan sections */
   setZones(arena: Arena, zoneColors: readonly number[]): void
+  /** survivor count → target of the day->night arc (full night at <=3) */
+  setSurvivors(survivors: number): void
+  /** debug: force full night on/off, overriding the survivor-driven arc */
+  debugForceNight(on: boolean): void
   /** meterFrac per zone [0..1] heats that wedge's grass */
   setDanger(fracs: readonly number[]): void
   /** blink one zone red (ball in your own wedge); zone=-1 off, pulse 0..1 */
@@ -116,7 +129,7 @@ const FAN_COLORS: readonly number[] = [
   PALETTE.uiGold,
 ]
 
-export function createArenaView(radius = 28): ArenaView {
+export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaView {
   const group = new THREE.Group()
   const neutralRadius = radius * 0.15
 
@@ -244,6 +257,13 @@ export function createArenaView(radius = 28): ArenaView {
   // THE PITCH — instanced stadium grass; zones/chalk/danger live in its shader
   const grass = createGrassField(radius, neutralRadius)
   group.add(grass.mesh)
+
+  // day -> night arc: eases the sun/hemi/fog/sky + the unlit grass toward
+  // night as survivors thin out (full night at 3). Null in contexts that
+  // didn't pass scene lighting (kept working for older call sites).
+  const dayNight: DayNight | null = lighting
+    ? createDayNight(lighting.scene, lighting.sun, lighting.hemi, lighting.sky, grass)
+    : null
 
   // wind: localized travelling GUST CELLS drive both the grass bend and the
   // streaks, so gusts appear in small areas, whiz past, and disappear
@@ -428,6 +448,7 @@ export function createArenaView(radius = 28): ArenaView {
   }
 
   let elapsed = 0
+  let forceNight = false // debug override of the survivor-driven arc
 
   return {
     group,
@@ -440,6 +461,15 @@ export function createArenaView(radius = 28): ArenaView {
       for (let zone = 0; zone < arena.seats; zone++) {
         cannonsGroup.add(buildCannon(arena.zoneAngles[zone] ?? 0, zoneColors[zone] ?? PALETTE.warmGray))
       }
+    },
+
+    setSurvivors(survivors: number): void {
+      if (!forceNight) dayNight?.setSurvivors(survivors)
+    },
+
+    debugForceNight(on: boolean): void {
+      forceNight = on
+      dayNight?.setTarget(on ? 1 : 0)
     },
 
     setDanger(fracs: readonly number[]): void {
@@ -456,6 +486,7 @@ export function createArenaView(radius = 28): ArenaView {
 
     update(dt: number): void {
       elapsed += dt
+      dayNight?.update(dt)
       const cells = windField.step(dt)
       const dx = windField.dirX
       const dz = windField.dirZ

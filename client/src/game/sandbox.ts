@@ -27,7 +27,7 @@ import {
   type PlayerSim,
 } from '@shared/sim/physics.ts'
 import { Random } from '@vendor/scheduler/random.ts'
-import { createArenaView, type ArenaView } from '../render/arenaView.ts'
+import { createArenaView, type ArenaView, type WorldLighting } from '../render/arenaView.ts'
 import { createBallView, type BallView } from '../render/ballView.ts'
 import { createBean, type Bean } from '../render/bean.ts'
 import { PALETTE } from '../render/palette.ts'
@@ -73,11 +73,16 @@ export interface Sandbox {
   readonly debug: DebugHooks
 }
 
-export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud): Sandbox {
+export function createSandbox(
+  scene: THREE.Scene,
+  camera: ChaseCamera,
+  hud: Hud,
+  lighting?: WorldLighting,
+): Sandbox {
   const rng = new Random('cannonball-sandbox')
 
   let arena: Arena = makeArena(SEATS)
-  const arenaView: ArenaView = createArenaView(arena.radius)
+  const arenaView: ArenaView = createArenaView(arena.radius, lighting)
   scene.add(arenaView.group)
   let zoneSeat: number[] = []
   const alive: boolean[] = new Array(SEATS).fill(true)
@@ -86,6 +91,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
   let eliminations = 0
   let gameOver = false
   let windOn = WIND_ENABLED
+  let nightDebug = false // debug: forced night preview
 
   const players: PlayerSim[] = []
   const beans: Bean[] = []
@@ -241,6 +247,7 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
 
       const interval = TICK_SECONDS_PER_SURVIVOR * survivors
       arenaView.setDanger(zoneSeat.map((seat) => (meters[seat] ?? 0) / Math.max(1, interval * 0.5)))
+      arenaView.setSurvivors(survivors) // day -> night as the sandbox thins out
 
       // grass parts around the player + ball (sandbox test path)
       const bodies = []
@@ -286,7 +293,10 @@ export function createSandbox(scene: THREE.Scene, camera: ChaseCamera, hud: Hud)
           ball.y = BALL_RADIUS + 3
           ball.vx = ball.vy = ball.vz = 0
         } else if (cmd === 'windToggle') windOn = !windOn
-        else if (cmd === 'elimMe') {
+        else if (cmd === 'nightCycle') {
+          nightDebug = !nightDebug
+          arenaView.debugForceNight(nightDebug)
+        } else if (cmd === 'elimMe') {
           gameOver = true
           hud.showEnd('ELIMINATED (debug)\npress R to run it back')
         }

@@ -50,6 +50,8 @@ export interface GrassField {
   setDanger(fracs: readonly number[]): void
   /** blink a zone red (ball in your own wedge); zone=-1 off, pulse 0..1 */
   setAlarm(zone: number, pulse: number): void
+  /** day->night arc for the pitch (unlit): 0 = day .. 1 = night */
+  setNight(frac: number): void
   /** feed the bodies that flatten grass this frame (players + ball) */
   setBodies(bodies: readonly GrassBody[]): void
   /** feed the active localized gust cells this frame */
@@ -188,6 +190,7 @@ const FRAG = /* glsl */ `
   uniform float uDanger[${MAX_ZONES}];
   uniform float uAlarmZone; // -1 = none, else the zone index that blinks
   uniform float uAlarmPulse; // 0..1 blink phase
+  uniform float uNight; // 0 = day .. 1 = night (grass is unlit → tint here)
 
   varying float vT;
   varying float vColorVar;
@@ -267,6 +270,15 @@ const FRAG = /* glsl */ `
     // trodden blades read a touch darker (pressed, in shadow)
     col *= 1.0 - vFlat * 0.22;
 
+    // NIGHT FALL: the grass is unlit, so the day->night arc is applied here.
+    // Deepen + cool the turf and pull it toward a dusky blue moonlit shade;
+    // tips keep a sliver more light than roots so blades still read at night.
+    if (uNight > 0.001) {
+      vec3 moon = col * vec3(0.34, 0.42, 0.62); // cool, dim moonlit turf
+      moon *= 0.55 + 0.45 * vT;                 // tips catch a little moonlight
+      col = mix(col, moon, uNight);
+    }
+
     gl_FragColor = vec4(col, 1.0);
   }
 `
@@ -328,6 +340,7 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
       uDanger: { value: new Array(MAX_ZONES).fill(0) },
       uAlarmZone: { value: -1 },
       uAlarmPulse: { value: 0 },
+      uNight: { value: 0 },
       uBodies: { value: bodies },
       uBodyCount: { value: 0 },
       uGusts: { value: gusts },
@@ -354,6 +367,9 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
     setAlarm(zone: number, pulse: number): void {
       material.uniforms.uAlarmZone!.value = zone
       material.uniforms.uAlarmPulse!.value = pulse
+    },
+    setNight(frac: number): void {
+      material.uniforms.uNight!.value = frac
     },
     setBodies(list: readonly GrassBody[]): void {
       const n = Math.min(MAX_BODIES, list.length)

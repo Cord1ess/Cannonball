@@ -14,7 +14,7 @@ export interface DebugHooks {
   label: string
   /** debug commands: skipPhase | resetRound | resetLobby | winMe | elimMe |
    *  botPlus | botMinus | clearBots | freeze | addTime | subTime | resetScore |
-   *  slowmo | ballToMe | resetBall | windToggle */
+   *  slowmo | ballToMe | resetBall | windToggle | nightCycle */
   send(cmd: string): void
   /** per-frame stats, rendered in the panel */
   info(): Record<string, string | number>
@@ -68,6 +68,10 @@ const GROUPS: ReadonlyArray<{ title: string; btns: DbgBtn[] }> = [
       { label: 'reset ball', cmd: 'resetBall' },
       { label: 'toggle wind', cmd: 'windToggle', toggle: true },
     ],
+  },
+  {
+    title: 'world',
+    btns: [{ label: 'night ↔ day', cmd: 'nightCycle', toggle: true }],
   },
 ]
 

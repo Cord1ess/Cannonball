@@ -13,6 +13,7 @@ import { connect, currentServerUrl, saveServerUrl } from './net/connection.ts'
 import { createGrainOverlay } from './render/grain.ts'
 import { PALETTE } from './render/palette.ts'
 import { makeSky } from './render/sky.ts'
+import type { WorldLighting } from './render/arenaView.ts'
 
 /**
  * M2: online by default (server-authoritative, predicted), `?offline` for
@@ -61,11 +62,16 @@ document.body.appendChild(pipFrame)
 
 const scene = new THREE.Scene()
 scene.fog = new THREE.Fog(PALETTE.horizonCream, 60, 240)
-scene.add(new THREE.HemisphereLight(0xdcefe8, 0xcbbfa6, 0.95))
+const hemi = new THREE.HemisphereLight(0xdcefe8, 0xcbbfa6, 0.95)
+scene.add(hemi)
 const sun = new THREE.DirectionalLight(0xfff3e0, 0.85)
 sun.position.set(6, 10, 4)
 scene.add(sun)
-scene.add(makeSky())
+const sky = makeSky()
+scene.add(sky)
+// bundle the world lighting the day->night arc drives (owned here, passed
+// into the game so its arenaView can ease it toward night as players drop)
+const lighting: WorldLighting = { scene, sun, hemi, sky }
 
 // --- game boot -----------------------------------------------------------------------
 
@@ -78,16 +84,16 @@ const time = new Time()
 let game: Sandbox | OnlineGame
 const wantOffline = new URLSearchParams(location.search).has('offline')
 if (wantOffline) {
-  game = createSandbox(scene, chase, hud)
+  game = createSandbox(scene, chase, hud, lighting)
   console.log('[cannonball] offline sandbox mode')
 } else {
   try {
     const conn = await connect()
-    game = createOnlineGame(scene, chase, hud, conn)
+    game = createOnlineGame(scene, chase, hud, conn, lighting)
     console.log(`[cannonball] online — session ${conn.sessionId}`)
   } catch (error) {
     console.warn('[cannonball] server unreachable, falling back to offline sandbox', error)
-    game = createSandbox(scene, chase, hud)
+    game = createSandbox(scene, chase, hud, lighting)
     // make the fallback IMPOSSIBLE to miss, and let a FRIEND fix the server
     // address right here (their tunnel URL) + retry, without editing any files
     const bar = document.createElement('div')
