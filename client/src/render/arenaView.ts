@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { WALL_HEIGHT } from '@shared/constants.ts'
 import type { Arena } from '@shared/sim/arena.ts'
 import { yawTowardCenter } from '@shared/sim/arena.ts'
@@ -9,6 +8,7 @@ import { createDayNight, type DayNight } from './dayNight.ts'
 import { createWindField, type WindField } from './windField.ts'
 import { createWindStreaks, type StreakCell, type WindStreaks } from './windStreaks.ts'
 import { createWindMarks, type WindMark, type WindMarks } from './windMarks.ts'
+import { createCrowd, type CrowdSeat } from './crowd.ts'
 import { addInkOutline, disposeHierarchy, INK_WEIGHT, makeToonMaterial } from './materials.ts'
 import { PALETTE } from './palette.ts'
 
@@ -54,7 +54,6 @@ export interface ArenaView {
 }
 
 const SEGMENTS = 64
-const TIERS = 5
 
 /** A fully-configured tiling ground texture from an ALREADY-painted canvas.
  *  Built atomically (fresh CanvasTexture, needsUpdate implicit) so it never
@@ -80,47 +79,29 @@ function ringGeometry(inner: number, outer: number, height: number): THREE.Extru
   return geo
 }
 
-/** The spectator bean: the player silhouette (torso stack + arms), merged. */
-function crowdBeanGeometry(): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = []
-  const rows: ReadonlyArray<readonly [number, number]> = [
-    [0.88, 0.22],
-    [0.86, 0.26],
-    [0.76, 0.26],
-    [0.58, 0.2],
-  ]
-  let y = 0.46
-  for (const [rw, rh] of rows) {
-    const box = new THREE.BoxGeometry(rw, rh, rw * 0.8)
-    box.translate(0, y + rh / 2, 0)
-    parts.push(box)
-    y += rh
-  }
-  for (const side of [-1, 1]) {
-    const arm = new THREE.BoxGeometry(0.16, 0.44, 0.2)
-    arm.translate(side * 0.52, 0.78, 0)
-    parts.push(arm)
-  }
-  const merged = mergeGeometries(parts)
-  for (const part of parts) part.dispose()
-  return merged
-}
-
-/** Cream face plate with two ink eyes, baked into one little texture. */
-function crowdFaceTexture(): THREE.CanvasTexture {
-  const size = 64
+/** Thin net weave: a transparent tile of fine ink lines for the pitch barrier. */
+function netTexture(): THREE.CanvasTexture {
+  const s = 128
   const canvas = document.createElement('canvas')
-  canvas.width = size
-  canvas.height = size
+  canvas.width = canvas.height = s
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('2d canvas unavailable')
-  ctx.fillStyle = '#fbf6e8'
-  ctx.fillRect(4, 8, size - 8, size - 16)
-  ctx.fillStyle = '#1c1a18'
-  ctx.fillRect(size * 0.3 - 3, size * 0.32, 7, 18)
-  ctx.fillRect(size * 0.7 - 3, size * 0.32, 7, 18)
+  ctx.clearRect(0, 0, s, s)
+  ctx.strokeStyle = 'rgba(40,38,34,0.85)'
+  ctx.lineWidth = 1.4
+  const step = s / 9
+  for (let i = 0; i <= 9; i++) {
+    ctx.beginPath()
+    ctx.moveTo(i * step, 0)
+    ctx.lineTo(i * step, s)
+    ctx.moveTo(0, i * step)
+    ctx.lineTo(s, i * step)
+    ctx.stroke()
+  }
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+  tex.repeat.set(80, 3) // fine mesh around the ring, short (a couple rows tall)
   return tex
 }
 
@@ -130,6 +111,139 @@ const FAN_COLORS: readonly number[] = [
   PALETTE.offWhite,
   PALETTE.uiGold,
 ]
+
+/** Stadium art-style palette — warm, colourful, in-style (no flat off-white). */
+const STADIUM = {
+  frame: 0xcbb489, // warm sandy structural frame (boards/kicker/rim base)
+  rail: 0x7a6f5c, // muted taupe rails/posts
+  aisle: 0xe7ddc4, // pale walkway strips
+  // seat-block tones cycled up the rake: teal/coral/butter/sage/rose/sky bands
+  seatTones: [0x6fb2ac, 0xe08a6e, 0xf0c97a, 0x8bb87e, 0xd98f8f, 0x6f9ec2],
+} as const
+
+interface FlagField {
+  group: THREE.Group
+  update(t: number): void
+}
+
+/** A ring of WAVING team flags on poles around the rim, waved in the vertex
+ *  shader (one instanced draw, one uniform/frame — no CPU cost). */
+function createFlags(ringR: number, baseY: number): FlagField {
+  const group = new THREE.Group()
+  const N = 24
+  // poles
+  const poleGeo = new THREE.CylinderGeometry(0.08, 0.08, 4.2, 6)
+  poleGeo.translate(0, 2.1, 0)
+  const poles = new THREE.InstancedMesh(poleGeo, makeToonMaterial(PALETTE.ink), N)
+  poles.frustumCulled = false
+
+  // flag cloth: a small grid so the shader can ripple it
+  const COLS = 8
+  const ROWS = 5
+  const flagGeo = new THREE.PlaneGeometry(1.7, 1.05, COLS, ROWS)
+  flagGeo.translate(0.85, 3.4, 0) // hang from the top of the pole, extend +x
+  const flagMat = new THREE.ShaderMaterial({
+    side: THREE.DoubleSide,
+    uniforms: { uTime: { value: 0 } },
+    vertexShader: /* glsl */ `
+      attribute vec3 aColor;
+      attribute float aPhase;
+      varying vec3 vColor;
+      uniform float uTime;
+      void main() {
+        vColor = aColor;
+        vec3 p = position;
+        // ripple grows toward the free (outer) edge of the flag
+        float edge = clamp((position.x - 0.0) / 1.7, 0.0, 1.0);
+        float w = sin(position.x * 3.5 - uTime * 6.0 + aPhase) * 0.22
+                + sin(position.y * 4.0 + uTime * 4.0 + aPhase) * 0.1;
+        p.z += w * edge;
+        p.y += w * 0.25 * edge;
+        gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(p, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      precision mediump float;
+      varying vec3 vColor;
+      void main() { gl_FragColor = vec4(vColor, 1.0); }
+    `,
+  })
+  const flags = new THREE.InstancedMesh(flagGeo, flagMat, N)
+  flags.frustumCulled = false
+
+  const instColor = new Float32Array(N * 3)
+  const instPhase = new Float32Array(N)
+  const m = new THREE.Matrix4()
+  const q = new THREE.Quaternion()
+  const up = new THREE.Vector3(0, 1, 0)
+  const col = new THREE.Color()
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2
+    const x = Math.cos(a) * ringR
+    const z = Math.sin(a) * ringR
+    q.setFromAxisAngle(up, yawTowardCenter(x, z) + Math.PI / 2)
+    m.compose(new THREE.Vector3(x, baseY, z), q, new THREE.Vector3(1, 1, 1))
+    poles.setMatrixAt(i, m)
+    flags.setMatrixAt(i, m)
+    col.setHex(FAN_COLORS[i % FAN_COLORS.length]!)
+    instColor[i * 3] = col.r
+    instColor[i * 3 + 1] = col.g
+    instColor[i * 3 + 2] = col.b
+    instPhase[i] = (i * 1.7) % 6.28
+  }
+  poles.instanceMatrix.needsUpdate = true
+  flags.instanceMatrix.needsUpdate = true
+  // wire the per-instance color/phase as instanced attributes the shader reads
+  flagGeo.setAttribute('aColor', new THREE.InstancedBufferAttribute(instColor, 3))
+  flagGeo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(instPhase, 1))
+  group.add(poles, flags)
+
+  return {
+    group,
+    update(t: number): void {
+      flagMat.uniforms.uTime!.value = t
+    },
+  }
+}
+
+/** A tall floodlight tower: pole + a lamp bank of little bright cells + a soft
+ *  beam sprite. Static geometry (cheap); the lamps brighten at night via the
+ *  material already reacting to the scene light. */
+function buildLightTower(x: number, z: number, baseY: number): THREE.Group {
+  const tower = new THREE.Group()
+  tower.position.set(x, baseY, z)
+  tower.rotation.y = yawTowardCenter(x, z)
+
+  const H = 22
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.42, H, 8), makeToonMaterial(PALETTE.ink))
+  pole.geometry.translate(0, H / 2, 0)
+  pole.castShadow = true
+  addInkOutline(pole, INK_WEIGHT.prop)
+  tower.add(pole)
+
+  // lamp bank head: a boxy panel of bright cells tilted toward the pitch
+  const head = new THREE.Group()
+  head.position.set(0, H, 0.3)
+  head.rotation.x = 0.5
+  const backing = new THREE.Mesh(new THREE.BoxGeometry(4.0, 2.4, 0.4), makeToonMaterial(PALETTE.ink))
+  addInkOutline(backing, INK_WEIGHT.prop)
+  head.add(backing)
+  const lampGeo = new THREE.CircleGeometry(0.36, 10)
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff3c8 }) // always-bright bulbs
+  const lamps = new THREE.InstancedMesh(lampGeo, lampMat, 12)
+  const lm = new THREE.Matrix4()
+  let k = 0
+  for (let ry = 0; ry < 3; ry++) {
+    for (let rx = 0; rx < 4; rx++) {
+      lm.makeTranslation(-1.5 + rx * 1.0, -0.8 + ry * 0.8, 0.22)
+      lamps.setMatrixAt(k++, lm)
+    }
+  }
+  lamps.instanceMatrix.needsUpdate = true
+  head.add(lamps)
+  tower.add(head)
+  return tower
+}
 
 export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaView {
   const group = new THREE.Group()
@@ -281,144 +395,166 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const gustScratch: GustCell[] = []
   const streakScratch: StreakCell[] = []
 
-  // seamless ring wall the players bounce off
-  const wall = new THREE.Mesh(ringGeometry(radius, radius + 1.8, WALL_HEIGHT), makeToonMaterial(PALETTE.warmGray))
+  // seamless ring wall the players bounce off (short kickboard at pitch edge)
+  const wall = new THREE.Mesh(ringGeometry(radius, radius + 0.9, WALL_HEIGHT), makeToonMaterial(PALETTE.warmGray))
   wall.castShadow = true
   wall.receiveShadow = true
   addInkOutline(wall, INK_WEIGHT.arena)
   group.add(wall)
 
-  // five stepped audience tiers, each with a parapet lip, + a tall outer rim
-  const tierTops: Array<{ inner: number; outer: number; top: number }> = []
-  for (let tier = 0; tier < TIERS; tier++) {
-    const inner = radius + 1.8 + tier * 2.5
-    const outer = inner + 2.5
-    const top = WALL_HEIGHT + 1.0 + tier * 1.35
-    tierTops.push({ inner, outer, top })
-    const ring = new THREE.Mesh(
-      ringGeometry(inner, outer, top),
-      makeToonMaterial(tier % 2 === 0 ? PALETTE.warmGray : PALETTE.greenGray),
+  // --- DISPLAY BOARD ring: a continuous perimeter display all around the pitch
+  // right at the field edge (the digital signs mount here later). One solid ring
+  // wall with a dark screen face toward the pitch — no gaps, reads as an LED band.
+  const BOARD_INNER = radius + 0.95
+  const BOARD_H = 1.3
+  const boardBack = new THREE.Mesh(
+    ringGeometry(BOARD_INNER, BOARD_INNER + 0.28, BOARD_H),
+    makeToonMaterial(STADIUM.frame),
+  )
+  boardBack.position.y = WALL_HEIGHT - 0.2
+  addInkOutline(boardBack, INK_WEIGHT.arena)
+  group.add(boardBack)
+  // the screen face: an inner cylinder shell, dark "LED" panel toward the pitch
+  const screen = new THREE.Mesh(
+    new THREE.CylinderGeometry(BOARD_INNER - 0.02, BOARD_INNER - 0.02, BOARD_H - 0.24, SEGMENTS, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x2b3038, side: THREE.BackSide }),
+  )
+  screen.position.y = WALL_HEIGHT - 0.2 + BOARD_H / 2
+  group.add(screen)
+
+  // --- protective NET right behind the display: SHORT + THIN, reads as a fence
+  // keeping the ball in without walling off the view -------------------------
+  const NET_R = radius + 1.35
+  const NET_H = 4.6 // shorter
+  const netGeo = new THREE.CylinderGeometry(NET_R, NET_R, NET_H, SEGMENTS, 1, true)
+  const netMat = new THREE.MeshBasicMaterial({
+    map: netTexture(),
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    opacity: 0.42,
+  })
+  const net = new THREE.Mesh(netGeo, netMat)
+  net.position.y = WALL_HEIGHT + NET_H / 2 - 0.2
+  net.renderOrder = 3
+  group.add(net)
+  // thin top rail so the net reads as a real fence (thinner than before)
+  const rail = new THREE.Mesh(
+    new THREE.TorusGeometry(NET_R, 0.035, 5, SEGMENTS),
+    makeToonMaterial(STADIUM.rail),
+  )
+  rail.rotation.x = Math.PI / 2
+  rail.position.y = WALL_HEIGHT + NET_H - 0.2
+  group.add(rail)
+
+  // --- the STANDS: raked seating rising DIRECTLY from behind the net (no gap,
+  // no flat track ring) — the rake climbs STEEPLY right from the fence -------
+  const STANDS_INNER = radius + 1.7 // seating starts right at the fence
+  const ROWS = 16 // seating rows (the rake)
+  const ROW_DEPTH = 0.95 // shallower tread → steeper climb, no flat track
+  const ROW_RISE = 0.82 // taller riser than tread → the bowl rakes up hard
+  const AISLES = 10 // radial walkways cut through the seating
+  const AISLE_HALF = 0.075 // half-angular-width of each aisle
+  const STANDS_BASE = WALL_HEIGHT + 0.9 // first row already up at the net top
+
+  // each seating row is a stepped ring (riser + tread) — the classic rake.
+  // rows cycle through a set of ART-STYLE seat-block colours so the bowl reads
+  // colourful + alive instead of flat off-white.
+  const SEAT_TONES = STADIUM.seatTones
+  const rowTops: Array<{ r: number; y: number }> = []
+  for (let row = 0; row < ROWS; row++) {
+    const inner = STANDS_INNER + row * ROW_DEPTH
+    const y = STANDS_BASE + row * ROW_RISE
+    rowTops.push({ r: inner + ROW_DEPTH * 0.5, y })
+    const step = new THREE.Mesh(
+      ringGeometry(inner, inner + ROW_DEPTH + 0.05, y + ROW_RISE),
+      makeToonMaterial(SEAT_TONES[row % SEAT_TONES.length]!),
     )
-    addInkOutline(ring, INK_WEIGHT.arena)
-    group.add(ring)
-    const parapet = new THREE.Mesh(ringGeometry(inner, inner + 0.35, top + 0.55), makeToonMaterial(PALETTE.greenGray))
-    group.add(parapet)
+    step.receiveShadow = true
+    group.add(step)
   }
-  const rimInner = radius + 1.8 + TIERS * 2.5
-  const rimTop = WALL_HEIGHT + 1.0 + TIERS * 1.35 + 1.9
-  const rim = new THREE.Mesh(ringGeometry(rimInner, rimInner + 1.3, rimTop), makeToonMaterial(PALETTE.warmGray))
+  // aisle strips: pale radial wedges laid over the rake so walkways read
+  {
+    const aisleMat = makeToonMaterial(STADIUM.aisle)
+    for (let a = 0; a < AISLES; a++) {
+      const mid = (a / AISLES) * Math.PI * 2
+      const shape = new THREE.Shape()
+      const r0 = STANDS_INNER - 0.1
+      const r1 = STANDS_INNER + ROWS * ROW_DEPTH + 0.3
+      const w = AISLE_HALF
+      shape.moveTo(Math.cos(mid - w) * r0, Math.sin(mid - w) * r0)
+      shape.lineTo(Math.cos(mid - w) * r1, Math.sin(mid - w) * r1)
+      shape.lineTo(Math.cos(mid + w) * r1, Math.sin(mid + w) * r1)
+      shape.lineTo(Math.cos(mid + w) * r0, Math.sin(mid + w) * r0)
+      shape.closePath()
+      const geo = new THREE.ShapeGeometry(shape)
+      geo.rotateX(-Math.PI / 2)
+      const strip = new THREE.Mesh(geo, aisleMat)
+      strip.position.y = STANDS_BASE - 0.05
+      strip.rotation.x = -0.62 // tilt up to follow the steeper rake
+      group.add(strip)
+    }
+  }
+  // tall outer rim wall behind the top row — where cannons/flags/lights mount
+  const rimInner = STANDS_INNER + ROWS * ROW_DEPTH + 0.3
+  const rimTop = STANDS_BASE + ROWS * ROW_RISE + 1.6
+  const rim = new THREE.Mesh(ringGeometry(rimInner, rimInner + 1.4, rimTop), makeToonMaterial(STADIUM.frame))
+  rim.castShadow = true
   addInkOutline(rim, INK_WEIGHT.arena)
   group.add(rim)
 
-  // pennant flags around the crown
-  const FLAGS = 20
-  const poleGeo = new THREE.CylinderGeometry(0.07, 0.07, 2.6, 6)
-  poleGeo.translate(0, 1.3, 0)
-  const poles = new THREE.InstancedMesh(poleGeo, makeToonMaterial(PALETTE.ink), FLAGS)
-  const flagGeo = new THREE.BufferGeometry()
-  flagGeo.setAttribute(
-    'position',
-    new THREE.Float32BufferAttribute([0, 2.5, 0, 0, 1.9, 0, 1.15, 2.2, 0], 3),
-  )
-  flagGeo.setIndex([0, 1, 2])
-  flagGeo.computeVertexNormals()
-  const flags = new THREE.InstancedMesh(
-    flagGeo,
-    new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
-    FLAGS,
-  )
-  poles.frustumCulled = flags.frustumCulled = false
-  {
-    const m = new THREE.Matrix4()
-    const q = new THREE.Quaternion()
-    const up = new THREE.Vector3(0, 1, 0)
-    const color = new THREE.Color()
-    for (let i = 0; i < FLAGS; i++) {
-      const a = ((i + 0.5) / FLAGS) * Math.PI * 2
-      const x = Math.cos(a) * (rimInner + 0.65)
-      const z = Math.sin(a) * (rimInner + 0.65)
-      q.setFromAxisAngle(up, yawTowardCenter(x, z) + Math.PI / 2)
-      m.compose(new THREE.Vector3(x, rimTop, z), q, new THREE.Vector3(1, 1, 1))
-      poles.setMatrixAt(i, m)
-      flags.setMatrixAt(i, m)
-      color.setHex(FAN_COLORS[i % FAN_COLORS.length]!)
-      flags.setColorAt(i, color)
-    }
-    poles.instanceMatrix.needsUpdate = true
-    flags.instanceMatrix.needsUpdate = true
-    if (flags.instanceColor) flags.instanceColor.needsUpdate = true
-  }
-  group.add(poles, flags)
+  // --- waving team FLAGS ringing the rim crown --------------------------------
+  const flagField = createFlags(rimInner + 0.9, rimTop)
+  group.add(flagField.group)
 
-  // --- the crowd: BEAN spectators in team jerseys ------------------------------
-  // placement first, then two instanced draws sharing transforms (body + face)
-  const placements: Array<{ x: number; z: number; y: number; yaw: number; s: number; angle: number; pick: number }> = []
-  for (const tier of tierTops) {
-    const r = (tier.inner + tier.outer) / 2
-    const count = Math.floor((Math.PI * 2 * r) / 1.05)
-    for (let i = 0; i < count; i++) {
-      if (Math.random() > 0.85) continue // empty seats read organic
-      const a = ((i + Math.random() * 0.55) / count) * Math.PI * 2
-      const x = Math.cos(a) * (r + (Math.random() - 0.5) * 1.3)
-      const z = Math.sin(a) * (r + (Math.random() - 0.5) * 1.3)
-      placements.push({
+  // --- 4 tall LIGHT TOWERS at the cardinal corners (beams + lamp banks) --------
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4 // corners, between the goals
+    const tx = Math.cos(a) * (rimInner + 2.2)
+    const tz = Math.sin(a) * (rimInner + 2.2)
+    group.add(buildLightTower(tx, tz, rimTop))
+  }
+
+  // --- the crowd: GPU-animated fans on the rake, skipping the aisles ----------
+  const seats: CrowdSeat[] = []
+  for (let row = 0; row < ROWS; row++) {
+    const rr = rowTops[row]!.r
+    const y = rowTops[row]!.y + 0.05
+    const perRow = Math.floor((Math.PI * 2 * rr) / 0.95)
+    for (let i = 0; i < perRow; i++) {
+      const a = ((i + Math.random() * 0.3) / perRow) * Math.PI * 2
+      // skip fans sitting in an aisle
+      let inAisle = false
+      for (let k = 0; k < AISLES; k++) {
+        const mid = (k / AISLES) * Math.PI * 2
+        let d = Math.abs(((a - mid + Math.PI * 3) % (Math.PI * 2)) - Math.PI)
+        if (d < AISLE_HALF + 0.03) inAisle = true
+      }
+      if (inAisle) continue
+      if (Math.random() > 0.9) continue // a few empty seats read organic
+      const x = Math.cos(a) * (rr + (Math.random() - 0.5) * 0.5)
+      const z = Math.sin(a) * (rr + (Math.random() - 0.5) * 0.5)
+      seats.push({
         x,
         z,
-        y: tier.top,
-        yaw: yawTowardCenter(x, z) + (Math.random() - 0.5) * 0.45,
-        s: 0.82 + Math.random() * 0.4,
+        y,
+        yaw: yawTowardCenter(x, z) + (Math.random() - 0.5) * 0.4,
+        scale: 0.8 + Math.random() * 0.35,
         angle: (Math.atan2(z, x) + Math.PI * 2) % (Math.PI * 2),
         pick: Math.random(),
       })
     }
   }
-  const crowdCount = placements.length
-  const crowdBody = new THREE.InstancedMesh(crowdBeanGeometry(), makeToonMaterial(0xffffff), crowdCount)
-  const faceGeo = new THREE.PlaneGeometry(0.5, 0.42)
-  faceGeo.translate(0, 0.98, 0.36)
-  const crowdFace = new THREE.InstancedMesh(
-    faceGeo,
-    new THREE.MeshBasicMaterial({ map: crowdFaceTexture(), transparent: true }),
-    crowdCount,
-  )
-  crowdBody.frustumCulled = crowdFace.frustumCulled = false
-  {
-    const m = new THREE.Matrix4()
-    const q = new THREE.Quaternion()
-    const up = new THREE.Vector3(0, 1, 0)
-    for (let i = 0; i < crowdCount; i++) {
-      const p = placements[i]!
-      q.setFromAxisAngle(up, p.yaw)
-      m.compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(p.s, p.s, p.s))
-      crowdBody.setMatrixAt(i, m)
-      crowdFace.setMatrixAt(i, m)
-    }
-    crowdBody.instanceMatrix.needsUpdate = true
-    crowdFace.instanceMatrix.needsUpdate = true
-  }
-  const crowdColor = new THREE.Color()
-  function recolorCrowd(zoneCount: number, zoneColors: readonly number[]): void {
-    const span = (Math.PI * 2) / Math.max(2, zoneCount)
-    for (let i = 0; i < crowdCount; i++) {
-      const p = placements[i]!
-      const zone = Math.floor(((p.angle + span / 2) % (Math.PI * 2)) / span) % Math.max(2, zoneCount)
-      const home = zoneColors[zone]
-      // each wedge's stands fill with that seat's supporters, plus neutrals
-      if (home !== undefined && p.pick < 0.62) crowdColor.setHex(home)
-      else crowdColor.setHex(FAN_COLORS[Math.floor(p.pick * 997) % FAN_COLORS.length]!)
-      crowdBody.setColorAt(i, crowdColor)
-    }
-    if (crowdBody.instanceColor) crowdBody.instanceColor.needsUpdate = true
-  }
-  recolorCrowd(6, []) // pre-match: everyone in random team colors
-  group.add(crowdBody, crowdFace)
+  const crowd = createCrowd(seats, FAN_COLORS)
+  crowd.recolor(6, []) // pre-match: everyone in random team colors
+  group.add(crowd.group)
 
   // floating dream island: tapered rock mass under the floor
   const island = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius * 1.02, radius * 0.28, 9, 24),
+    new THREE.CylinderGeometry(rimInner * 0.6, radius * 0.28, 11, 24),
     makeToonMaterial(PALETTE.greenGray),
   )
-  island.position.y = -5.1
+  island.position.y = -6.0
   addInkOutline(island, INK_WEIGHT.arena)
   group.add(island)
 
@@ -428,21 +564,24 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   group.add(cannonsGroup)
 
   function buildCannon(angle: number, zoneColor: number): THREE.Group {
+    // MOUNTED ON THE TOPMOST RIM (above the audience), aiming down-and-inward
+    // over the stands into the pitch — never out over the crowd.
     const cannon = new THREE.Group()
-    const px = Math.cos(angle) * (radius + 0.9)
-    const pz = Math.sin(angle) * (radius + 0.9)
-    cannon.position.set(px, WALL_HEIGHT, pz)
+    const px = Math.cos(angle) * (rimInner + 0.7)
+    const pz = Math.sin(angle) * (rimInner + 0.7)
+    cannon.position.set(px, rimTop, pz)
     cannon.rotation.y = yawTowardCenter(px, pz) // local +Z aims at the center
 
-    const base = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.9, 1.4), makeToonMaterial(PALETTE.ink))
-    base.position.y = 0.45
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 1.6), makeToonMaterial(PALETTE.ink))
+    base.position.y = 0.5
     addInkOutline(base, INK_WEIGHT.prop)
     cannon.add(base)
 
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.6, 2.6, 12), makeToonMaterial(PALETTE.ink))
-    barrel.geometry.translate(0, 1.0, 0) // pivot at the breech
-    barrel.position.set(0, 0.8, 0.1)
-    barrel.rotation.x = 0.92 // tip the muzzle up-and-inward over the wall
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.68, 3.0, 12), makeToonMaterial(PALETTE.ink))
+    barrel.geometry.translate(0, 1.1, 0) // pivot at the breech
+    barrel.position.set(0, 0.95, 0.15)
+    barrel.rotation.x = 1.35 // tip the muzzle down-and-inward toward the pitch
+    barrel.castShadow = true
     addInkOutline(barrel, INK_WEIGHT.prop)
     cannon.add(barrel)
 
@@ -461,7 +600,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
 
     setZones(arena: Arena, zoneColors: readonly number[]): void {
       grass.setZones(arena.seats, zoneColors)
-      recolorCrowd(arena.seats, zoneColors)
+      crowd.recolor(arena.seats, zoneColors)
       disposeHierarchy(cannonsGroup)
       cannonsGroup.clear()
       for (let zone = 0; zone < arena.seats; zone++) {
@@ -497,6 +636,8 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
     update(dt: number): void {
       elapsed += dt
       dayNight?.update(dt)
+      crowd.update(dt) // GPU-animated fans: one uniform write, no CPU cost
+      flagField.update(elapsed) // waving flags: one uniform write
       const cells = windField.step(dt)
       const dx = windField.dirX
       const dz = windField.dirZ
@@ -525,6 +666,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
       grass.dispose()
       streaks.dispose()
       marks.dispose()
+      crowd.dispose()
       disposeHierarchy(group)
     },
   }
