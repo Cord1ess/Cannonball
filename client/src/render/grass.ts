@@ -52,6 +52,8 @@ export interface GrassField {
   setAlarm(zone: number, pulse: number): void
   /** day->night arc for the pitch (unlit): 0 = day .. 1 = night */
   setNight(frac: number): void
+  /** the 4 tower floodlight pools (aim point + radius + strength) */
+  setFloods(list: readonly { x: number; z: number; radius: number; strength: number }[]): void
   /** feed the bodies that flatten grass this frame (players + ball) */
   setBodies(bodies: readonly GrassBody[]): void
   /** feed the active localized gust cells this frame */
@@ -205,6 +207,7 @@ const FRAG = /* glsl */ `
   uniform float uAlarmZone; // -1 = none, else the zone index that blinks
   uniform float uAlarmPulse; // 0..1 blink phase
   uniform float uNight; // 0 = day .. 1 = night (grass is unlit → tint here)
+  uniform vec4 uFloods[4]; // xz = light aim point on the pitch · z=radius · w=strength
 
   varying float vT;
   varying float vColorVar;
@@ -293,13 +296,26 @@ const FRAG = /* glsl */ `
     float shadowMask = getShadowMask();
     col *= mix(1.0, shadowMask, 0.45);
 
-    // NIGHT FALL: the pitch is FLOODLIT at night by the tower lights, so the
-    // turf stays LIT (a touch cooler + slightly deeper than day) rather than
-    // going dark moonlit — reads as a proper night match under the lights.
+    // NIGHT FALL: at night the base turf dims to a dusk shade, but the tower
+    // FLOODLIGHTS then re-light it — so the pitch reads as a lit night match
+    // with brighter warm POOLS under each light, not a flat wash.
     if (uNight > 0.001) {
-      vec3 lit = col * vec3(0.82, 0.9, 0.86); // floodlit turf, faintly cooled
-      lit *= 0.78 + 0.22 * vT;                // subtle root shade
-      col = mix(col, lit, uNight);
+      vec3 dusk = col * vec3(0.42, 0.5, 0.6); // dim dusk turf before the lights
+      col = mix(col, dusk, uNight);
+      // 4 tower floodlight pools: a warm additive brightening centred on each
+      // light's aim point, strongest at its centre, falling off with distance.
+      vec3 warm = vec3(1.0, 0.96, 0.82);
+      float flood = 0.0;
+      for (int i = 0; i < 4; i++) {
+        vec2 fc = uFloods[i].xy;
+        float fr = uFloods[i].z;
+        float fs = uFloods[i].w;
+        float d = distance(vWorldXZ, fc);
+        flood += (1.0 - smoothstep(0.0, fr, d)) * fs;
+      }
+      flood = clamp(flood, 0.0, 1.3) * uNight;
+      // lift the turf toward warm floodlit green where the pools overlap
+      col = mix(col, col * warm * 1.9, min(0.85, flood));
     }
 
     gl_FragColor = vec4(col, 1.0);
@@ -381,6 +397,8 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
   material.uniforms.uBodies = { value: bodies }
   material.uniforms.uGusts = { value: gusts }
   material.uniforms.uGustDir = { value: gustDirs }
+  const floods = Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 20, 0))
+  material.uniforms.uFloods = { value: floods }
 
   const mesh = new THREE.Mesh(geo, material)
   mesh.frustumCulled = false // one field, always on screen
@@ -404,6 +422,13 @@ export function createGrassField(radius: number, neutralRadius: number, blades =
     },
     setNight(frac: number): void {
       material.uniforms.uNight!.value = frac
+    },
+    setFloods(list: readonly { x: number; z: number; radius: number; strength: number }[]): void {
+      for (let i = 0; i < 4; i++) {
+        const f = list[i]
+        if (f) floods[i]!.set(f.x, f.z, f.radius, f.strength)
+        else floods[i]!.set(0, 0, 20, 0)
+      }
     },
     setBodies(list: readonly GrassBody[]): void {
       const n = Math.min(MAX_BODIES, list.length)

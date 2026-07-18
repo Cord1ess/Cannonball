@@ -650,6 +650,8 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
 
   // --- 4 tall LIGHT TOWERS at the cardinal corners (bulbs + real floodlights) --
   const lightTowers: LightTower[] = []
+  // each tower's floodlight pool aim point on the pitch (toward its quadrant)
+  const floodAims: { x: number; z: number; radius: number; strength: number }[] = []
   for (let i = 0; i < 4; i++) {
     const a = (i / 4) * Math.PI * 2 + Math.PI / 4 // corners, between the goals
     const tx = Math.cos(a) * (rimInner + 2.2)
@@ -657,7 +659,11 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
     const t = buildLightTower(tx, tz, rimTop)
     lightTowers.push(t)
     group.add(t.group)
+    // the light pool sits out toward this tower's side of the pitch so the four
+    // pools together cover the whole field with brighter warm patches
+    floodAims.push({ x: Math.cos(a) * radius * 0.55, z: Math.sin(a) * radius * 0.55, radius: radius * 0.95, strength: 0.9 })
   }
+  grass.setFloods(floodAims) // static pools; the grass shader scales them by night
 
   // --- the crowd: GPU-animated fans on the rake, skipping the aisles ----------
   const seats: CrowdSeat[] = []
