@@ -423,34 +423,32 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   rail.position.y = WALL_HEIGHT + NET_H - 0.2
   group.add(rail)
 
-  // --- DISPLAY BOARD ring: a continuous perimeter display BEHIND the net (the
-  // digital signs mount here later). Solid ring with a dark screen face inward.
-  const BOARD_INNER = radius + 1.15
-  const BOARD_H = 1.3
-  const boardBack = new THREE.Mesh(
-    ringGeometry(BOARD_INNER, BOARD_INNER + 0.28, BOARD_H),
-    makeToonMaterial(STADIUM.frame),
-  )
-  boardBack.position.y = WALL_HEIGHT - 0.2
-  addInkOutline(boardBack, INK_WEIGHT.arena)
-  group.add(boardBack)
-  // the screen face: an inner cylinder shell, dark "LED" panel toward the pitch
-  const screen = new THREE.Mesh(
-    new THREE.CylinderGeometry(BOARD_INNER - 0.02, BOARD_INNER - 0.02, BOARD_H - 0.24, SEGMENTS, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0x2b3038, side: THREE.BackSide }),
-  )
-  screen.position.y = WALL_HEIGHT - 0.2 + BOARD_H / 2
-  group.add(screen)
-
-  // --- the STANDS: raked seating rising DIRECTLY from behind the net (no gap,
-  // no flat track ring) — the rake climbs STEEPLY right from the fence -------
-  const STANDS_INNER = radius + 1.7 // seating starts right at the fence
+  // --- the STANDS: raked seating; the DISPLAY WALL below closes the field-to-
+  // stands gap so the whole thing is unified (no trench/hole) --------------
+  const STANDS_INNER = radius + 1.7 // seating starts here, right behind the net
   const ROWS = 16 // seating rows (the rake)
   const ROW_DEPTH = 0.95 // shallower tread → steeper climb, no flat track
   const ROW_RISE = 0.82 // taller riser than tread → the bowl rakes up hard
   const AISLES = 10 // radial walkways cut through the seating
   const AISLE_HALF = 0.075 // half-angular-width of each aisle
-  const STANDS_BASE = WALL_HEIGHT + 0.9 // first row already up at the net top
+  const STANDS_BASE = WALL_HEIGHT + 0.9 // first row height (top of the display wall)
+
+  // --- DISPLAY WALL: a SOLID perimeter wall from the net out to the stands,
+  // rising from the ground to the first seat row — this CLOSES the hole and
+  // carries the dark "screen" band (the digital signs mount here later) ------
+  const boardWall = new THREE.Mesh(
+    ringGeometry(NET_R + 0.05, STANDS_INNER + 0.05, STANDS_BASE),
+    makeToonMaterial(STADIUM.frame),
+  )
+  addInkOutline(boardWall, INK_WEIGHT.arena)
+  group.add(boardWall)
+  // the dark LED screen band on the pitch-facing side of the display wall
+  const screen = new THREE.Mesh(
+    new THREE.CylinderGeometry(NET_R + 0.04, NET_R + 0.04, 1.3, SEGMENTS, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x2b3038, side: THREE.BackSide }),
+  )
+  screen.position.y = STANDS_BASE - 0.9
+  group.add(screen)
 
   // each seating row is a stepped ring (riser + tread) — the classic rake.
   // rows cycle through a set of ART-STYLE seat-block colours so the bowl reads
