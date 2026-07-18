@@ -118,12 +118,15 @@ const STADIUM = {
   frame: 0xcbb489, // warm SANDY structural frame (apron/plinth/rim base)
   rail: 0x5c5346, // dark taupe rails/posts
   concrete: 0xb8b0a0, // concrete aisle stairs / walkways
-  // seat DECKS: lower + upper of the SAME teal family, each with a slightly
-  // lighter/darker alternate for per-row banding. Reads as one coherent bowl.
-  seatLowerA: 0x3f8f88,
-  seatLowerB: 0x469a92,
-  seatUpperA: 0x356f78,
-  seatUpperB: 0x3b7b84,
+  // SHADES OF TEAL — one family, several values. Each step is drawn as a light
+  // TREAD (the seating surface) + a darker RISER wall, and the decks/rows band
+  // through these shades so the bowl reads with real light/dark depth.
+  tealTreadLo: 0x5bb0a6, // lower-deck seating surface (light)
+  tealRiserLo: 0x2f7f78, // lower-deck riser wall (dark)
+  tealTreadHi: 0x4a9aa2, // upper-deck seating surface (light, cooler)
+  tealRiserHi: 0x27636e, // upper-deck riser wall (dark, cooler)
+  tealTreadAlt: 0x66bdb2, // brightest band variant for the A/B seat banding
+  tealDeep: 0x235057, // deepest teal (vom band / shadowed rows)
 } as const
 
 interface FlagField {
@@ -474,28 +477,42 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   screen.position.y = PLINTH_H + DISPLAY_BAND * 0.5
   group.add(screen)
 
-  // each seating row is a stepped ring (riser + tread) — the classic rake.
-  // TWO DECKS of the same teal family (lower/upper) with a subtle A/B per-row
-  // banding, so the bowl reads as ONE cohesive coloured stand, not a rainbow.
-  // A concrete "vom" band splits the two decks.
+  // each seating row is a step: a dark RISER wall + a light TREAD surface, so
+  // SHADES OF TEAL play across the bowl (light seating, dark step walls). Two
+  // decks (lower/upper) + an A/B per-row banding vary the shade for depth. A
+  // concrete "vom" band splits the decks.
   const DECK_SPLIT = Math.floor(ROWS * 0.55)
-  const seatTone = (row: number): number => {
-    if (row === DECK_SPLIT) return STADIUM.concrete // walkway ring between decks
+  const treadTone = (row: number): number => {
+    if (row === DECK_SPLIT) return STADIUM.concrete
     const upper = row > DECK_SPLIT
     const b = row % 2 === 0
-    return upper ? (b ? STADIUM.seatUpperA : STADIUM.seatUpperB) : b ? STADIUM.seatLowerA : STADIUM.seatLowerB
+    if (upper) return b ? STADIUM.tealTreadHi : STADIUM.tealTreadAlt
+    return b ? STADIUM.tealTreadLo : STADIUM.tealTreadAlt
+  }
+  const riserTone = (row: number): number => {
+    if (row === DECK_SPLIT) return STADIUM.tealDeep
+    return row > DECK_SPLIT ? STADIUM.tealRiserHi : STADIUM.tealRiserLo
   }
   const rowTops: Array<{ r: number; y: number }> = []
   for (let row = 0; row < ROWS; row++) {
     const inner = STANDS_INNER + row * ROW_DEPTH
     const y = STANDS_BASE + row * ROW_RISE
     rowTops.push({ r: inner + ROW_DEPTH * 0.5, y })
-    const step = new THREE.Mesh(
+    // RISER: the vertical step wall (dark teal) — a solid ring up to this height
+    const riser = new THREE.Mesh(
       ringGeometry(inner, inner + ROW_DEPTH + 0.05, y + ROW_RISE),
-      makeToonMaterial(seatTone(row)),
+      makeToonMaterial(riserTone(row)),
     )
-    step.receiveShadow = true
-    group.add(step)
+    riser.receiveShadow = true
+    group.add(riser)
+    // TREAD: the flat seating surface on top (light teal), a thin ring cap
+    const tread = new THREE.Mesh(
+      ringGeometry(inner + 0.04, inner + ROW_DEPTH, 0.12),
+      makeToonMaterial(treadTone(row)),
+    )
+    tread.position.y = y + ROW_RISE
+    tread.receiveShadow = true
+    group.add(tread)
   }
 
   // --- VERTICAL WALK AISLES: real concrete STAIR channels climbing the rake.
