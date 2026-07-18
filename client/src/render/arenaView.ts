@@ -581,7 +581,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
     // fans are SMALL (seated-crowd size ~0.5) and spaced so they sit close but
     // don't overlap into mush. spacing ≈ fan width so a row reads as distinct
     // people shoulder-to-shoulder, not a smeared carpet.
-    const perRow = Math.floor((Math.PI * 2 * rr) / 0.62)
+    const perRow = Math.floor((Math.PI * 2 * rr) / 0.9)
     for (let i = 0; i < perRow; i++) {
       const a = ((i + (Math.random() - 0.5) * 0.25) / perRow) * Math.PI * 2
       // skip fans sitting in an aisle
@@ -600,7 +600,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
         z,
         y,
         yaw: yawTowardCenter(x, z) + (Math.random() - 0.5) * 0.3,
-        scale: 0.5 + Math.random() * 0.12, // small seated fans
+        scale: 0.8 + Math.random() * 0.15, // fans a bit smaller than players
         angle: (Math.atan2(z, x) + Math.PI * 2) % (Math.PI * 2),
         pick: Math.random(),
       })
