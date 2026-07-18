@@ -114,9 +114,10 @@ const FAN_COLORS: readonly number[] = [
 
 /** Stadium art-style palette — warm, colourful, in-style (no flat off-white). */
 const STADIUM = {
-  frame: 0xcbb489, // warm sandy structural frame (boards/kicker/rim base)
-  rail: 0x7a6f5c, // muted taupe rails/posts
-  aisle: 0xe7ddc4, // pale walkway strips
+  wall: 0x5f7a6b, // deep muted green pitch-edge wall (sits with the grass, not pale)
+  frame: 0x8a7a5c, // deeper warm structural frame (boards/kicker/rim base)
+  rail: 0x5c5346, // dark taupe rails/posts
+  aisle: 0xc9bfa2, // walkway strips (toned down from bright off-white)
   // seat-block tones cycled up the rake: teal/coral/butter/sage/rose/sky bands
   seatTones: [0x6fb2ac, 0xe08a6e, 0xf0c97a, 0x8bb87e, 0xd98f8f, 0x6f9ec2],
 } as const
@@ -396,7 +397,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const streakScratch: StreakCell[] = []
 
   // seamless ring wall the players bounce off (short kickboard at pitch edge)
-  const wall = new THREE.Mesh(ringGeometry(radius, radius + 0.9, WALL_HEIGHT), makeToonMaterial(PALETTE.warmGray))
+  const wall = new THREE.Mesh(ringGeometry(radius, radius + 0.9, WALL_HEIGHT), makeToonMaterial(STADIUM.wall))
   wall.castShadow = true
   wall.receiveShadow = true
   addInkOutline(wall, INK_WEIGHT.arena)
