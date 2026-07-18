@@ -111,13 +111,19 @@ const FAN_COLORS: readonly number[] = [
   PALETTE.uiGold,
 ]
 
-/** Stadium art-style palette — warm, colourful, in-style (no flat off-white). */
+/** Stadium art-style palette — a cohesive, real-stadium look (NOT rainbow):
+ *  a deep teal seat bowl in two decks with a subtle row banding, concrete
+ *  aisles/steps, warm sandy structure. Toon shading does the light/shadow. */
 const STADIUM = {
   frame: 0xcbb489, // warm SANDY structural frame (apron/plinth/rim base)
   rail: 0x5c5346, // dark taupe rails/posts
-  aisle: 0xc9bfa2, // walkway strips (toned down from bright off-white)
-  // seat-block tones cycled up the rake: teal/coral/butter/sage/rose/sky bands
-  seatTones: [0x6fb2ac, 0xe08a6e, 0xf0c97a, 0x8bb87e, 0xd98f8f, 0x6f9ec2],
+  concrete: 0xb8b0a0, // concrete aisle stairs / walkways
+  // seat DECKS: lower + upper of the SAME teal family, each with a slightly
+  // lighter/darker alternate for per-row banding. Reads as one coherent bowl.
+  seatLowerA: 0x3f8f88,
+  seatLowerB: 0x469a92,
+  seatUpperA: 0x356f78,
+  seatUpperB: 0x3b7b84,
 } as const
 
 interface FlagField {
@@ -469,9 +475,16 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   group.add(screen)
 
   // each seating row is a stepped ring (riser + tread) — the classic rake.
-  // rows cycle through a set of ART-STYLE seat-block colours so the bowl reads
-  // colourful + alive instead of flat off-white.
-  const SEAT_TONES = STADIUM.seatTones
+  // TWO DECKS of the same teal family (lower/upper) with a subtle A/B per-row
+  // banding, so the bowl reads as ONE cohesive coloured stand, not a rainbow.
+  // A concrete "vom" band splits the two decks.
+  const DECK_SPLIT = Math.floor(ROWS * 0.55)
+  const seatTone = (row: number): number => {
+    if (row === DECK_SPLIT) return STADIUM.concrete // walkway ring between decks
+    const upper = row > DECK_SPLIT
+    const b = row % 2 === 0
+    return upper ? (b ? STADIUM.seatUpperA : STADIUM.seatUpperB) : b ? STADIUM.seatLowerA : STADIUM.seatLowerB
+  }
   const rowTops: Array<{ r: number; y: number }> = []
   for (let row = 0; row < ROWS; row++) {
     const inner = STANDS_INNER + row * ROW_DEPTH
@@ -479,32 +492,47 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
     rowTops.push({ r: inner + ROW_DEPTH * 0.5, y })
     const step = new THREE.Mesh(
       ringGeometry(inner, inner + ROW_DEPTH + 0.05, y + ROW_RISE),
-      makeToonMaterial(SEAT_TONES[row % SEAT_TONES.length]!),
+      makeToonMaterial(seatTone(row)),
     )
     step.receiveShadow = true
     group.add(step)
   }
-  // aisle strips: pale radial wedges laid over the rake so walkways read
+
+  // --- VERTICAL WALK AISLES: real concrete STAIR channels climbing the rake.
+  // Each aisle is a stack of little step boxes at the aisle angle, one per row,
+  // so it reads as a proper staircase cutting up through the seating (the crowd
+  // already leaves these angles empty). Instanced → one draw for all aisles.
   {
-    const aisleMat = makeToonMaterial(STADIUM.aisle)
+    const stepGeo = new THREE.BoxGeometry(1, 1, 1)
+    const aisleMat = makeToonMaterial(STADIUM.concrete)
+    const perAisle = ROWS
+    const stairs = new THREE.InstancedMesh(stepGeo, aisleMat, AISLES * perAisle)
+    stairs.receiveShadow = true
+    stairs.castShadow = true
+    const m = new THREE.Matrix4()
+    const q = new THREE.Quaternion()
+    const upv = new THREE.Vector3(0, 1, 0)
+    let idx = 0
     for (let a = 0; a < AISLES; a++) {
       const mid = (a / AISLES) * Math.PI * 2
-      const shape = new THREE.Shape()
-      const r0 = STANDS_INNER - 0.1
-      const r1 = STANDS_INNER + ROWS * ROW_DEPTH + 0.3
-      const w = AISLE_HALF
-      shape.moveTo(Math.cos(mid - w) * r0, Math.sin(mid - w) * r0)
-      shape.lineTo(Math.cos(mid - w) * r1, Math.sin(mid - w) * r1)
-      shape.lineTo(Math.cos(mid + w) * r1, Math.sin(mid + w) * r1)
-      shape.lineTo(Math.cos(mid + w) * r0, Math.sin(mid + w) * r0)
-      shape.closePath()
-      const geo = new THREE.ShapeGeometry(shape)
-      geo.rotateX(-Math.PI / 2)
-      const strip = new THREE.Mesh(geo, aisleMat)
-      strip.position.y = STANDS_BASE - 0.05
-      strip.rotation.x = -0.62 // tilt up to follow the steeper rake
-      group.add(strip)
+      for (let row = 0; row < ROWS; row++) {
+        const rr = STANDS_INNER + row * ROW_DEPTH + ROW_DEPTH * 0.5
+        const y = STANDS_BASE + row * ROW_RISE
+        const x = Math.cos(mid) * rr
+        const z = Math.sin(mid) * rr
+        // a step tread as wide as the aisle, deep as a row, rising with the rake
+        const width = 2 * AISLE_HALF * rr // arc width of the aisle at this radius
+        q.setFromAxisAngle(upv, yawTowardCenter(x, z))
+        m.compose(
+          new THREE.Vector3(x, y + ROW_RISE * 0.5, z),
+          q,
+          new THREE.Vector3(Math.max(0.8, width), ROW_RISE + 0.06, ROW_DEPTH + 0.06),
+        )
+        stairs.setMatrixAt(idx++, m)
+      }
     }
+    stairs.instanceMatrix.needsUpdate = true
+    group.add(stairs)
   }
   // tall outer rim wall behind the top row — where cannons/flags/lights mount
   const rimInner = STANDS_INNER + ROWS * ROW_DEPTH + 0.3
