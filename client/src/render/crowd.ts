@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
+import type { KitColors } from '@shared/cosmetics/jerseys.ts'
 import { createBean } from './bean.ts'
 import { toonRamp } from './materials.ts'
 
@@ -17,8 +18,8 @@ import { toonRamp } from './materials.ts'
 
 export interface Crowd {
   readonly group: THREE.Group
-  /** fill each wedge's stand with its owner-seat's team colour (+ neutrals) */
-  recolor(zoneCount: number, zoneColors: readonly number[]): void
+  /** fill each wedge's stand with its owner-seat's team JERSEY (+ neutrals) */
+  recolor(zoneCount: number, zoneKits: readonly (KitColors | undefined)[]): void
   /** advance the GPU animation clock (one uniform write, no CPU animation) */
   update(dt: number): void
   dispose(): void
@@ -161,10 +162,16 @@ function bodyMaterial(outline: boolean): THREE.ShaderMaterial {
     vertexShader: /* glsl */ `
       attribute float aPart;
       attribute vec4 aSeed;
-      attribute vec3 aColor;
+      attribute vec3 aColor;   // jersey PRIMARY
+      attribute vec3 aColor2;  // jersey SECONDARY
+      attribute float aPattern; // 0 solid · 1 stripes · 2 hoops
       uniform float uTime;
       uniform vec3 uLight;
       varying vec3 vColor;
+      varying vec3 vColor2;
+      varying float vPattern;
+      varying float vPart;
+      varying vec3 vLocal;   // pre-animation body position → drives the bands
       varying float vLit;
       ${ANIM}
       void main() {
@@ -174,6 +181,10 @@ function bodyMaterial(outline: boolean): THREE.ShaderMaterial {
           ? '// push out along the normal for the crayon outline hull\n        pos += normal * 0.04;'
           : ''}
         vColor = aColor;
+        vColor2 = aColor2;
+        vPattern = aPattern;
+        vPart = aPart;
+        vLocal = position;
         vLit = clamp(dot(nrm, uLight), 0.0, 1.0);
         gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(pos, 1.0);
       }
@@ -186,10 +197,28 @@ function bodyMaterial(outline: boolean): THREE.ShaderMaterial {
       : /* glsl */ `
         uniform sampler2D uRamp;
         varying vec3 vColor;
+        varying vec3 vColor2;
+        varying float vPattern;
+        varying float vPart;
+        varying vec3 vLocal;
         varying float vLit;
         void main() {
+          vec3 base = vColor;
+          // JERSEY pattern on the TORSO only (part 0, upper body region). Stripes
+          // = vertical bands from local X; hoops = horizontal bands from local Y.
+          if (vPart < 0.5 && vLocal.y > 0.44 && vLocal.y < 1.42) {
+            if (vPattern > 1.5) {
+              // hoops: 3 horizontal bands
+              float b = step(0.5, fract(vLocal.y * 3.2));
+              base = mix(base, vColor2, b);
+            } else if (vPattern > 0.5) {
+              // stripes: vertical bands
+              float b = step(0.5, fract(vLocal.x * 3.5));
+              base = mix(base, vColor2, b);
+            }
+          }
           float lit = texture2D(uRamp, vec2(clamp(0.35 + vLit * 0.6, 0.02, 0.98), 0.5)).r;
-          gl_FragColor = vec4(vColor * mix(0.8, 1.0, lit), 1.0);
+          gl_FragColor = vec4(base * mix(0.8, 1.0, lit), 1.0);
         }
       `,
   })
@@ -257,7 +286,9 @@ function faceMaterial(): THREE.ShaderMaterial {
   })
 }
 
-export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly number[]): Crowd {
+const PATTERN_ID: Record<string, number> = { solid: 0, stripes: 1, hoops: 2 }
+
+export function createCrowd(seats: readonly CrowdSeat[], fanKits: readonly KitColors[]): Crowd {
   const group = new THREE.Group()
   group.name = 'crowd'
   const count = seats.length
@@ -276,15 +307,31 @@ export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly num
   fill.renderOrder = 1
   faces.renderOrder = 2
 
-  // per-instance transforms + seed + colour
+  // per-instance transforms + seed + JERSEY (primary, secondary, pattern)
   const seed = new Float32Array(count * 4)
   const colorArr = new Float32Array(count * 3)
+  const color2Arr = new Float32Array(count * 3)
+  const patternArr = new Float32Array(count)
   const m = new THREE.Matrix4()
   const q = new THREE.Quaternion()
   const up = new THREE.Vector3(0, 1, 0)
-  const col = new THREE.Color()
+  const c1 = new THREE.Color()
+  const c2 = new THREE.Color()
   const angles: number[] = []
   const picks: number[] = []
+
+  const applyKit = (i: number, kit: KitColors): void => {
+    c1.setHex(kit.primary)
+    c2.setHex(kit.secondary)
+    colorArr[i * 3] = c1.r
+    colorArr[i * 3 + 1] = c1.g
+    colorArr[i * 3 + 2] = c1.b
+    color2Arr[i * 3] = c2.r
+    color2Arr[i * 3 + 1] = c2.g
+    color2Arr[i * 3 + 2] = c2.b
+    patternArr[i] = PATTERN_ID[kit.pattern] ?? 0
+  }
+
   for (let i = 0; i < count; i++) {
     const s = seats[i]!
     q.setFromAxisAngle(up, s.yaw)
@@ -296,17 +343,18 @@ export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly num
     seed[i * 4 + 1] = (s.pick * 41.3) % 1
     seed[i * 4 + 2] = (s.pick * 7.7) % 1
     seed[i * 4 + 3] = (s.pick * 3.1) % 1
-    col.setHex(fanColors[Math.floor(s.pick * 997) % fanColors.length]!)
-    colorArr[i * 3] = col.r
-    colorArr[i * 3 + 1] = col.g
-    colorArr[i * 3 + 2] = col.b
+    applyKit(i, fanKits[Math.floor(s.pick * 997) % fanKits.length]!)
     angles.push(s.angle)
     picks.push(s.pick)
   }
   const seedAttr = new THREE.InstancedBufferAttribute(seed, 4)
   const colorAttr = new THREE.InstancedBufferAttribute(colorArr, 3)
+  const color2Attr = new THREE.InstancedBufferAttribute(color2Arr, 3)
+  const patternAttr = new THREE.InstancedBufferAttribute(patternArr, 1)
   bodyGeo.setAttribute('aSeed', seedAttr)
   bodyGeo.setAttribute('aColor', colorAttr)
+  bodyGeo.setAttribute('aColor2', color2Attr)
+  bodyGeo.setAttribute('aPattern', patternAttr)
   faceGeo.setAttribute('aSeed', seedAttr) // faces share the seed (ride the head)
   fill.instanceMatrix.needsUpdate = true
   outline.instanceMatrix.needsUpdate = true
@@ -315,19 +363,19 @@ export function createCrowd(seats: readonly CrowdSeat[], fanColors: readonly num
 
   return {
     group,
-    recolor(zoneCount: number, zoneColors: readonly number[]): void {
+    recolor(zoneCount: number, zoneKits: readonly (KitColors | undefined)[]): void {
       const span = (Math.PI * 2) / Math.max(2, zoneCount)
       for (let i = 0; i < count; i++) {
         const zone = Math.floor(((angles[i]! + span / 2) % (Math.PI * 2)) / span) % Math.max(2, zoneCount)
-        const home = zoneColors[zone]
-        // home fans wear their team's jersey colour; a scatter stays neutral
-        if (home !== undefined && picks[i]! < 0.68) col.setHex(home)
-        else col.setHex(fanColors[Math.floor(picks[i]! * 997) % fanColors.length]!)
-        colorArr[i * 3] = col.r
-        colorArr[i * 3 + 1] = col.g
-        colorArr[i * 3 + 2] = col.b
+        const home = zoneKits[zone]
+        // home fans wear their team's ACTUAL jersey (primary+secondary+pattern);
+        // a scatter stays in a random kit as neutrals
+        if (home && picks[i]! < 0.68) applyKit(i, home)
+        else applyKit(i, fanKits[Math.floor(picks[i]! * 997) % fanKits.length]!)
       }
       colorAttr.needsUpdate = true
+      color2Attr.needsUpdate = true
+      patternAttr.needsUpdate = true
     },
     update(dt: number): void {
       const t = (fillMat.uniforms.uTime!.value as number) + dt

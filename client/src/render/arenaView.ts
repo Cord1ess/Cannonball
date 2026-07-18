@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { Arena } from '@shared/sim/arena.ts'
 import { yawTowardCenter } from '@shared/sim/arena.ts'
-import { KITS } from '@shared/cosmetics/jerseys.ts'
+import { KITS, type KitColors } from '@shared/cosmetics/jerseys.ts'
 import { createGrassField, type GrassBody, type GrassField, type GustCell } from './grass.ts'
 import { createDayNight, type DayNight } from './dayNight.ts'
 import { createWindField, type WindField } from './windField.ts'
@@ -104,12 +104,35 @@ function netTexture(): THREE.CanvasTexture {
   return tex
 }
 
-/** every kit colorway a fan could wear */
-const FAN_COLORS: readonly number[] = [
-  ...KITS.flatMap((kit) => [kit.home.primary, kit.away.primary]),
-  PALETTE.offWhite,
-  PALETTE.uiGold,
+/** every kit colorway a fan could wear (real jerseys — primary/secondary/pattern) */
+const FAN_KITS: readonly KitColors[] = [
+  ...KITS.flatMap((kit) => [kit.home, kit.away]),
+  { primary: PALETTE.offWhite, secondary: PALETTE.shadowShape, pattern: 'solid', shorts: PALETTE.ink },
+  { primary: PALETTE.uiGold, secondary: PALETTE.ink, pattern: 'solid', shorts: PALETTE.ink },
 ]
+/** flat primaries (flags still use solid colours) */
+const FAN_COLORS: readonly number[] = FAN_KITS.map((k) => k.primary)
+
+/** map a zone's team primary colour to the closest fan kit (so home fans wear
+ *  that team's ACTUAL jersey — stripes/hoops/secondary — not just its colour) */
+function kitForColor(hex: number): KitColors {
+  const r = (hex >> 16) & 255
+  const g = (hex >> 8) & 255
+  const b = hex & 255
+  let best = FAN_KITS[0]!
+  let bestD = Infinity
+  for (const k of FAN_KITS) {
+    const kr = (k.primary >> 16) & 255
+    const kg = (k.primary >> 8) & 255
+    const kb = k.primary & 255
+    const d = (kr - r) ** 2 + (kg - g) ** 2 + (kb - b) ** 2
+    if (d < bestD) {
+      bestD = d
+      best = k
+    }
+  }
+  return best
+}
 
 /** Stadium art-style palette — a cohesive, real-stadium look (NOT rainbow):
  *  a deep teal seat bowl in two decks with a subtle row banding, concrete
@@ -606,8 +629,8 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
       })
     }
   }
-  const crowd = createCrowd(seats, FAN_COLORS)
-  crowd.recolor(6, []) // pre-match: everyone in random team colors
+  const crowd = createCrowd(seats, FAN_KITS)
+  crowd.recolor(6, []) // pre-match: everyone in random team jerseys
   group.add(crowd.group)
 
   // floating dream island: tapered rock mass under the floor
@@ -661,7 +684,11 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
 
     setZones(arena: Arena, zoneColors: readonly number[]): void {
       grass.setZones(arena.seats, zoneColors)
-      crowd.recolor(arena.seats, zoneColors)
+      // map each zone's team primary → its real kit so stands wear real jerseys
+      crowd.recolor(
+        arena.seats,
+        zoneColors.map((c) => kitForColor(c)),
+      )
       disposeHierarchy(cannonsGroup)
       cannonsGroup.clear()
       for (let zone = 0; zone < arena.seats; zone++) {
