@@ -5,6 +5,27 @@
 
 ## STATUS: M0–M5a + M5b day→night arc · NEXT UP: rest of M5b (banners, elim-in-stands, faces)
 
+### M5b — smooth night flow, bigger sun, real 3D clouds (feedback pass 2)
+- NIGHT TRANSITION is now ONE smooth monotonic flow. Bug was: every non-play phase (draft/kickoff/
+  RESTART/duel) forced day, so night snapped back to day between rounds then jumped forward. Fix:
+  only Phase.Lobby resets to day; all mid-match phases keep progress (survivors already decremented).
+  Plus dayNight now tracks a MONOTONIC `stepProgress` (never regresses in a match; only a drop to ~0
+  = new match resets it) and the effective target CREEPS from each step toward the next (~0.012/s,
+  capped) so the sky keeps darkening continuously instead of freezing then jumping. Verified: sky
+  tint sampled across a fast match = ffffff→…→a5a7b3, strictly monotonic, no day snap-backs.
+- SUN DISC much bigger: canvas 128→256 with a fat bright core (solid to 0.42) + wide soft glow halo;
+  sizes 26/16 → 62/44 (day/night). Keeps the additive glow.
+- CLOUDS revamped: flat painted PNG clouds KILLED from skyTexture. New `render/clouds.ts` — real 3D
+  BUBBLY toon clouds, each a cluster of 6-10 overlapping low-poly spheres merged and wrapped in ONE
+  crayon INK HULL (matches the game's flat-shaded hand-outlined style), flat toon white so they
+  warm/cool with the day→night sun for free. RANDOM every session (puff count/shape/size/sky pos)
+  and ALIVE: 11 clouds drift around the sky bowl (mixed directions), bob, and each puff breathes so
+  the silhouette churns. Placed low near the sky dome so they ride the visible band above the rim
+  (chase-cam pitch is clamped ~[-7°,+34°]). Verified: 0 shader errors, clouds render day + night.
+- OWN-ZONE GROUND NAME hardened again: zoneLabel now BLANKS its texture when hidden (1×1 clear) so a
+  stale name can never linger a frame; the seat+name guard already prevents drawing it. (Live
+  spectator capture showed no own ground label on the current build.)
+
 ### M5b — real sun, shadows, ground darkening, wind glitch fix (feedback pass)
 - REAL VISIBLE SUN: a soft additive sprite disc (`dayNight.ts`) that ARCS across the sky —
   high + bright sharp daytime (day sun intensity 1.35) sinking to the horizon and setting as
