@@ -578,9 +578,12 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
     // feet on the TREAD TOP (riser extrudes up to y+ROW_RISE) — not the base,
     // else fans sink a full row height below the seat surface.
     const y = rowTops[row]!.y + ROW_RISE + 0.02
-    const perRow = Math.floor((Math.PI * 2 * rr) / 0.72) // denser packing
+    // fans are SMALL (seated-crowd size ~0.5) and spaced so they sit close but
+    // don't overlap into mush. spacing ≈ fan width so a row reads as distinct
+    // people shoulder-to-shoulder, not a smeared carpet.
+    const perRow = Math.floor((Math.PI * 2 * rr) / 0.62)
     for (let i = 0; i < perRow; i++) {
-      const a = ((i + Math.random() * 0.3) / perRow) * Math.PI * 2
+      const a = ((i + (Math.random() - 0.5) * 0.25) / perRow) * Math.PI * 2
       // skip fans sitting in an aisle
       let inAisle = false
       for (let k = 0; k < AISLES; k++) {
@@ -589,15 +592,15 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
         if (d < AISLE_HALF + 0.012) inAisle = true
       }
       if (inAisle) continue
-      if (Math.random() > 0.97) continue // only the odd empty seat
-      const x = Math.cos(a) * (rr + (Math.random() - 0.5) * 0.5)
-      const z = Math.sin(a) * (rr + (Math.random() - 0.5) * 0.5)
+      if (Math.random() > 0.96) continue // only the odd empty seat
+      const x = Math.cos(a) * (rr + (Math.random() - 0.5) * 0.2)
+      const z = Math.sin(a) * (rr + (Math.random() - 0.5) * 0.2)
       seats.push({
         x,
         z,
         y,
-        yaw: yawTowardCenter(x, z) + (Math.random() - 0.5) * 0.4,
-        scale: 0.8 + Math.random() * 0.35,
+        yaw: yawTowardCenter(x, z) + (Math.random() - 0.5) * 0.3,
+        scale: 0.5 + Math.random() * 0.12, // small seated fans
         angle: (Math.atan2(z, x) + Math.PI * 2) % (Math.PI * 2),
         pick: Math.random(),
       })
