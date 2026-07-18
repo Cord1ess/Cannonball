@@ -29,8 +29,15 @@ export interface WorldLighting {
 
 export interface ArenaView {
   readonly group: THREE.Group
-  /** repaint the floor divisions + cannons + home-fan sections */
-  setZones(arena: Arena, zoneColors: readonly number[]): void
+  /** repaint the floor divisions + cannons + home-fan sections.
+   *  seatKits/seatAlive (seat-indexed, full roster) drive the crowd: each stand
+   *  section supports one seat's team, and eliminated teams' fans leave. */
+  setZones(
+    arena: Arena,
+    zoneColors: readonly number[],
+    seatKits?: readonly (KitColors | undefined)[],
+    seatAlive?: readonly boolean[],
+  ): void
   /** match progress → day->night arc target (elims done / elims-to-night) */
   setMatchProgress(survivors: number, seatsAtStart: number): void
   /** debug: force full night on/off, overriding the progress-driven arc */
@@ -630,7 +637,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
     }
   }
   const crowd = createCrowd(seats, FAN_KITS)
-  crowd.recolor(6, []) // pre-match: everyone in random team jerseys
+  crowd.setSections([], []) // pre-match: everyone in random team jerseys
   group.add(crowd.group)
 
   // floating dream island: tapered rock mass under the floor
@@ -682,13 +689,23 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   return {
     group,
 
-    setZones(arena: Arena, zoneColors: readonly number[]): void {
+    setZones(
+      arena: Arena,
+      zoneColors: readonly number[],
+      seatKits?: readonly (KitColors | undefined)[],
+      seatAlive?: readonly boolean[],
+    ): void {
       grass.setZones(arena.seats, zoneColors)
-      // map each zone's team primary → its real kit so stands wear real jerseys
-      crowd.recolor(
-        arena.seats,
-        zoneColors.map((c) => kitForColor(c)),
-      )
+      // CROWD sections are fixed to the FULL roster (seat 0..5). Each section
+      // wears its seat's real kit; eliminated seats' fans leave the stand.
+      if (seatKits && seatAlive) {
+        crowd.setSections(seatKits, seatAlive)
+      } else {
+        // fallback (sandbox / no roster passed): map surviving zone colours to
+        // kits and treat all as present
+        const kits = zoneColors.map((c) => kitForColor(c))
+        crowd.setSections(kits, kits.map(() => true))
+      }
       disposeHierarchy(cannonsGroup)
       cannonsGroup.clear()
       for (let zone = 0; zone < arena.seats; zone++) {

@@ -372,11 +372,20 @@ export function createOnlineGame(
     const seats: number[] = []
     for (let i = 0; i < zoneSeat.length; i++) seats.push(zoneSeat[i] ?? 0)
     const colors = seats.map((seat) => seatColors[seat] ?? PALETTE.warmGray)
-    const key = `${seats.join(',')}#${colors.join(',')}`
+    // FULL roster (seat-indexed) for the crowd: each stand section supports one
+    // seat's team; eliminated seats' fans leave. Section k -> seat k.
+    const seatKits: (KitColors | undefined)[] = []
+    const seatAlive: boolean[] = []
+    state.players.forEach((p: NetPlayerRead) => {
+      seatKits[p.seat] = kitOf(p)
+      seatAlive[p.seat] = p.alive
+    })
+    const aliveKey = seatAlive.map((a) => (a ? 1 : 0)).join('')
+    const key = `${seats.join(',')}#${colors.join(',')}#${aliveKey}`
     if (key === arenaKey) return
     arenaKey = key
     arena = makeArena(Math.max(2, seats.length))
-    arenaView.setZones(arena, colors)
+    arenaView.setZones(arena, colors, seatKits, seatAlive)
   }
 
   function pushSnap(buffer: Snap[], p: NetPlayerRead): void {
