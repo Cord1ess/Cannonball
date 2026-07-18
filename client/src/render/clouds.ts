@@ -1,6 +1,5 @@
 import * as THREE from 'three'
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import { addInkOutline, INK_WEIGHT, makeToonMaterial } from './materials.ts'
+import { makeToonMaterial } from './materials.ts'
 
 /**
  * The sky's clouds (M5b revamp): real 3D BUBBLY toon clouds, not painted PNGs.
@@ -56,21 +55,23 @@ function buildCloud(rng: () => number): Cloud {
   const group = new THREE.Group()
   const puffs: Puff[] = []
 
-  // a bumpy horizontal cluster — bigger core puffs, smaller ones piled on top
-  const n = 6 + Math.floor(rng() * 5) // 6..10 puffs
-  const spread = 20 + rng() * 16 // how wide the cloud is (big, reads far out)
+  // a bumpy horizontal cluster — bigger core puffs, smaller ones piled on top.
+  // puffs are packed TIGHT + heavily overlapping so they melt into one soft
+  // lumpy mass, not a pile of separate balls (the "full circles" look).
+  const n = 7 + Math.floor(rng() * 5) // 7..11 puffs
+  const spread = 12 + rng() * 8 // TIGHTER so puffs deeply overlap
   for (let i = 0; i < n; i++) {
-    // lay puffs along a flattened disc so clouds are wider than tall, with a
-    // few stacked higher for a cauliflower top
+    // lay puffs along a flattened line so clouds are wide + low, deeply
+    // overlapping neighbours; a couple ride a little higher for a lumpy top
     const t = i / n
-    const bx = (rng() - 0.5) * spread * 2
-    const bz = (rng() - 0.5) * spread
-    const by = (rng() - 0.5) * 6 + (rng() < 0.4 ? 6 + rng() * 8 : 0) // some ride high
-    const r = 9 + rng() * 10 * (1 - t * 0.4) // core puffs bigger
+    const bx = (rng() - 0.5) * spread * 1.4
+    const bz = (rng() - 0.5) * spread * 0.5
+    const by = (rng() - 0.5) * 3 + (rng() < 0.35 ? 3 + rng() * 4 : 0)
+    const r = 10 + rng() * 8 * (1 - t * 0.3) // big, so neighbours overlap a lot
     // low-poly sphere: reads as a soft toon lump, cheap
     const geo = new THREE.SphereGeometry(r, 10, 8)
-    // squash very slightly so the blob is cloud-like, not a ball pile
-    geo.scale(1, 0.82, 1)
+    // squash flatter so it's a cloud mass, not a round ball
+    geo.scale(1.15, 0.6, 1.0)
     const mesh = new THREE.Mesh(geo, makeToonMaterial(0xf7f9f4))
     mesh.position.set(bx, by, bz)
     mesh.castShadow = false
@@ -88,21 +89,8 @@ function buildCloud(rng: () => number): Cloud {
     })
   }
 
-  // ONE crayon ink hull around the whole merged silhouette — the outline reads
-  // as a single hand-drawn cloud edge, not per-puff rings. Build a merged hull
-  // geometry from all puffs (in the cloud's local space) and wrap it.
-  const hullSources: THREE.BufferGeometry[] = []
-  for (const p of puffs) {
-    const g = p.mesh.geometry.clone()
-    g.translate(p.bx, p.by, p.bz)
-    hullSources.push(g)
-  }
-  const merged = mergeGeometries(hullSources)
-  for (const g of hullSources) g.dispose()
-  const outlineHost = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ visible: false }))
-  addInkOutline(outlineHost, INK_WEIGHT.prop)
-  group.add(outlineHost)
-
+  // NO ink outline on clouds — the merged hull read as an odd silhouette. Just
+  // the bubbly toon puffs, packed tight so they melt into one soft mass.
   return {
     group,
     puffs,
