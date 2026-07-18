@@ -26,6 +26,8 @@ export interface Crowd {
   ): void
   /** advance the GPU animation clock (one uniform write, no CPU animation) */
   update(dt: number): void
+  /** day->night dim (crowd shader ignores scene lights, so tint here) */
+  setNight(frac: number): void
   dispose(): void
 }
 
@@ -159,6 +161,7 @@ function bodyMaterial(outline: boolean): THREE.ShaderMaterial {
     side: outline ? THREE.BackSide : THREE.FrontSide,
     uniforms: {
       uTime: { value: 0 },
+      uNight: { value: 0 },
       uInk: { value: new THREE.Color(0x2c2824) },
       uRamp: { value: toonRamp() },
       uLight: { value: new THREE.Vector3(0.4, 0.9, 0.3).normalize() },
@@ -196,10 +199,12 @@ function bodyMaterial(outline: boolean): THREE.ShaderMaterial {
     fragmentShader: outline
       ? /* glsl */ `
         uniform vec3 uInk;
-        void main() { gl_FragColor = vec4(uInk, 1.0); }
+        uniform float uNight;
+        void main() { gl_FragColor = vec4(uInk * (1.0 - uNight * 0.4), 1.0); }
       `
       : /* glsl */ `
         uniform sampler2D uRamp;
+        uniform float uNight;
         varying vec3 vColor;
         varying vec3 vColor2;
         varying float vPattern;
@@ -222,7 +227,12 @@ function bodyMaterial(outline: boolean): THREE.ShaderMaterial {
             }
           }
           float lit = texture2D(uRamp, vec2(clamp(0.35 + vLit * 0.6, 0.02, 0.98), 0.5)).r;
-          gl_FragColor = vec4(base * mix(0.8, 1.0, lit), 1.0);
+          vec3 col = base * mix(0.8, 1.0, lit);
+          // NIGHT: the crowd shader ignores scene lights, so darken + cool it
+          // here so the stands don't glow bright while the rest goes dark.
+          vec3 night = col * vec3(0.34, 0.42, 0.6);
+          col = mix(col, night, uNight);
+          gl_FragColor = vec4(col, 1.0);
         }
       `,
   })
@@ -259,7 +269,7 @@ function faceMaterial(): THREE.ShaderMaterial {
     polygonOffset: true,
     polygonOffsetFactor: -1,
     polygonOffsetUnits: -1,
-    uniforms: { uTime: { value: 0 } },
+    uniforms: { uTime: { value: 0 }, uNight: { value: 0 } },
     vertexShader: /* glsl */ `
       attribute float aEye;
       attribute vec4 aSeed;
@@ -276,6 +286,7 @@ function faceMaterial(): THREE.ShaderMaterial {
       }
     `,
     fragmentShader: /* glsl */ `
+      uniform float uNight;
       varying float vEye;
       varying float vBlink;
       void main() {
@@ -283,7 +294,9 @@ function faceMaterial(): THREE.ShaderMaterial {
           if (vBlink > 0.5) discard;          // eyes shut on a blink
           gl_FragColor = vec4(0.11, 0.10, 0.09, 1.0);
         } else {
-          gl_FragColor = vec4(0.98, 0.96, 0.90, 1.0); // cream face plate
+          vec3 c = vec3(0.98, 0.96, 0.90);
+          c = mix(c, c * vec3(0.4, 0.48, 0.66), uNight); // faces dim at night too
+          gl_FragColor = vec4(c, 1.0);
         }
       }
     `,
@@ -301,7 +314,7 @@ function bannerGeometry(): THREE.BufferGeometry {
 function bannerMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
-    uniforms: { uTime: { value: 0 } },
+    uniforms: { uTime: { value: 0 }, uNight: { value: 0 } },
     vertexShader: /* glsl */ `
       attribute vec3 aColor;
       attribute vec3 aColor2;
@@ -321,6 +334,7 @@ function bannerMaterial(): THREE.ShaderMaterial {
       }
     `,
     fragmentShader: /* glsl */ `
+      uniform float uNight;
       varying vec3 vColor;
       varying vec3 vColor2;
       varying vec2 vUv;
@@ -330,6 +344,7 @@ function bannerMaterial(): THREE.ShaderMaterial {
         if (abs(vUv.y - 0.5) < 0.22) c = mix(c, vColor2, 0.85); // central band
         float border = step(0.04, vUv.x) * step(vUv.x, 0.96) * step(0.06, vUv.y) * step(vUv.y, 0.94);
         c = mix(vec3(0.14,0.12,0.11), c, border); // dark ink border
+        c = mix(c, c * vec3(0.34, 0.42, 0.6), uNight); // dim at night with the crowd
         gl_FragColor = vec4(c, 1.0);
       }
     `,
@@ -515,6 +530,12 @@ export function createCrowd(seats: readonly CrowdSeat[], fanKits: readonly KitCo
       outlineMat.uniforms.uTime!.value = t
       fMat.uniforms.uTime!.value = t
       bannerMat.uniforms.uTime!.value = t
+    },
+    setNight(frac: number): void {
+      fillMat.uniforms.uNight!.value = frac
+      outlineMat.uniforms.uNight!.value = frac
+      fMat.uniforms.uNight!.value = frac
+      bannerMat.uniforms.uNight!.value = frac
     },
     dispose(): void {
       bodyGeo.dispose()

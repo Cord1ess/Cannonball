@@ -256,8 +256,10 @@ const FRAG = /* glsl */ `
     // stronger toward the wall, fading to plain grass near the neutral disc,
     // so the center stays clean and the tint reads as "this side is theirs"
     float ownEdge = smoothstep(uNeutralR, uRadius * 0.9, r);
-    col = mix(col, ownerCol, 0.16 * ownEdge);
-    col = mix(col, vec3(0.82, 0.20, 0.16), danger * 0.45);
+    // ownership tint kept SUBTLE — big wedges (few players left) would otherwise
+    // read as a fully-coloured half from the spectate overview
+    col = mix(col, ownerCol, 0.1 * ownEdge);
+    col = mix(col, vec3(0.82, 0.20, 0.16), danger * 0.4);
 
     // ALARM: when the ball is in the LOCAL player's own zone, that whole wedge
     // BLINKS bright red so it's impossible to miss "get the ball out of here".

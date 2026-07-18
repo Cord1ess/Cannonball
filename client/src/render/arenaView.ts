@@ -247,7 +247,13 @@ function createFlags(ringR: number, baseY: number): FlagField {
 /** A tall floodlight tower: pole + a lamp bank of little bright cells + a soft
  *  beam sprite. Static geometry (cheap); the lamps brighten at night via the
  *  material already reacting to the scene light. */
-function buildLightTower(x: number, z: number, baseY: number): THREE.Group {
+interface LightTower {
+  group: THREE.Group
+  /** dim/bright the bulbs + turn the floodlight on toward the pitch at night */
+  setNight(frac: number): void
+}
+
+function buildLightTower(x: number, z: number, baseY: number): LightTower {
   const tower = new THREE.Group()
   tower.position.set(x, baseY, z)
   tower.rotation.y = yawTowardCenter(x, z)
@@ -259,7 +265,7 @@ function buildLightTower(x: number, z: number, baseY: number): THREE.Group {
   addInkOutline(pole, INK_WEIGHT.prop)
   tower.add(pole)
 
-  // lamp bank head: a boxy panel of bright cells tilted toward the pitch
+  // lamp bank head: a boxy panel of bulb cells tilted toward the pitch
   const head = new THREE.Group()
   head.position.set(0, H, 0.3)
   head.rotation.x = 0.5
@@ -267,7 +273,8 @@ function buildLightTower(x: number, z: number, baseY: number): THREE.Group {
   addInkOutline(backing, INK_WEIGHT.prop)
   head.add(backing)
   const lampGeo = new THREE.CircleGeometry(0.36, 10)
-  const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff3c8 }) // always-bright bulbs
+  // bulbs: dark-ish by day, blazing at night (setNight drives the colour)
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0x6a6656 })
   const lamps = new THREE.InstancedMesh(lampGeo, lampMat, 12)
   const lm = new THREE.Matrix4()
   let k = 0
@@ -280,7 +287,55 @@ function buildLightTower(x: number, z: number, baseY: number): THREE.Group {
   lamps.instanceMatrix.needsUpdate = true
   head.add(lamps)
   tower.add(head)
-  return tower
+
+  // a soft glow halo sprite in front of the bulbs (reads as the light bloom)
+  const glowCanvas = document.createElement('canvas')
+  glowCanvas.width = glowCanvas.height = 64
+  {
+    const c = glowCanvas.getContext('2d')!
+    const g = c.createRadialGradient(32, 32, 0, 32, 32, 32)
+    g.addColorStop(0, 'rgba(255,247,210,1)')
+    g.addColorStop(1, 'rgba(255,247,210,0)')
+    c.fillStyle = g
+    c.fillRect(0, 0, 64, 64)
+  }
+  const glowTex = new THREE.CanvasTexture(glowCanvas)
+  glowTex.colorSpace = THREE.SRGBColorSpace
+  const glowMat = new THREE.SpriteMaterial({
+    map: glowTex,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    opacity: 0,
+    fog: false,
+  })
+  const glow = new THREE.Sprite(glowMat)
+  glow.scale.setScalar(6)
+  glow.position.set(0, H, 1.0)
+  tower.add(glow)
+
+  // REAL floodlight: a SpotLight aimed from the lamp head at the pitch centre,
+  // OFF by day and switched on at night so the field is lit like a night match.
+  const spot = new THREE.SpotLight(0xfff3d8, 0, 160, Math.PI / 5, 0.5, 1.0)
+  spot.position.set(0, H, 0.3)
+  // aim at the arena centre: yawTowardCenter makes local +Z point at the centre,
+  // so the centre sits at local (0, 2-baseY, +dist) where dist = hypot(x,z).
+  const target = new THREE.Object3D()
+  target.position.set(0, 2 - baseY, Math.hypot(x, z))
+  tower.add(target)
+  spot.target = target
+  tower.add(spot)
+
+  const dayCol = new THREE.Color(0x6a6656)
+  const nightCol = new THREE.Color(0xfff7d2)
+  return {
+    group: tower,
+    setNight(frac: number): void {
+      lampMat.color.copy(dayCol).lerp(nightCol, frac)
+      glowMat.opacity = frac * 0.85
+      spot.intensity = frac * 2.4 // floodlight fades on at night
+    },
+  }
 }
 
 export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaView {
@@ -593,12 +648,15 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const flagField = createFlags(rimInner + 0.9, rimTop)
   group.add(flagField.group)
 
-  // --- 4 tall LIGHT TOWERS at the cardinal corners (beams + lamp banks) --------
+  // --- 4 tall LIGHT TOWERS at the cardinal corners (bulbs + real floodlights) --
+  const lightTowers: LightTower[] = []
   for (let i = 0; i < 4; i++) {
     const a = (i / 4) * Math.PI * 2 + Math.PI / 4 // corners, between the goals
     const tx = Math.cos(a) * (rimInner + 2.2)
     const tz = Math.sin(a) * (rimInner + 2.2)
-    group.add(buildLightTower(tx, tz, rimTop))
+    const t = buildLightTower(tx, tz, rimTop)
+    lightTowers.push(t)
+    group.add(t.group)
   }
 
   // --- the crowd: GPU-animated fans on the rake, skipping the aisles ----------
@@ -742,6 +800,11 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
       elapsed += dt
       dayNight?.update(dt)
       crowd.update(dt) // GPU-animated fans: one uniform write, no CPU cost
+      if (dayNight) {
+        const n = dayNight.night
+        crowd.setNight(n) // dim the crowd with nightfall
+        for (const t of lightTowers) t.setNight(n) // floodlights blaze on at night
+      }
       flagField.update(elapsed) // waving flags: one uniform write
       const cells = windField.step(dt)
       const dx = windField.dirX

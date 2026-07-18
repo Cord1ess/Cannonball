@@ -176,3 +176,75 @@ export function skyTexture(w = 1024, h = 512): THREE.CanvasTexture {
 
   return toTexture(canvas)
 }
+
+/**
+ * The MATCH BALL skin: a colourful world-cup-style football. A cream base with
+ * curved panel seams and bright accent panels (teal / coral / gold) so it reads
+ * as a real, lively football — not a flat solid ball. Painted in our style
+ * (wobbly seams, gouache mottle). Equirectangular, wraps on the sphere UV.
+ */
+export function ballTexture(w = 512, h = 256): THREE.CanvasTexture {
+  const [canvas, ctx] = makeCanvas(w, h)
+  // cream base
+  ctx.fillStyle = '#f5f0e2'
+  ctx.fillRect(0, 0, w, h)
+
+  const accents = ['#e0705a', '#3fb0a6', '#f0b93c', '#4a8fd0'] // coral/teal/gold/blue
+  const ink = '#3a342c'
+
+  // a lattice of rounded panels: staggered rows of hex-ish blobs. Some panels
+  // get an accent colour, most stay cream, a few carry a dark pentagon.
+  const cols = 8
+  const rows = 4
+  const cw = w / cols
+  const rh = h / rows
+  const rnd = (n: number): number => (Math.sin(n * 12.9898) * 43758.5453) % 1
+  let seed = 1
+  const panel = (cx: number, cy: number, r: number, fill: string): void => {
+    ctx.fillStyle = fill
+    ctx.beginPath()
+    const sides = 6
+    for (let i = 0; i <= sides; i++) {
+      const a = (i / sides) * Math.PI * 2 + 0.3
+      const wob = 1 + (rnd(seed++) - 0.5) * 0.22
+      const px = cx + Math.cos(a) * r * wob
+      const py = cy + Math.sin(a) * r * 0.86 * wob
+      if (i === 0) ctx.moveTo(px, py)
+      else ctx.lineTo(px, py)
+    }
+    ctx.closePath()
+    ctx.fill()
+    // dark seam outline (wobbly)
+    ctx.strokeStyle = ink
+    ctx.lineWidth = 3.2
+    ctx.stroke()
+  }
+
+  for (let ry = 0; ry < rows; ry++) {
+    for (let cx0 = 0; cx0 < cols; cx0++) {
+      const stagger = ry % 2 === 0 ? 0 : cw / 2
+      const px = cx0 * cw + cw / 2 + stagger
+      const py = ry * rh + rh / 2
+      const pick = rnd(cx0 * 7 + ry * 13 + 3)
+      let fill = '#f5f0e2'
+      if (pick > 0.82) fill = ink // dark pentagon panel
+      else if (pick > 0.5) fill = accents[Math.floor(rnd(cx0 * 3 + ry * 5) * accents.length + accents.length) % accents.length]!
+      // draw wrapped so the equirect seam is continuous
+      for (const ox of [-w, 0, w]) panel(px + ox, py, cw * 0.52, fill)
+    }
+  }
+
+  // baked gouache mottle so it sits in the paint style
+  ctx.globalAlpha = 0.05
+  ctx.fillStyle = '#5a504a'
+  for (let i = 0; i < 40; i++) {
+    ctx.beginPath()
+    ctx.arc(Math.random() * w, Math.random() * h, 6 + Math.random() * 22, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.globalAlpha = 1
+
+  const tex = toTexture(canvas)
+  tex.anisotropy = 4
+  return tex
+}

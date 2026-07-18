@@ -1,13 +1,16 @@
 import * as THREE from 'three'
 import { BALL_RADIUS } from '@shared/constants.ts'
-import { addInkOutline, INK_WEIGHT, makeToonMaterial } from './materials.ts'
-import { PALETTE } from './palette.ts'
+import { ballTexture } from './textures.ts'
+import { addInkOutline, INK_WEIGHT, toonRamp } from './materials.ts'
 
 /**
  * The most-watched object in the game. Smooth sphere (the sketchy art lives
  * in shading/outline, not the silhouette), with PHYSICAL rolling: rotation is
  * derived from actual motion — rolls exactly when grounded, keeps its spin
  * decaying through the air, and NEVER rotates while at rest.
+ *
+ * The ball wears a colourful world-cup-style panel skin (canvas texture) and is
+ * grounded by the REAL cast shadow only — no fake blob disc.
  */
 
 export interface BallView {
@@ -18,22 +21,14 @@ export interface BallView {
 export function createBallView(): BallView {
   const group = new THREE.Group()
 
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 36, 24), makeToonMaterial(PALETTE.ballCream))
+  const ball = new THREE.Mesh(
+    new THREE.SphereGeometry(BALL_RADIUS, 40, 28),
+    new THREE.MeshToonMaterial({ gradientMap: toonRamp(), map: ballTexture() }),
+  )
   ball.castShadow = true
   addInkOutline(ball, INK_WEIGHT.character)
   group.add(ball)
 
-  const blobMat = new THREE.MeshBasicMaterial({
-    color: PALETTE.shadowShape,
-    transparent: true,
-    opacity: 0.6,
-    depthWrite: false,
-  })
-  const blob = new THREE.Mesh(new THREE.CircleGeometry(BALL_RADIUS * 1.15, 32), blobMat)
-  blob.rotation.x = -Math.PI / 2
-  group.add(blob)
-
-  const zoneColor = new THREE.Color()
   const rollAxis = new THREE.Vector3()
   const airAxis = new THREE.Vector3(1, 0, 0)
   const q = new THREE.Quaternion()
@@ -42,7 +37,7 @@ export function createBallView(): BallView {
 
   return {
     group,
-    update(x: number, y: number, z: number, zone: number | null): void {
+    update(x: number, y: number, z: number, _zone: number | null): void {
       ball.position.set(x, y, z)
 
       // physical roll from actual displacement — no phantom spin
@@ -67,15 +62,6 @@ export function createBallView(): BallView {
         }
       }
       last = { x, z }
-
-      blob.position.set(x, 0.045, z)
-      blobMat.opacity = Math.max(0.25, 0.65 - (y - BALL_RADIUS) * 0.08)
-      if (zone === null) {
-        blobMat.color.setHex(PALETTE.shadowShape)
-      } else {
-        zoneColor.setHex(zone)
-        blobMat.color.copy(zoneColor)
-      }
     },
   }
 }

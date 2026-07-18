@@ -1066,7 +1066,8 @@ export function createOnlineGame(
       // zone-owner labels: name painted FLAT on the grass in each wedge, so
       // it reads as territory (not a floating player tag).
       const zoneCount = zoneSeatArr?.length ?? 0
-      const showZoneLabels = isPlayPhase(state.phase ?? 0)
+      // no ground name markers while spectating (the leaderboard names everyone)
+      const showZoneLabels = isPlayPhase(state.phase ?? 0) && !this.spectating()
       for (let i = 0; i < zoneLabels.length; i++) {
         const label = zoneLabels[i]!
         if (!showZoneLabels || i >= zoneCount) {
@@ -1103,7 +1104,7 @@ export function createOnlineGame(
             followed = true
           }
         }
-        if (!followed) camera.updateOrbit(dt, arena.radius + 16, 20)
+        if (!followed) camera.updateOrbit(dt, arena.radius + 21, 22) // just past the cannons
       } else {
         camera.update(dt, selfX, selfY, selfZ)
       }
