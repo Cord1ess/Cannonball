@@ -408,13 +408,14 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const DISPLAY_BAND = 1.5 // the ad band height on top of the plinth
   const STANDS_BASE = PLINTH_H + DISPLAY_BAND // first seat row rests on top of the display
 
-  // --- APRON: extend the ground out from the grass to under the stands so the
-  // net + display + first seats have SOLID ground to sit on (no floating/hole)
+  // --- APRON: a RING (annulus) from the field edge out to the stands so the
+  // net + display + first seats have solid ground — NOT a full disc (that would
+  // sit under the grass and z-fight it). Dropped just below the grass surface.
   const apron = new THREE.Mesh(
-    new THREE.CylinderGeometry(STANDS_INNER + 0.1, STANDS_INNER + 0.1, 0.6, SEGMENTS),
+    ringGeometry(radius - 0.3, STANDS_INNER + 0.15, 0.55),
     makeToonMaterial(STADIUM.frame),
   )
-  apron.position.y = -0.3 // top surface flush with the field (y=0)
+  apron.position.y = -0.6 // top at ~-0.05, just under the grass so it never fights it
   group.add(apron)
 
   // --- protective NET right at the field edge, standing UP FROM THE GROUND ----
