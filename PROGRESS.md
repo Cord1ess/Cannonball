@@ -3,7 +3,26 @@
 > Session handoff document. Updated at every milestone. Read top-to-bottom to
 > resume: DONE tells you what exists, NEXT tells you what to build.
 
-## STATUS: M0–M5a + playtest feedback rounds · NEXT UP: M5b (light arc, banners)
+## STATUS: M0–M5a + M5b day→night arc · NEXT UP: rest of M5b (banners, elim-in-stands, faces)
+
+### M5b — day → night light arc (first M5b piece, done)
+Survivor-driven: the pitch opens in full daylight and eases toward a dusky moonlit NIGHT,
+reaching FULL night by the time 3 players remain (stays night through the duel). Reset to day
+in lobby/pre-match. `render/dayNight.ts` owns two keyframe palettes (DAY/NIGHT) and lerps the
+sun (color+intensity+lowers toward horizon), hemisphere fill, scene.fog (color+near/far), the
+sky-dome tint (multiplied down to night blue), and the GRASS — which is unlit (MeshBasicMaterial)
+so it can't take lights; a new `uNight` uniform tints it down + cool IN THE FRAG SHADER (tips keep
+a sliver of moonlight so blades still read). `nightFrac` is EASED (`frac += (target-frac)*dt*0.55`,
+frame-rate-independent) so dusk falls gradually, never a snap on elimination. Wiring: main.ts owns
+sun/hemi/sky/fog and passes a `WorldLighting` bundle into the game → `createArenaView(radius,
+lighting)` builds the DayNight and drives it from `arenaView.update(dt)`; online.ts + sandbox.ts
+call `arenaView.setSurvivors(n)` each frame (day in non-play phases). DEBUG: new "world" accordion
+group with a `night ↔ day` toggle (`nightCycle`, CLIENT-ONLY — intercepted in online.ts, never sent
+to the server; `debugForceNight` overrides the survivor arc) so night is previewable without
+playing down to 3. Stadium light PROPS (lamps/lanterns) come later. Verified: typecheck + 56 tests,
+zero shader errors, full-night palette screenshotted (deep-blue sky, cooled stadium, crowd faces
+read like lights in the dark, deeper grass). NOTE: headless rAF is throttled so the eased arc
+crawls in playwright — the DESTINATION palette is correct; real 60fps browser converges in ~2-3s.
 
 ### Playtest feedback round 2
 - Own name tag now floats over MY head in-match too (not just the flat grass zone label).
@@ -232,9 +251,10 @@ the circular wall), all four smokes, playwright lobby/launch/arena screenshots.
 
 ## NEXT (see implementation_plan.md for full detail)
 
-- **M5b art & world remainder:** day→sunset→dusk light arc + lanterns at duel, banners w/ fake
-  glyphs on the rim, eliminated players seated in the stands, bean face expression swaps, HUD
-  paper skin, menu/draft camera framing (currently stares from spawn).
+- **M5b art & world remainder:** day→night light arc DONE (see above); still to do — stadium light
+  PROPS (lamps/lanterns lit at night), banners w/ fake glyphs on the rim, eliminated players seated
+  in the stands, bean face expression swaps, HUD paper skin, menu/draft camera framing (currently
+  stares from spawn).
 - **M6 juice & audio:** hitstop, camera punch, squash-stretch, pooled particles (header burst,
   launch puff, elim poof, confetti), force-scaled SFX over vendored WebAudio (+`toneClip`
   placeholders), one lo-fi loop, autoplay unlock, tab-mute.
