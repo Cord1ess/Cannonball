@@ -5,3 +5,6 @@ dist/
 .DS_Store
 
 *.zip
+
+CLAUDE.md
+docs/
