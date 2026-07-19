@@ -98,68 +98,99 @@ export function skyTexture(w = 1024, h = 512): THREE.CanvasTexture {
 }
 
 /**
- * The MATCH BALL skin: a colourful world-cup-style football. A cream base with
- * curved panel seams and bright accent panels (teal / coral / gold) so it reads
- * as a real, lively football — not a flat solid ball. Painted in our style
- * (wobbly seams, gouache mottle). Equirectangular, wraps on the sphere UV.
+ * The MATCH BALL skin (art_direction.md §5, §3): a CLEAN classic football — the
+ * Telstar look, cream-white with black-pentagon patches — painted in OUR style.
+ * The "black" patches are warm ink `#4A443C` (never pure black, §2.2), drawn as
+ * wobbly hand-inked pentagons with broken seam strokes radiating out to the
+ * neighbouring patches, over a gouache-mottled cream base so no surface is flat
+ * (§2.1). No accent colours: saturation is rationed to teams (§2.4). The 3D mesh
+ * carries the heaviest ink OUTLINE separately. Equirectangular, wraps on the UV.
+ *
+ * Pentagon placement is the icosahedral soccer-ball layout flattened to equirect:
+ * one patch at each pole and two staggered rings of five around the belly — the
+ * distribution the eye reads instantly as "football".
  */
 export function ballTexture(w = 512, h = 256): THREE.CanvasTexture {
   const [canvas, ctx] = makeCanvas(w, h)
-  // cream base
-  ctx.fillStyle = '#f5f0e2'
+  const cream = '#f5f0e2'
+  const ink = '#4a443c' // warm dark gray-brown — the palette ink, NOT black
+
+  ctx.fillStyle = cream
   ctx.fillRect(0, 0, w, h)
 
-  const accents = ['#e0705a', '#3fb0a6', '#f0b93c', '#4a8fd0'] // coral/teal/gold/blue
-  const ink = '#3a342c'
+  // deterministic wobble so the ball looks the same every load (it's iconic, not
+  // random like the world dressing) — a cheap hash keyed on a running seed.
+  let seed = 7
+  const rnd = (): number => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return seed / 0x7fffffff
+  }
 
-  // a lattice of rounded panels: staggered rows of hex-ish blobs. Some panels
-  // get an accent colour, most stay cream, a few carry a dark pentagon.
-  const cols = 8
-  const rows = 4
-  const cw = w / cols
-  const rh = h / rows
-  const rnd = (n: number): number => (Math.sin(n * 12.9898) * 43758.5453) % 1
-  let seed = 1
-  const panel = (cx: number, cy: number, r: number, fill: string): void => {
-    ctx.fillStyle = fill
-    ctx.beginPath()
-    const sides = 6
-    for (let i = 0; i <= sides; i++) {
-      const a = (i / sides) * Math.PI * 2 + 0.3
-      const wob = 1 + (rnd(seed++) - 0.5) * 0.22
-      const px = cx + Math.cos(a) * r * wob
-      const py = cy + Math.sin(a) * r * 0.86 * wob
-      if (i === 0) ctx.moveTo(px, py)
-      else ctx.lineTo(px, py)
+  // the 12 pentagon centres in (u,v) 0..1. u wraps; v is 0=top pole .. 1=bottom.
+  // poles sit ON the seam-free caps; the two belly rings are offset by half a
+  // step so they interlock like the real ball.
+  const R = h * 0.13 // patch radius in px (belly); poles drawn a touch smaller
+  const centres: Array<{ u: number; v: number; r: number }> = [
+    { u: 0.25, v: 0.12, r: 0.82 }, // top cap (near pole, not on it)
+    { u: 0.75, v: 0.12, r: 0.82 },
+    { u: 0.25, v: 0.88, r: 0.82 }, // bottom cap
+    { u: 0.75, v: 0.88, r: 0.82 },
+  ]
+  for (let i = 0; i < 5; i++) {
+    centres.push({ u: i / 5, v: 0.36, r: 1 }) // upper belly ring
+    centres.push({ u: i / 5 + 0.1, v: 0.64, r: 1 }) // lower belly ring, offset
+  }
+
+  // one hand-inked pentagon: a wobbly filled 5-gon with a slightly darker broken
+  // rim so the edge reads as a drawn stroke, plus short seam ticks poking out
+  // toward its neighbours (the classic radiating soccer seams).
+  const pentagon = (cx: number, cy: number, r: number): void => {
+    const rot = rnd() * Math.PI * 2
+    const pts: Array<[number, number]> = []
+    for (let i = 0; i < 5; i++) {
+      const a = rot + (i / 5) * Math.PI * 2
+      const wob = 1 + (rnd() - 0.5) * 0.16
+      pts.push([cx + Math.cos(a) * r * wob, cy + Math.sin(a) * r * 0.9 * wob])
     }
+    ctx.beginPath()
+    ctx.moveTo(pts[0]![0], pts[0]![1])
+    for (let i = 1; i < 5; i++) ctx.lineTo(pts[i]![0], pts[i]![1])
     ctx.closePath()
+    ctx.fillStyle = ink
     ctx.fill()
-    // dark seam outline (wobbly)
-    ctx.strokeStyle = ink
-    ctx.lineWidth = 3.2
+    // broken rim stroke, warm ink a touch lighter, so the edge looks drawn
+    ctx.strokeStyle = '#5a5348'
+    ctx.lineWidth = 2.4
+    ctx.lineCap = 'round'
     ctx.stroke()
-  }
-
-  for (let ry = 0; ry < rows; ry++) {
-    for (let cx0 = 0; cx0 < cols; cx0++) {
-      const stagger = ry % 2 === 0 ? 0 : cw / 2
-      const px = cx0 * cw + cw / 2 + stagger
-      const py = ry * rh + rh / 2
-      const pick = rnd(cx0 * 7 + ry * 13 + 3)
-      let fill = '#f5f0e2'
-      if (pick > 0.82) fill = ink // dark pentagon panel
-      else if (pick > 0.5) fill = accents[Math.floor(rnd(cx0 * 3 + ry * 5) * accents.length + accents.length) % accents.length]!
-      // draw wrapped so the equirect seam is continuous
-      for (const ox of [-w, 0, w]) panel(px + ox, py, cw * 0.52, fill)
+    // seam ticks radiating from each vertex (the white-hexagon boundaries)
+    ctx.strokeStyle = ink
+    ctx.lineWidth = 2.2
+    for (const [px, py] of pts) {
+      const ang = Math.atan2(py - cy, px - cx)
+      const len = r * (0.5 + rnd() * 0.35)
+      ctx.globalAlpha = 0.55
+      ctx.beginPath()
+      ctx.moveTo(px, py)
+      ctx.lineTo(px + Math.cos(ang) * len, py + Math.sin(ang) * len)
+      ctx.stroke()
     }
+    ctx.globalAlpha = 1
   }
 
-  // baked gouache mottle so it sits in the paint style
-  ctx.globalAlpha = 0.05
-  ctx.fillStyle = '#5a504a'
-  for (let i = 0; i < 40; i++) {
+  // draw every patch wrapped across the u-seam (−w, 0, +w) so it's continuous
+  for (const c of centres) {
+    const cx = c.u * w
+    const cy = c.v * h
+    for (const ox of [-w, 0, w]) pentagon(cx + ox, cy, R * c.r)
+  }
+
+  // gouache mottle over the whole ball so the cream is never a flat fill (§2.1)
+  ctx.globalAlpha = 0.04
+  ctx.fillStyle = '#8a8072'
+  for (let i = 0; i < 46; i++) {
     ctx.beginPath()
-    ctx.arc(Math.random() * w, Math.random() * h, 6 + Math.random() * 22, 0, Math.PI * 2)
+    ctx.arc(rnd() * w, rnd() * h, 5 + rnd() * 20, 0, Math.PI * 2)
     ctx.fill()
   }
   ctx.globalAlpha = 1
