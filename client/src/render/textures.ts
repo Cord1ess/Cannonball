@@ -199,3 +199,109 @@ export function ballTexture(w = 512, h = 256): THREE.CanvasTexture {
   tex.anisotropy = 4
   return tex
 }
+
+/**
+ * The perimeter AD BOARDS (art_direction.md §6): the ring of sponsor signs on
+ * the stadium's LED band facing the pitch. A repeating strip of ad panels, each
+ * a muted-saturated board with FAKE-GLYPH lettering — invented block letterforms
+ * drawn as ink strokes (Japanese-ish, an Abeto signature §6), never real brand
+ * names or logos. A couple of panels carry a simple painted mark. Wobbly seams
+ * + gouache mottle keep it in-style; the strip tiles seamlessly around the ring.
+ *
+ * `panels` = how many ad boards fit around the full circumference. The texture
+ * repeats horizontally, so the caller sets tex.repeat.x to the ring loop count.
+ */
+export function adBoardTexture(w = 1024, h = 128): THREE.CanvasTexture {
+  const [canvas, ctx] = makeCanvas(w, h)
+  const ink = '#3a352d'
+  // muted-saturated board colours (rationed palette — a shade below the teams so
+  // the beans still read as the loudest thing on the pitch, §2.4)
+  const boards = ['#c65b4e', '#d69a3a', '#4b93b0', '#5c9e6a', '#8a6fb0', '#c9803f']
+
+  const PANELS = 6
+  const pw = w / PANELS
+  let seed = 3
+  const rnd = (): number => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return seed / 0x7fffffff
+  }
+
+  // one fake-glyph "word": a run of blocky invented letterforms built from a few
+  // ink strokes each (vertical/horizontal bars + a stub), baseline-aligned.
+  const glyph = (gx: number, gy: number, gw: number, gh: number, col: string): void => {
+    ctx.strokeStyle = col
+    ctx.lineWidth = Math.max(2, gh * 0.16)
+    ctx.lineCap = 'square'
+    const strokes = 2 + Math.floor(rnd() * 3)
+    for (let s = 0; s < strokes; s++) {
+      const vertical = rnd() > 0.45
+      ctx.beginPath()
+      if (vertical) {
+        const x = gx + rnd() * gw
+        const y0 = gy + rnd() * gh * 0.3
+        ctx.moveTo(x, y0)
+        ctx.lineTo(x + (rnd() - 0.5) * 2, gy + gh * (0.7 + rnd() * 0.3))
+      } else {
+        const y = gy + rnd() * gh
+        ctx.moveTo(gx + rnd() * gw * 0.3, y)
+        ctx.lineTo(gx + gw * (0.7 + rnd() * 0.3), y + (rnd() - 0.5) * 2)
+      }
+      ctx.stroke()
+    }
+  }
+
+  const word = (cx: number, cy: number, maxW: number, gh: number, col: string): void => {
+    const n = 3 + Math.floor(rnd() * 4)
+    const gap = 4
+    const gw = (maxW - gap * (n - 1)) / n
+    let x = cx - maxW / 2
+    for (let i = 0; i < n; i++) {
+      glyph(x, cy - gh / 2, gw, gh, col)
+      x += gw + gap
+    }
+  }
+
+  for (let p = 0; p < PANELS; p++) {
+    const x0 = p * pw
+    const bg = boards[p % boards.length]!
+    // board fill with a wobbly inner edge so the seam looks hand-cut
+    ctx.fillStyle = bg
+    ctx.fillRect(x0, 0, pw, h)
+    // gouache value wobble so the board isn't a flat fill (§2.1)
+    ctx.globalAlpha = 0.06
+    for (let i = 0; i < 10; i++) {
+      ctx.fillStyle = rnd() > 0.5 ? '#ffffff' : '#000000'
+      ctx.beginPath()
+      ctx.arc(x0 + rnd() * pw, rnd() * h, 8 + rnd() * 26, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.globalAlpha = 1
+    // cream sign plate the lettering sits on (like a painted banner card)
+    const plW = pw * 0.8
+    const plH = h * 0.54
+    ctx.fillStyle = '#f2ecdc'
+    ctx.fillRect(x0 + (pw - plW) / 2, (h - plH) / 2, plW, plH)
+    // wobbly ink frame on the plate
+    ctx.strokeStyle = ink
+    ctx.lineWidth = 3
+    ctx.strokeRect(x0 + (pw - plW) / 2 + 1, (h - plH) / 2 + 1, plW - 2, plH - 2)
+    // fake-glyph "sponsor" word in the board colour, on the plate
+    word(x0 + pw / 2, h / 2, plW * 0.78, plH * 0.5, bg)
+    // a couple of panels get a small painted mark (a dot cluster) beside the word
+    if (p % 3 === 0) {
+      ctx.fillStyle = ink
+      for (let d = 0; d < 3; d++) {
+        ctx.beginPath()
+        ctx.arc(x0 + pw * 0.16 + d * 5, h * 0.5, 2.5, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+    // dark seam between boards (the LED bezel)
+    ctx.fillStyle = ink
+    ctx.fillRect(x0 - 1.5, 0, 3, h)
+  }
+
+  const tex = toTexture(canvas, true) // repeats around the ring
+  tex.anisotropy = 4
+  return tex
+}

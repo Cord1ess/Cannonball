@@ -9,6 +9,7 @@ import { createWindStreaks, type StreakCell, type WindStreaks } from './windStre
 import { createWindMarks, type WindMark, type WindMarks } from './windMarks.ts'
 import { createCrowd, type CrowdSeat } from './crowd.ts'
 import { addInkOutline, disposeHierarchy, INK_WEIGHT, makeToonMaterial } from './materials.ts'
+import { adBoardTexture } from './textures.ts'
 import { PALETTE } from './palette.ts'
 
 /**
@@ -627,10 +628,17 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   boardWall.position.y = PLINTH_H
   addInkOutline(boardWall, INK_WEIGHT.arena)
   group.add(boardWall)
-  // 3) the dark LED ad screen on the inner (pitch-facing) face of the band
+  // 3) the LED ad screen on the inner (pitch-facing) face of the band: the ring
+  // of fake-glyph SPONSOR BOARDS (art_direction.md §6). The board strip tiles
+  // around the circumference; each texture repeat holds 6 panels, so ~4 loops
+  // give a believable count of perimeter ads. Unlit basic material (it's a
+  // painted sign, not a lit surface) so it stays crisp against the toon stadium.
+  const AD_LOOPS = 4
+  const adTex = adBoardTexture()
+  adTex.repeat.set(AD_LOOPS, 1)
   const screen = new THREE.Mesh(
     new THREE.CylinderGeometry(DISPLAY_INNER - 0.02, DISPLAY_INNER - 0.02, DISPLAY_BAND * 0.86, SEGMENTS, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0x2b3038, side: THREE.BackSide }),
+    new THREE.MeshBasicMaterial({ map: adTex, side: THREE.BackSide }),
   )
   screen.position.y = PLINTH_H + DISPLAY_BAND * 0.5
   group.add(screen)
