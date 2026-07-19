@@ -84,7 +84,22 @@ interface Session {
   offers: Record<CardPool, string[]> | null
   kitId: string
   isBot: boolean
-  bot?: { wanderX: number; wanderZ: number; wanderT: number }
+  bot?: BotBrain
+}
+
+/** bot archetypes — the fleet is a MIX so they don't all behave alike:
+ *  - keeper  : disciplined wedge defender, clears the ball, low aggression
+ *  - hunter  : stalks the nearest OPPONENT and dives to knock them off their feet
+ *  - scrapper: high-mobility ball-chaser, contests neutral balls all over, shoves */
+type BotKind = 'keeper' | 'hunter' | 'scrapper'
+interface BotBrain {
+  kind: BotKind
+  wanderX: number
+  wanderZ: number
+  wanderT: number
+  targetSeat: number // current opponent a hunter is stalking (-1 = none)
+  retargetT: number // seconds until a hunter re-picks its victim
+  aggro: number // 0..1 per-bot temperament, jitters jump/dive/sprint odds
 }
 
 export class MatchRoom extends Room<{ state: MatchStateT }> {
@@ -435,7 +450,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       offers: null,
       kitId: DEFAULT_KIT_IDS[seat] ?? DEFAULT_KIT_IDS[0]!,
       isBot: true,
-      bot: { wanderX: 0, wanderZ: 0, wanderT: 0 },
+      bot: this.#makeBotBrain(),
     })
     const ps = new PlayerState()
     ps.sessionId = id
@@ -448,11 +463,58 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     return true
   }
 
+  /** a fresh bot brain with a randomized archetype so the fleet is a MIX. The
+   *  spread leans playful: keepers defend, hunters harass opponents, scrappers
+   *  chase everything. aggro jitters each bot's jump/dive/sprint temperament. */
+  #makeBotBrain(): BotBrain {
+    const r = this.#rng.next()
+    const kind: BotKind = r < 0.4 ? 'keeper' : r < 0.75 ? 'hunter' : 'scrapper'
+    return {
+      kind,
+      wanderX: 0,
+      wanderZ: 0,
+      wanderT: 0,
+      targetSeat: -1,
+      retargetT: 0,
+      aggro: 0.4 + this.#rng.next() * 0.6,
+    }
+  }
+
+  /** nearest ALIVE opponent to a seat (never self). Used so hunters go after
+   *  EACH OTHER, not gang up on the human. `preferSeat` biases toward a specific
+   *  rival (e.g. whoever owns the ball threat) when it's reasonably close. */
+  #nearestOpponent(sim: PlayerSim, preferSeat = -1): { seat: number; dist: number } {
+    let best = -1
+    let bestD = Infinity
+    for (const other of this.#sessions.values()) {
+      const o = other.sim
+      if (o.seat === sim.seat || !this.#alive[o.seat]) continue
+      let d = Math.hypot(o.x - sim.x, o.z - sim.z)
+      if (o.seat === preferSeat) d *= 0.6 // bias toward the preferred rival
+      if (d < bestD) {
+        bestD = d
+        best = o.seat
+      }
+    }
+    return { seat: best, dist: bestD }
+  }
+
+  /** a seat's current sim (or null). */
+  #simOfSeat(seat: number): PlayerSim | null {
+    for (const s of this.#sessions.values()) if (s.sim.seat === seat) return s.sim
+    return null
+  }
+
   /**
-   * The M7 bot, pulled forward: roam your wedge; when the ball is in YOUR
-   * wedge (or sitting in the neutral disc and you're the nearest bean),
-   * charge it from the wall side, jump close, dive through it — the header
-   * clears it away from your wall. Dumb but alive.
+   * The M7 bot — personality-driven so the fleet is alive and varied, and bots
+   * go after EACH OTHER, not just the human:
+   *  - keeper : hold your wedge; when the ball is yours (or neutral + you're
+   *             nearest), charge from the wall side, jump close, header it clear.
+   *  - hunter : stalk the nearest OPPONENT (biased toward whoever's threatening
+   *             the ball) and DIVE into them to knock them off their feet; drop
+   *             everything to defend if the ball lands in your own wedge.
+   *  - scrapper: race for the ball anywhere it goes, shoving through the pack;
+   *             restless, always moving.
    */
   #botInput(session: Session, dt: number): PlayerInputFrame {
     const sim = session.sim
@@ -461,10 +523,11 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     const zone = this.#zoneSeat.indexOf(sim.seat)
     const ballZone = footprintZone(this.#arena, ball.x, ball.z)
     const distToBall = Math.hypot(ball.x - sim.x, ball.z - sim.z)
+    const ballIsMine = ballZone >= 0 && this.#zoneSeat[ballZone] === sim.seat
+    const ballThreatSeat = ballZone >= 0 ? (this.#zoneSeat[ballZone] ?? -1) : -1
 
-    let chase = ballZone >= 0 && this.#zoneSeat[ballZone] === sim.seat
-    if (!chase && ballZone === -1) {
-      // neutral ball: nearest alive bean takes initiative
+    // nearest alive bean to a neutral ball takes initiative (shared by all kinds)
+    const nearestToBall = (): boolean => {
       let nearest = Infinity
       let nearestSeat = -1
       for (const other of this.#sessions.values()) {
@@ -475,21 +538,21 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
           nearestSeat = other.sim.seat
         }
       }
-      chase = nearestSeat === sim.seat
+      return nearestSeat === sim.seat
     }
 
-    let tx: number
-    let tz: number
+    let tx = sim.x
+    let tz = sim.z
     let jump = false
     let dive = false
     let sprint = false
+    let ability = false
 
-    if (chase && zone >= 0) {
-      const wallAngle = this.#arena.zoneAngles[zone] ?? 0
-      const wx = Math.cos(wallAngle)
-      const wz = Math.sin(wallAngle)
-      const behindX = ball.x + wx * 2.4
-      const behindZ = ball.z + wz * 2.4
+    // shared "clear the ball" behavior — approach from the wall side then header
+    const goClearBall = (): void => {
+      const wallAngle = this.#arena.zoneAngles[Math.max(zone, 0)] ?? 0
+      const behindX = ball.x + Math.cos(wallAngle) * 2.4
+      const behindZ = ball.z + Math.sin(wallAngle) * 2.4
       const distBehind = Math.hypot(behindX - sim.x, behindZ - sim.z)
       if (distBehind > 1.4 && distToBall > 3.6) {
         tx = behindX
@@ -499,32 +562,104 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
         tx = ball.x
         tz = ball.z
         jump = sim.grounded && distToBall < 5
-        dive = !sim.grounded && !sim.diving && distToBall < 4.2 && this.#rng.next() < 0.4
+        dive = !sim.grounded && !sim.diving && distToBall < 4.2 && this.#rng.next() < 0.35 + bot.aggro * 0.2
       }
-    } else {
+      ability = this.#rng.next() < 0.008
+    }
+
+    // restless wander around a home point so idle bots keep MOVING (not standing)
+    const wanderAround = (frac: number, spread: number): void => {
       bot.wanderT -= dt
       if (bot.wanderT <= 0) {
-        bot.wanderT = 1.5 + this.#rng.next() * 2.5
-        bot.wanderX = (this.#rng.next() - 0.5) * 7
-        bot.wanderZ = (this.#rng.next() - 0.5) * 7
-        if (this.#rng.next() < 0.12) jump = sim.grounded
+        bot.wanderT = 0.8 + this.#rng.next() * 1.8
+        bot.wanderX = (this.#rng.next() - 0.5) * spread
+        bot.wanderZ = (this.#rng.next() - 0.5) * spread
+        if (this.#rng.next() < 0.14 * bot.aggro) jump = sim.grounded
       }
-      const anchor = zoneAnchor(this.#arena, Math.max(zone, 0), 0.55)
+      const anchor = zoneAnchor(this.#arena, Math.max(zone, 0), frac)
       tx = anchor.x + bot.wanderX
       tz = anchor.z + bot.wanderZ
+    }
+
+    if (bot.kind === 'hunter') {
+      // defend first if the ball is genuinely in MY wedge — survival over sabotage
+      if (ballIsMine && distToBall < 12) {
+        goClearBall()
+      } else {
+        // pick / refresh a victim: the nearest opponent, biased toward whoever's
+        // currently threatened by the ball (so aggression spreads across rivals).
+        bot.retargetT -= dt
+        if (bot.retargetT <= 0 || bot.targetSeat < 0 || !this.#alive[bot.targetSeat]) {
+          bot.retargetT = 1.5 + this.#rng.next() * 2
+          bot.targetSeat = this.#nearestOpponent(sim, ballThreatSeat).seat
+        }
+        const victim = bot.targetSeat >= 0 ? this.#simOfSeat(bot.targetSeat) : null
+        if (victim) {
+          const d = Math.hypot(victim.x - sim.x, victim.z - sim.z)
+          // drive STRAIGHT at the victim so yaw (which follows movement) locks on;
+          // sprint to close and keep barging into them — the running shoves alone
+          // knock them off their line and out of position (real disruption).
+          tx = victim.x + victim.vx * 0.15
+          tz = victim.z + victim.vz * 0.15
+          sprint = true
+          // DIVE-LAUNCH: the dive lunges along yaw and floats UP, so it lands the
+          // major shove best when the victim is ALSO airborne (they meet in the
+          // air, small Δy, and only the diver is diving → a real launch). Pounce
+          // when close to a jumping/airborne victim who isn't diving; otherwise a
+          // low descent-dive right on top of a grounded one. The constant barging
+          // (sprint into them above) is the reliable disruption; this is the spike.
+          const closeEnough = d < 2.0
+          const victimAir = victim.y > 0.5 && !victim.diving
+          const levelWith = Math.abs(victim.y - sim.y) < 1.2
+          if (closeEnough && !victim.diving) {
+            if (victimAir && !sim.grounded && !sim.diving && levelWith) {
+              dive = true // both airborne, lined up → LAUNCH them out of the air
+            } else if (victimAir && sim.grounded) {
+              jump = true // they're up — leap to meet them
+            } else if (!victim.diving && sim.grounded && d < 1.3) {
+              jump = true // grounded target, right on them — hop to dive next
+            } else if (!sim.grounded && !sim.diving && sim.vy < 0 && sim.y < 1.2 && d < 1.3) {
+              dive = true // descending onto a grounded victim at point blank
+            }
+          }
+        } else {
+          wanderAround(0.5, 8)
+        }
+      }
+    } else if (bot.kind === 'scrapper') {
+      // chase the ball wherever it is — contest neutral + others' balls too
+      if (ballIsMine || ballZone === -1 || nearestToBall() || distToBall < 9) {
+        goClearBall()
+        sprint = sprint || distToBall > 6
+      } else {
+        // shadow the ball's side of the field, restless, ready to pounce
+        tx = ball.x * 0.6
+        tz = ball.z * 0.6
+        sprint = Math.hypot(tx - sim.x, tz - sim.z) > 8
+        wanderAround(0.6, 5)
+        // still steer toward the ball's half
+        tx = (tx + ball.x * 0.6) * 0.5
+        tz = (tz + ball.z * 0.6) * 0.5
+      }
+    } else {
+      // keeper: disciplined — clear your ball, else patrol your wedge
+      if (ballIsMine || (ballZone === -1 && nearestToBall())) {
+        goClearBall()
+      } else {
+        wanderAround(0.55, 6)
+      }
     }
 
     let dirX = tx - sim.x
     let dirZ = tz - sim.z
     const len = Math.hypot(dirX, dirZ)
-    if (len < 0.5) {
+    if (len < 0.4) {
       dirX = 0
       dirZ = 0
     } else {
       dirX /= len
       dirZ /= len
     }
-    const ability = chase && this.#rng.next() < 0.008 // occasional ability use
     return { dirX, dirZ, jump, dive, sprint, ability }
   }
 
