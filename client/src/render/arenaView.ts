@@ -39,6 +39,9 @@ export interface ArenaView {
     seatKits?: readonly (KitColors | undefined)[],
     seatAlive?: readonly boolean[],
   ): void
+  /** aim a zone's cannon during the kickoff: yaw offset (rad) + charge 0..1.
+   *  moves the barrel (yaw + pitch) and fills the charge bar. */
+  setCannonAim(zone: number, aimYaw: number, charge: number): void
   /** match progress → day->night arc target (elims done / elims-to-night) */
   setMatchProgress(survivors: number, seatsAtStart: number): void
   /** debug: force full night on/off, overriding the progress-driven arc */
@@ -801,33 +804,91 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const cannonsGroup = new THREE.Group()
   group.add(cannonsGroup)
 
-  function buildCannon(angle: number, zoneColor: number): THREE.Group {
+  // per-zone cannon rig handles so the launch controller can MOVE the barrel
+  // (yaw with aim, pitch with charge) and fill the charge indicator live.
+  interface CannonRig {
+    group: THREE.Group
+    yoke: THREE.Group // yaws left/right with aim
+    barrel: THREE.Group // pitches up/down with charge
+    chargeFill: THREE.Mesh // grows with charge (a paint bar on the barrel)
+    baseYaw: number // the inward-facing yaw (aim offsets from here)
+    basePitch: number // the resting barrel pitch
+  }
+  const cannonRigs: CannonRig[] = []
+
+  // barrel pitch range: LOW charge = lofted (steeper, more up), FULL charge =
+  // flatter (barrel drops toward the pitch). Tuned to read as elevation change.
+  const PITCH_LOFT = 1.15 // barrel.rotation.x at charge 0 (more vertical)
+  const PITCH_FLAT = 1.5 // barrel.rotation.x at charge 1 (flatter, toward field)
+
+  function buildCannon(angle: number, zoneColor: number): CannonRig {
     // MOUNTED ON THE TOPMOST RIM (above the audience), aiming down-and-inward
     // over the stands into the pitch — never out over the crowd.
     const cannon = new THREE.Group()
     const px = Math.cos(angle) * (rimInner + 0.7)
     const pz = Math.sin(angle) * (rimInner + 0.7)
     cannon.position.set(px, rimTop, pz)
-    cannon.rotation.y = yawTowardCenter(px, pz) // local +Z aims at the center
+    const baseYaw = yawTowardCenter(px, pz) // local +Z aims at the center
+    cannon.rotation.y = baseYaw
 
     const base = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 1.6), makeToonMaterial(PALETTE.ink))
     base.position.y = 0.5
     addInkOutline(base, INK_WEIGHT.prop)
     cannon.add(base)
 
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.68, 3.0, 12), makeToonMaterial(PALETTE.ink))
-    barrel.geometry.translate(0, 1.1, 0) // pivot at the breech
-    barrel.position.set(0, 0.95, 0.15)
-    barrel.rotation.x = 1.35 // tip the muzzle down-and-inward toward the pitch
-    barrel.castShadow = true
-    addInkOutline(barrel, INK_WEIGHT.prop)
-    cannon.add(barrel)
+    // YOKE: yaws the whole barrel assembly left/right when aiming (A/D)
+    const yoke = new THREE.Group()
+    yoke.position.y = 0.95
+    cannon.add(yoke)
 
-    // the seat's colors on a muzzle band
+    // BARREL PIVOT: pitches up/down with charge
+    const barrel = new THREE.Group()
+    barrel.position.set(0, 0, 0.15)
+    barrel.rotation.x = PITCH_LOFT
+    yoke.add(barrel)
+
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.68, 3.0, 12), makeToonMaterial(PALETTE.ink))
+    tube.geometry.translate(0, 1.1, 0) // pivot at the breech
+    tube.castShadow = true
+    addInkOutline(tube, INK_WEIGHT.prop)
+    barrel.add(tube)
+
+    // the seat's colours on a muzzle band
     const band = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.52, 0.42, 12), makeToonMaterial(zoneColor))
     band.position.y = 2.05
-    barrel.add(band)
-    return cannon
+    tube.add(band)
+
+    // CHARGE INDICATOR: a paint bar up the side of the barrel that fills as the
+    // player charges (no numbers — a pure visual). Scales in Y from the breech.
+    const chargeTrack = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 2.0, 0.14),
+      makeToonMaterial(PALETTE.ink),
+    )
+    chargeTrack.position.set(0.6, 1.1, 0)
+    barrel.add(chargeTrack)
+    const chargeFill = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 2.0, 0.2),
+      makeToonMaterial(zoneColor),
+    )
+    chargeFill.geometry.translate(0, 1.0, 0) // grow up from the bottom
+    chargeFill.position.set(0.6, 0.1, 0)
+    chargeFill.scale.y = 0.001
+    barrel.add(chargeFill)
+
+    return { group: cannon, yoke, barrel, chargeFill, baseYaw, basePitch: PITCH_LOFT }
+  }
+
+  /** aim a zone's cannon: yaw offset (radians, +/- along the arc), charge 0..1.
+   *  The barrel yaws with aim, pitches from loft→flat with charge, and the
+   *  charge bar fills. seat-indexed by zone. */
+  function setCannonAim(zone: number, aimYaw: number, charge: number): void {
+    const rig = cannonRigs[zone]
+    if (!rig) return
+    const c = Math.max(0, Math.min(1, charge))
+    // the cannon fires INWARD; a +aim swings the muzzle one way along the arc.
+    rig.yoke.rotation.y = aimYaw
+    rig.barrel.rotation.x = PITCH_LOFT + (PITCH_FLAT - PITCH_LOFT) * c
+    rig.chargeFill.scale.y = Math.max(0.001, c)
   }
 
   let elapsed = 0
@@ -855,10 +916,15 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
       }
       disposeHierarchy(cannonsGroup)
       cannonsGroup.clear()
+      cannonRigs.length = 0
       for (let zone = 0; zone < arena.seats; zone++) {
-        cannonsGroup.add(buildCannon(arena.zoneAngles[zone] ?? 0, zoneColors[zone] ?? PALETTE.warmGray))
+        const rig = buildCannon(arena.zoneAngles[zone] ?? 0, zoneColors[zone] ?? PALETTE.warmGray)
+        cannonRigs.push(rig)
+        cannonsGroup.add(rig.group)
       }
     },
+
+    setCannonAim,
 
     setMatchProgress(survivors: number, seatsAtStart: number): void {
       if (!forceNight) dayNight?.setMatchProgress(survivors, seatsAtStart)

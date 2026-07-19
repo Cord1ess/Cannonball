@@ -99,8 +99,33 @@ export const WIND_BASE_STRENGTH = 2.0 // base breeze force; gusts multiply up
 export const WIND_STEP_PER_ELIMINATION = 0.7 // grows as the field thins
 
 // --- cannon launch ------------------------------------------------------------
-export const LAUNCH_AIM_ARC_DEG = 50 // aimable arc, centered on wedge inward normal
-export const LAUNCH_FLIGHT_S = 1.4 // scripted parabola duration
+export const LAUNCH_AIM_ARC_DEG = 60 // aimable yaw arc, centered on wedge inward normal
+export const LAUNCH_FLIGHT_S = 1.4 // baseline parabola duration (charge scales it)
+export const LAUNCH_COUNTDOWN_HOLD_S = 3 // (see LAUNCH_COUNTDOWN_S) aim/charge window
+
+// CANNON RIG GEOMETRY — the muzzle sits on the TOPMOST rim, above the audience.
+// These MUST match the stand/rim build in client/render/arenaView.ts; the shared
+// `cannonMouth()` below is the single source of truth both the server physics and
+// the client cannon rig use, so the launch arc starts exactly at the drawn muzzle.
+export const STANDS_INNER_OFF = 1.7 // seating starts at radius + this
+export const STANDS_BASE_H = 2.65 // first seat row height (plinth 1.15 + band 1.5)
+export const STAND_ROWS = 16
+export const ROW_DEPTH = 0.95
+export const ROW_RISE = 0.82
+export const RIM_INNER_OFF = STANDS_INNER_OFF + STAND_ROWS * ROW_DEPTH + 0.3 // radius + this = rim ring
+export const RIM_TOP_H = STANDS_BASE_H + STAND_ROWS * ROW_RISE + 1.6 // rim crown height
+export const CANNON_RADIUS_OFF = RIM_INNER_OFF + 0.7 // cannon origin ring: radius + this
+export const CANNON_MUZZLE_UP = 2.4 // muzzle tip height above the cannon origin
+export const CANNON_MUZZLE_FWD = 1.0 // muzzle tip reach inward from the cannon origin
+
+// CHARGE: hold-to-charge fills 0..1; higher charge lands FARTHER out on the pitch
+// (never past the field edge — the landing point is clamped inside the pitch).
+export const LAUNCH_CHARGE_FILL_S = 1.15 // seconds of hold to reach full charge
+export const LAUNCH_LAND_MIN_FRAC = 0.12 // min charge → lands this frac of radius from center
+export const LAUNCH_LAND_MAX_FRAC = 0.82 // full charge → lands this frac (never past ~0.82R = safe)
+export const LAUNCH_DEFAULT_CHARGE = 0.5 // untouched players get a mid launch
+export const LAUNCH_MIN_FLIGHT_S = 0.9 // full charge (flat/fast) flight time
+export const LAUNCH_MAX_FLIGHT_S = 1.7 // low charge (lofty/slow) flight time
 
 // --- cards ---------------------------------------------------------------------
 export const DRAFT_OFFERS_PER_POOL = 3

@@ -1,4 +1,17 @@
-import { ARENA_RADIUS, NEUTRAL_DISC_FRACTION } from '../constants.ts'
+import {
+  ARENA_RADIUS,
+  CANNON_MUZZLE_FWD,
+  CANNON_MUZZLE_UP,
+  CANNON_RADIUS_OFF,
+  GRAVITY,
+  LAUNCH_AIM_ARC_DEG,
+  LAUNCH_LAND_MAX_FRAC,
+  LAUNCH_LAND_MIN_FRAC,
+  LAUNCH_MAX_FLIGHT_S,
+  LAUNCH_MIN_FLIGHT_S,
+  NEUTRAL_DISC_FRACTION,
+  RIM_TOP_H,
+} from '../constants.ts'
 
 /**
  * THE colosseum (idea.md §1, M5 revision): one permanent round stadium.
@@ -91,4 +104,84 @@ export function zoneAnchor(arena: Arena, zone: number, frac: number): { x: numbe
 /** Yaw that faces the arena center from a given position (see physics facing convention). */
 export function yawTowardCenter(x: number, z: number): number {
   return Math.atan2(-x, -z)
+}
+
+// --- CANNON LAUNCH (M6b): one source of truth for server physics + client rig --
+
+export interface Vec3 {
+  x: number
+  y: number
+  z: number
+}
+
+/**
+ * The muzzle tip world position for a zone's cannon — on the TOPMOST rim, above
+ * the audience, reaching a little inward + up. Derived purely from shared rig
+ * constants so the drawn cannon in arenaView.ts and the launch physics agree.
+ */
+export function cannonMouth(arena: Arena, zone: number): Vec3 {
+  const angle = arena.zoneAngles[zone] ?? 0
+  const ring = arena.radius + CANNON_RADIUS_OFF
+  // origin on the rim ring, then the muzzle reaches inward (toward center) + up
+  const inward = -1 // toward center along the radial
+  return {
+    x: Math.cos(angle) * (ring + inward * CANNON_MUZZLE_FWD),
+    y: RIM_TOP_H + CANNON_MUZZLE_UP,
+    z: Math.sin(angle) * (ring + inward * CANNON_MUZZLE_FWD),
+  }
+}
+
+/**
+ * Where a launch LANDS on the pitch, from an aim (yaw offset, radians) and a
+ * charge (0..1). Charge scales distance from center; aim rotates the direction
+ * within the wedge's arc. The result is ALWAYS clamped inside the pitch (never
+ * the crowd): distance ∈ [MIN_FRAC, MAX_FRAC]·radius, and MAX_FRAC < 1.
+ */
+export function launchLandingPoint(
+  arena: Arena,
+  zone: number,
+  aim: number,
+  charge: number,
+): { x: number; z: number } {
+  const arc = (LAUNCH_AIM_ARC_DEG * Math.PI) / 360 // half-arc
+  const a = Math.max(-arc, Math.min(arc, aim))
+  const c = Math.max(0, Math.min(1, charge))
+  // the cannon fires INWARD, so the landing direction is the wedge angle (which
+  // points from center out to the wall); the landing sits between center + wall.
+  const angle = (arena.zoneAngles[zone] ?? 0) + a
+  const frac = LAUNCH_LAND_MIN_FRAC + (LAUNCH_LAND_MAX_FRAC - LAUNCH_LAND_MIN_FRAC) * c
+  const d = arena.radius * frac
+  return { x: Math.cos(angle) * d, z: Math.sin(angle) * d }
+}
+
+/** flight time for a charge — full charge is flatter/faster, low charge lofts. */
+export function launchFlightTime(charge: number): number {
+  const c = Math.max(0, Math.min(1, charge))
+  return LAUNCH_MAX_FLIGHT_S + (LAUNCH_MIN_FLIGHT_S - LAUNCH_MAX_FLIGHT_S) * c
+}
+
+/**
+ * The ballistic launch velocity that carries a body from the muzzle to the
+ * landing point in the charge's flight time under GRAVITY. Same solve on server
+ * (applied to the sim) and client (drawn as the predictive arc), so the drawn
+ * trajectory is exactly the flight.
+ */
+export function launchVelocity(from: Vec3, to: { x: number; z: number }, flight: number): Vec3 {
+  const t = Math.max(0.1, flight)
+  return {
+    x: (to.x - from.x) / t,
+    // vy solves y(t)=0 at the pitch: from.y + vy·t − ½g·t² = 0
+    y: (0 - from.y + 0.5 * GRAVITY * t * t) / t,
+    z: (to.z - from.z) / t,
+  }
+}
+
+/** Sample the ballistic arc at parameter u∈[0,1] over the flight — for drawing. */
+export function launchArcPoint(from: Vec3, vel: Vec3, flight: number, u: number): Vec3 {
+  const t = u * flight
+  return {
+    x: from.x + vel.x * t,
+    y: from.y + vel.y * t - 0.5 * GRAVITY * t * t,
+    z: from.z + vel.z * t,
+  }
 }

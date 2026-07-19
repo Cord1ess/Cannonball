@@ -280,8 +280,8 @@ export function createMatchUi(client: MatchClient): MatchUi {
 
     if (phase === Phase.Launch) {
       panel.style.display = 'none'
-      const deg = Math.round((client.aimAngle() * 180) / Math.PI)
-      showBanner(`LAUNCH IN ${Math.ceil(remaining)} — A/D to aim ${deg >= 0 ? '+' : ''}${deg}°`, 0.4)
+      // no numbers — the trajectory arc + cannon show aim/power; just the prompt
+      showBanner('KICKOFF! — A/D aim · hold SPACE to charge', 0.4)
       return
     }
 

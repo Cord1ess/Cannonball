@@ -5,25 +5,27 @@ import {
   DUEL_METER_CAPACITY_S,
   FIXED_DELTA,
   GRACE_SECONDS,
-  GRAVITY,
   HANDOUT_SECONDS,
   LAUNCH_AIM_ARC_DEG,
   LAUNCH_COUNTDOWN_S,
-  LAUNCH_FLIGHT_S,
+  LAUNCH_DEFAULT_CHARGE,
   PATCH_HZ,
   PLAYERS_MAX,
   RESTART_PAUSE_S,
   TICK_LOCKIN_S,
   TIE_EPSILON_S,
-  WALL_HEIGHT,
   ZONE_DWELL_GRACE_S,
   WIND_BASE_STRENGTH,
   WIND_ENABLED,
   WIND_STEP_PER_ELIMINATION,
 } from '../../../shared/src/constants.ts'
 import {
+  cannonMouth,
   footprintZone,
   footprintZoneWidths,
+  launchFlightTime,
+  launchLandingPoint,
+  launchVelocity,
   makeArena,
   yawTowardCenter,
   zoneAnchor,
@@ -76,6 +78,8 @@ interface Session {
   lastInput: PlayerInputFrame
   lastSeq: number
   aim: number // launch aim offset, radians
+  charge: number // launch charge 0..1 (hold-to-charge power)
+  aimed: boolean // did the player touch the launch controls this kickoff?
   picks: Partial<Record<CardPool, string>>
   offers: Record<CardPool, string[]> | null
   kitId: string
@@ -177,12 +181,19 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       if (id) session.picks[pool] = id
     })
 
-    this.onMessage('aim', (client, message: { angle?: number }) => {
+    this.onMessage('aim', (client, message: { angle?: number; charge?: number }) => {
       if (this.#phase !== Phase.Launch) return
       const session = this.#sessions.get(client.sessionId)
-      if (!session || typeof message?.angle !== 'number' || !Number.isFinite(message.angle)) return
+      if (!session) return
       const arc = (LAUNCH_AIM_ARC_DEG * Math.PI) / 360 // half-arc in radians
-      session.aim = Math.max(-arc, Math.min(arc, message.angle))
+      if (typeof message?.angle === 'number' && Number.isFinite(message.angle)) {
+        session.aim = Math.max(-arc, Math.min(arc, message.angle))
+        session.aimed = true
+      }
+      if (typeof message?.charge === 'number' && Number.isFinite(message.charge)) {
+        session.charge = Math.max(0, Math.min(1, message.charge))
+        session.aimed = true
+      }
     })
 
     this.onMessage('assign', (client, message: { advTo?: number; curseTo?: number }) => {
@@ -340,6 +351,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       lastInput: { ...ZERO_INPUT },
       lastSeq: 0,
       aim: 0,
+      charge: 0,
+      aimed: false,
       picks: {},
       offers: null,
       kitId: DEFAULT_KIT_IDS[seat] ?? DEFAULT_KIT_IDS[0]!,
@@ -416,6 +429,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       lastInput: { ...ZERO_INPUT },
       lastSeq: 0,
       aim: 0,
+      charge: 0,
+      aimed: false,
       picks: {},
       offers: null,
       kitId: DEFAULT_KIT_IDS[seat] ?? DEFAULT_KIT_IDS[0]!,
@@ -615,7 +630,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     for (const seat of this.#zoneSeat) this.state.zoneSeat.push(seat)
   }
 
-  /** park survivors at their cannons on the wall crown, aim resets */
+  /** park survivors LOADED IN THEIR CANNONS on the topmost rim, aim/charge reset */
   #beginLaunch(): void {
     resetBall(this.#ball)
     this.#meters.fill(0)
@@ -624,16 +639,19 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       const sim = session.sim
       if (!this.#alive[sim.seat]) continue
       const zone = this.#zoneSeat.indexOf(sim.seat)
-      const angle = this.#arena.zoneAngles[zone] ?? 0
-      sim.x = Math.cos(angle) * (this.#arena.apothem - 0.6)
-      sim.z = Math.sin(angle) * (this.#arena.apothem - 0.6)
-      sim.y = WALL_HEIGHT + 0.4
+      // sit the bean at the muzzle high on the rim (above the audience), aiming in
+      const mouth = cannonMouth(this.#arena, zone)
+      sim.x = mouth.x
+      sim.y = mouth.y
+      sim.z = mouth.z
       sim.vx = sim.vy = sim.vz = 0
       sim.yaw = yawTowardCenter(sim.x, sim.z)
       sim.grounded = false
       sim.diving = false
       sim.knockedCd = 0
       session.aim = 0
+      session.charge = 0
+      session.aimed = false
     }
     this.#enter(Phase.Launch, this.#scale(LAUNCH_COUNTDOWN_S))
   }
@@ -646,19 +664,24 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       this.#freeSaves[seat] = hasFreeSave(this.#cardsOf(session)) ? 1 : 0
       session.sim.abilityActiveT = 0
     }
-    const flight = this.#fast ? LAUNCH_FLIGHT_S * 0.6 : LAUNCH_FLIGHT_S
     for (const session of this.#sessions.values()) {
       const sim = session.sim
       if (!this.#alive[sim.seat]) continue
       const zone = this.#zoneSeat.indexOf(sim.seat)
-      const baseAngle = this.#arena.zoneAngles[zone] ?? 0
-      const landAngle = baseAngle + session.aim
-      const tx = Math.cos(landAngle) * this.#arena.apothem * 0.5
-      const tz = Math.sin(landAngle) * this.#arena.apothem * 0.5
-      sim.vx = (tx - sim.x) / flight
-      sim.vz = (tz - sim.z) / flight
-      sim.vy = (0.5 * GRAVITY * flight * flight - sim.y) / flight
+      // DEFAULT for players who never touched the controls: mid charge, straight
+      // aim — so the launch always works and always lands on the field.
+      const aim = session.aimed ? session.aim : 0
+      const charge = session.aimed ? session.charge : LAUNCH_DEFAULT_CHARGE
+      const land = launchLandingPoint(this.#arena, zone, aim, charge)
+      let flight = launchFlightTime(charge)
+      if (this.#fast) flight *= 0.6
+      const from = { x: sim.x, y: sim.y, z: sim.z }
+      const v = launchVelocity(from, land, flight)
+      sim.vx = v.x
+      sim.vy = v.y
+      sim.vz = v.z
       sim.grounded = false
+      sim.yaw = yawTowardCenter(land.x, land.z) // face the way you're flying
     }
     this.#tickRemaining = this.#scale(tickInterval(this.#survivors))
     if (this.#survivors <= 2 && this.#seatsAtStart >= 2) {

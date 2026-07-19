@@ -7,6 +7,8 @@ import {
   FIXED_DELTA,
   INTERP_DELAY_MS,
   LAUNCH_AIM_ARC_DEG,
+  LAUNCH_CHARGE_FILL_S,
+  LAUNCH_DEFAULT_CHARGE,
   PATCH_HZ,
   SPRINT_SPEED,
   STAMINA_MAX,
@@ -37,6 +39,7 @@ import {
   type SaveStore,
 } from '@vendor/platform/save-data.ts'
 import { createArenaView, type ArenaView, type WorldLighting } from '../render/arenaView.ts'
+import { createTrajectory } from '../render/trajectory.ts'
 import type { GrassBody } from '../render/grass.ts'
 import type { WindMark } from '../render/windMarks.ts'
 import { createBallView, type BallView } from '../render/ballView.ts'
@@ -211,6 +214,9 @@ export function createOnlineGame(
   const arenaView: ArenaView = createArenaView(arena.radius, lighting)
   scene.add(arenaView.group)
   camera.setArenaRadius(arena.radius) // keep the chase cam inside the wall
+  // the predictive launch trajectory (shown during the kickoff aim)
+  const trajectory = createTrajectory()
+  scene.add(trajectory.group)
   let arenaKey = ''
 
   const ballView: BallView = createBallView()
@@ -238,6 +244,8 @@ export function createOnlineGame(
   const renderOffset = { x: 0, y: 0, z: 0 }
   const prevLocal = { x: 0, y: 0, z: 0 }
   let myAim = 0
+  let myCharge = LAUNCH_DEFAULT_CHARGE // hold-Space fills this; default if untouched
+  let launchTouched = false // did I move the aim/charge this kickoff?
   let aimSendCd = 0
 
   // --- spectate (eliminated players) -----------------------------------------------
@@ -806,17 +814,29 @@ export function createOnlineGame(
       const dt = FIXED_DELTA
       const phase = state.phase ?? 0
 
-      // launch: A/D steers the cannon aim
+      // KICKOFF: A/D swings the cannon aim, HOLD Space charges the power. The
+      // cannon barrel + a predictive trajectory arc update live; everyone fires
+      // together when the countdown ends. Untouched players keep the default.
       if (phase === Phase.Launch) {
         const arc = (LAUNCH_AIM_ARC_DEG * Math.PI) / 360
-        myAim = Math.max(-arc, Math.min(arc, myAim + input.dirX * 1.4 * dt))
+        if (Math.abs(input.dirX) > 0.01) {
+          myAim = Math.max(-arc, Math.min(arc, myAim + input.dirX * 1.4 * dt))
+          launchTouched = true
+        }
+        if (input.jump) {
+          // hold to charge — fills toward full, then holds at max
+          myCharge = Math.min(1, myCharge + dt / LAUNCH_CHARGE_FILL_S)
+          launchTouched = true
+        }
         aimSendCd -= dt
-        if (aimSendCd <= 0) {
-          aimSendCd = 0.1
-          conn.send('aim', { angle: myAim })
+        if (aimSendCd <= 0 && launchTouched) {
+          aimSendCd = 0.08
+          conn.send('aim', { angle: myAim, charge: myCharge })
         }
       } else if (phase === Phase.Restart) {
         myAim = 0
+        myCharge = LAUNCH_DEFAULT_CHARGE
+        launchTouched = false
       }
 
       const isPredicting = predicting()
@@ -928,6 +948,28 @@ export function createOnlineGame(
       // wind visual runs every phase (grass breathes in the lobby too): sample
       // the arena owns its own localized gust-cell wind field now
       arenaView.update(dt)
+
+      // KICKOFF VISUALS: during Launch, move MY cannon to my aim/charge and draw
+      // the predictive trajectory arc + landing ring. Other cannons rest neutral.
+      const phaseNow = state.phase ?? 0
+      if (phaseNow === Phase.Launch) {
+        const zoneSeatArr = state.zoneSeat
+        const myZone = zoneSeatArr ? Array.from(zoneSeatArr).indexOf(mySeat) : -1
+        for (let z = 0; z < arena.seats; z++) {
+          if (z === myZone && aliveOf(mySeat)) {
+            arenaView.setCannonAim(z, myAim, myCharge)
+          } else {
+            arenaView.setCannonAim(z, 0, 0) // neutral (we don't see others' aim)
+          }
+        }
+        if (myZone >= 0 && aliveOf(mySeat)) {
+          trajectory.show(arena, myZone, myAim, myCharge, seatColors[mySeat] ?? 0xffffff)
+        } else {
+          trajectory.hide()
+        }
+      } else {
+        trajectory.hide()
+      }
       const decay = Math.exp(-10 * dt)
       renderOffset.x *= decay
       renderOffset.y *= decay

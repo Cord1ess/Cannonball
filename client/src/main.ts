@@ -230,7 +230,10 @@ function frame(nowMs: number): void {
     game.fixedStep({
       dirX,
       dirZ,
-      jump: jumpQueued,
+      // jump gates on `grounded` in the sim, so passing the HELD state is
+      // identical to the edge for jumping — but it also lets the kickoff use
+      // hold-Space as the launch CHARGE without a second input path.
+      jump: jumpQueued || input.pressed('jump'),
       dive: diveQueued,
       sprint: input.pressed('sprint'),
       ability: abilityQueued,
