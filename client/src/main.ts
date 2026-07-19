@@ -169,6 +169,7 @@ let mainMenu: MainMenu | null = null
 // menuActive = the player is at the menu (not in their own live match). The
 // backdrop is a bot match (instantArena); starting a real match hides the menu.
 let menuActive = 'match' in game
+let menuClock = 0 // drives the menu's looping day↔night cycle
 const devSkipMenu = new URLSearchParams(location.search).has('dev')
 if ('match' in game) {
   matchUi = createMatchUi(game.match)
@@ -294,6 +295,13 @@ function frame(nowMs: number): void {
     chase.updateMenuOrbit(time.unscaledDelta)
     mainMenu.update(time.unscaledDelta)
     uiBeans.update(time.unscaledDelta)
+    // loop the sky day→night→day so the menu is alive (noticeable, not timelapse):
+    // a full cycle in ~34s. A raised cosine gives smooth dwell at day AND night.
+    // loop the sky day→night→day so the menu is alive (noticeable, not timelapse):
+    // a raised cosine gives a full cycle in ~34s with a smooth dwell at both ends.
+    menuClock += time.unscaledDelta
+    const frac = 0.5 - 0.5 * Math.cos((menuClock / 17) * Math.PI)
+    if ('setMenuDayNight' in game) game.setMenuDayNight(frac)
   }
   document.body.classList.toggle('menu-mode', menuActive)
 
@@ -313,8 +321,9 @@ function frame(nowMs: number): void {
   }
   debugPanel.update(time.unscaledDelta)
 
-  // spectate control hint
-  if ('spectating' in game && game.spectating() && 'spectateInfo' in game) {
+  // spectate control hint — never on the main menu (the backdrop match reads as
+  // "spectating" but there's nothing to follow there)
+  if (!menuActive && 'spectating' in game && game.spectating() && 'spectateInfo' in game) {
     const info = game.spectateInfo()
     specHint.style.display = 'block'
     specHint.innerHTML =

@@ -26,6 +26,8 @@ export interface DayNight {
   setMatchProgress(survivors: number, seatsAtStart: number): void
   /** set the target directly, 0 = day .. 1 = night (debug / menus) */
   setTarget(frac: number): void
+  /** MAIN MENU ONLY: drive the day↔night frac directly (no ease) for the loop */
+  setMenuPhase(frac: number): void
   /** register a one-shot callback for when night is essentially reached */
   onNightfall(cb: () => void): void
   /** ease toward the target, move the sun, and repaint the world; every frame */
@@ -213,6 +215,15 @@ export function createDayNight(
     setTarget(frac2: number): void {
       stepProgress = Math.max(0, Math.min(1, frac2))
       target = stepProgress
+    },
+    setMenuPhase(frac2: number): void {
+      // MAIN MENU ONLY: drive the day↔night frac DIRECTLY (no creep/ease) so the
+      // menu can loop day→night→day smoothly. Keeps stepProgress/target in sync
+      // so nothing snaps if the game later takes over via setMatchProgress.
+      frac = Math.max(0, Math.min(1, frac2))
+      stepProgress = frac
+      target = frac
+      apply()
     },
     onNightfall(cb: () => void): void {
       nightfallCb = cb

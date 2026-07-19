@@ -44,6 +44,8 @@ export interface ArenaView {
   setCannonAim(zone: number, aimYaw: number, charge: number): void
   /** match progress → day->night arc target (elims done / elims-to-night) */
   setMatchProgress(survivors: number, seatsAtStart: number): void
+  /** MAIN MENU ONLY: drive the day↔night frac directly (0 day..1 night) */
+  setMenuDayNight(frac: number): void
   /** debug: force full night on/off, overriding the progress-driven arc */
   debugForceNight(on: boolean): void
   /** register the one-shot nightfall pop (future light-prop + audio bang) */
@@ -928,6 +930,10 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
 
     setMatchProgress(survivors: number, seatsAtStart: number): void {
       if (!forceNight) dayNight?.setMatchProgress(survivors, seatsAtStart)
+    },
+
+    setMenuDayNight(frac: number): void {
+      dayNight?.setMenuPhase(frac)
     },
 
     debugForceNight(on: boolean): void {

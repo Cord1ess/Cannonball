@@ -199,6 +199,9 @@ export interface OnlineGame {
   /** MENU MODE: the match plays as a pure backdrop — suppress ALL name tags,
    *  zone labels + spectate hints so it reads as clean gameplay behind the menu. */
   setMenuMode(on: boolean): void
+  /** MAIN MENU ONLY: drive the world's day↔night frac (0 day..1 night) for the
+   *  looping menu cycle — bypasses the match-progress arc. */
+  setMenuDayNight(frac: number): void
   readonly match: MatchClient
   readonly debug: DebugHooks
 }
@@ -816,6 +819,10 @@ export function createOnlineGame(
       menuMode = on
     },
 
+    setMenuDayNight(frac: number): void {
+      arenaView.setMenuDayNight(frac)
+    },
+
     fixedStep(input: PlayerInputFrame): void {
       ensureLocal()
       if (!localSim) return
@@ -1122,10 +1129,14 @@ export function createOnlineGame(
       // kickoff, restart, duel...) keeps the progress, so night never snaps back
       // to day between rounds. survivors is already decremented in those phases,
       // so the arc keeps advancing smoothly toward night.
-      if ((state.phase ?? 0) === Phase.Lobby) {
-        arenaView.setMatchProgress(state.seatsAtStart || 6, state.seatsAtStart || 6) // day
-      } else {
-        arenaView.setMatchProgress(state.survivors || 6, state.seatsAtStart || state.survivors || 6)
+      // MENU MODE drives its own looping day↔night (via setMenuDayNight from
+      // main.ts); the match-progress arc must NOT fight it, so skip it here.
+      if (!menuMode) {
+        if ((state.phase ?? 0) === Phase.Lobby) {
+          arenaView.setMatchProgress(state.seatsAtStart || 6, state.seatsAtStart || 6) // day
+        } else {
+          arenaView.setMatchProgress(state.survivors || 6, state.seatsAtStart || state.survivors || 6)
+        }
       }
 
       // OWN-ZONE ALARM: ball sitting in MY wedge -> blink that wedge + prompt

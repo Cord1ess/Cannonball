@@ -47,14 +47,16 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
 
   // --- LEFT: title + tagline ----------------------------------------------------
   const left = document.createElement('div')
-  left.style.cssText =
-    'align-self:center;margin:0 0 0 6vw;max-width:34vw;pointer-events:none;' +
-    'text-shadow:0 3px 0 rgba(255,253,246,0.55);'
+  left.style.cssText = 'align-self:center;margin:0 0 0 6vw;max-width:34vw;pointer-events:none;'
   const title = document.createElement('div')
-  title.style.cssText = 'font-size:clamp(52px,8vw,116px);font-weight:800;line-height:0.92;letter-spacing:-1px;'
+  // white with a sharp offset ink shadow — smaller, clean and punchy
+  title.style.cssText =
+    'font-size:clamp(40px,5vw,72px);font-weight:800;line-height:0.95;letter-spacing:-1px;' +
+    `color:#ffffff;text-shadow:3px 3px 0 ${INK};`
   title.textContent = 'CANNONBALL'
   const tag = document.createElement('div')
-  tag.style.cssText = `font-family:${FONT_HAND};font-size:clamp(18px,2vw,28px);margin-top:14px;opacity:0.9;`
+  tag.style.cssText =
+    `font-family:${FONT_HAND};font-size:clamp(16px,1.6vw,22px);margin-top:12px;color:#ffffff;text-shadow:2px 2px 0 ${INK};`
   tag.textContent = TAGLINE
   left.append(title, tag)
   root.appendChild(left)
