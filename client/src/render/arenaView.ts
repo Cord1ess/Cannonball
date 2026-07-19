@@ -321,12 +321,14 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
   // lamp head aimed at the pitch that lights the beans/ball and CASTS SHADOWS.
   // Its position/target are computed in WORLD space (shadows need world coords),
   // so the caller adds the light + target to the SCENE, not this tower group.
-  const spot = new THREE.SpotLight(0xfff3d8, 0, 220, Math.PI / 4.5, 0.55, 0.8)
+  // decay=0 → NO distance falloff (a floodlight reaching the far pitch at full
+  // strength; with decay the light was ~zero by the time it reached the field).
+  const spot = new THREE.SpotLight(0xfff3d8, 0, 400, Math.PI / 4, 0.4, 0)
   spot.position.set(x, baseY + H, z) // at the lamp head, world space
   spot.castShadow = true
   spot.shadow.mapSize.set(1024, 1024)
-  spot.shadow.camera.near = 20
-  spot.shadow.camera.far = 260
+  spot.shadow.camera.near = 10
+  spot.shadow.camera.far = 400
   spot.shadow.bias = -0.0006
   const spotTarget = new THREE.Object3D()
   spotTarget.position.set(0, 0, 0) // aim at the pitch centre
@@ -341,8 +343,9 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
     setNight(frac: number): void {
       lampMat.color.copy(dayCol).lerp(nightCol, frac)
       glowMat.opacity = frac * 0.85
-      // the floodlight fades on at night (real light, casts shadows like the sun)
-      spot.intensity = frac * 3.2
+      // the floodlight fades on at night (real light, casts shadows like the sun).
+      // 4 towers overlap, so keep each moderate or the pitch reads like daytime.
+      spot.intensity = frac * 1.1
       spot.castShadow = frac > 0.15
     },
   }
@@ -759,7 +762,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   }
 
   let elapsed = 0
-  let forceNight = false // debug override of the progress-driven arc
+  let forceNight = false
 
   return {
     group,
