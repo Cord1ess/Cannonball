@@ -3,9 +3,76 @@
 > Session handoff document. Updated at every milestone. Read top-to-bottom to
 > resume: DONE tells you what exists, NEXT tells you what to build.
 
-## STATUS: M0–M5a + M5b day→night arc · NEXT UP: rest of M5b (banners, elim-in-stands, faces)
+## STATUS: M0–M5a + M5b (stadium, crowd, ball, day→night+floodlights, spectate) DONE · NEXT: M6 juice+audio, or M5b leftovers (eliminated-in-stands, HUD paper skin, draft cam)
 
-### M5b — STADIUM REVAMP pass 1 (structure + animated crowd)
+### M5b — FULL WORLD PASS (this session): stadium + crowd + ball + night lighting + spectate
+All committed, typecheck + 56 tests green, 0 shader errors. Files: `render/crowd.ts` (new),
+`render/arenaView.ts`, `render/grass.ts`, `render/dayNight.ts`, `render/ballView.ts`,
+`render/textures.ts`, `render/clouds.ts`, `render/bean.ts`, `game/camera.ts`, `game/online.ts`,
+`game/input.ts`, `game/sandbox.ts`, `main.ts`.
+
+**STADIUM (arenaView.ts) — fully rebuilt.** Layer order OUT from the pitch: field (grass r=28) →
+protective NET at the field edge (thin, r+0.4) → solid DISPLAY WALL on a low sandy PLINTH (dark LED
+screen band facing pitch; ads mount here later) → raked SEATING rising straight off the display (no
+gap) → rim → cannons/flags/light-towers. EVERYTHING anchors to the GROUND (y=0), not WALL_HEIGHT — a
+sandy APRON ring (a ring/annulus dropped just BELOW the grass, NOT a full disc — a full disc
+z-fights the grass) gives the perimeter solid ground. Seating: TWO teal DECKS, each step = a dark
+RISER wall + a light TREAD cap (light-seat/dark-wall), A/B per-row banding, concrete VOM band
+splitting decks. Real VERTICAL AISLES = instanced concrete STAIR channels (one draw) at each aisle
+angle; the crowd leaves those angles empty. Colours in the `STADIUM` palette const (sandy frame,
+teal seat family — NO rainbow). Cannons moved to the TOPMOST rim aiming DOWN-inward at the pitch.
+24 waving team FLAGS (shader-waved) + 4 corner FLOODLIGHT TOWERS on the rim.
+
+**CROWD (`render/crowd.ts`) — the hard-won part; READ before touching.** Fans ARE the real player
+bean, geometry EXTRACTED from `createBean()` (walk its solid meshes, bake transforms, KEEP+transform
+NORMALS — stripping normals = NaN = exploded mesh, cost many rounds; de-index to flat position so the
+merge is always clean; tag each vertex with an animation PART via `aPart`). ALL emotes in the VERTEX
+SHADER from a per-instance seed (bob, both-arms-up cheer, one-arm wave+waggle, little jumps, head
+look L/R, blink) — one InstancedMesh fill + one outline (inverted hull) + one face (plate+eyes) pass,
+~zero per-frame CPU (only the clock uniform). Fans wear the REAL team JERSEY: per-instance primary +
+secondary + pattern (0 solid/1 stripes/2 hoops), painted in the shader (stripes=vertical, hoops=
+horizontal bands on the torso). `setSections(sectionKits, sectionAlive)` binds each fan to a FIXED
+stand section (6-way by angle) supporting one seat's team; when a team is ELIMINATED its fans LEAVE
+(hidden via scale-0 instance matrix, ~15% stay), driven from the full seat roster in online.ts
+`rebuildArenaIfNeeded` (aliveKey in the cache key). Sparse held team BANNERS (~1.5% of fans, shader-
+waved). `setNight(frac)` dims the whole crowd (shader ignores scene lights). GOTCHAS: fan SCALE 1.0 +
+row spacing 1.25 (packing tighter than fan width = smeared carpet); the arm pivot is the real
+shoulder (0.52, 1.0); the head/face turn around the NECK, not world origin.
+
+**BALL (`ballView.ts`).** Fake disc shadow REMOVED (real cast shadow only). Uses the DOWNLOADED
+football textures in `client/public/textures/` (`ball_basecolor.png` + `ball_normal.png`) on a
+MeshToonMaterial — colourful panelled football. NOTE: those textures are UV-unwrapped for a specific
+model we don't have, so on a plain sphere they map equirect (slight pole stretch, but reads fine).
+Source `Ball Texture/` is gitignored; a procedural `ballTexture()` in textures.ts is an unused
+fallback. Zone-colour indicator gone (the `zone` param is now `_zone`).
+
+**DAY→NIGHT + FLOODLIGHTS (`dayNight.ts` + `arenaView.ts` + `grass.ts`).** Match-progress driven
+(elims done / elims-to-night; 6p→full night ~3 left; small lobbies stretch to the end), MONOTONIC,
+one smooth flow (only LOBBY resets to day; `stepProgress` creeps continuously between elims). Visible
+SUN disc arcs high→horizon; `depthTest:true` so it never bleeds through the stadium. Grass/ground
+unlit → tinted in-shader: dark dusk as night falls, then FLIPS to floodlit-bright at the switch
+point. FLOODLIGHTS are the KEY thing (many rounds to get right): 4 real shadow-casting SpotLights
+(same system as the sun) added to the SCENE, `decay=0` (with decay the light died before reaching the
+field — that was THE bug), aimed near centre (overlapping) so a player casts 4 shadows. HARD ON/OFF
+switch at `LIGHTS_ON_AT=0.9` (not a dimmer) — off through day+dusk, SNAP on at nightfall. Each spot
+`castShadow` STARTS false (creation-true + the on/off guard skipped resetting it = 4 shadows in
+daylight bug). Sun stops casting its shadow at night (`sun.castShadow = f<0.9`) so night shows only
+the 4 flood shadows. GRASS SHADOW must apply AFTER the night re-tint (the re-tint rebuilds colour
+from the base palette and discards an earlier shadow — that was the "no night shadows" bug); night
+shadow strength kept SUBTLE (0.22). Per-tower intensity 0.7, night hemi 0.3. Subtle low-opacity
+additive light BEAM per tower (fresnel + length fade) switches on with the lights. Debug: backquote
+→ WORLD group → "night ↔ day" toggle (nightCycle, client-only).
+
+**CLOUDS (`clouds.ts`).** Real 3D bubbly toon clouds (clustered flattened spheres, NO outline —
+outline looked odd), random each session, drift/bob/breathe, tint with the sun.
+
+**SPECTATE (`game/camera.ts` + `online.ts` + `input.ts` + `main.ts`).** Eliminated players get a
+raised angled-down broadcast ORBIT (radius+21, height 22, look y=3.5) OR a FOLLOW mode (chase a
+player). **V** toggles orbit↔follow, **Space** cycles alive players; camera glides, auto-advances if
+the followed player dies; a HUD hint shows mode + name. Ground name markers hidden while spectating;
+grass ownership tint softened (0.16→0.10) so a big wedge isn't a fully-coloured half in the overview.
+
+### M5b — earlier passes (superseded/folded into the above; kept for history)
 - ANIMATED CROWD (`render/crowd.ts`): ~1000+ fans, ALL animation in the VERTEX SHADER from
   per-instance seeds (bob, both-arms-up cheer, one-arm wave+waggle, head look L/R, blink) — ONE
   InstancedMesh, ~zero per-frame CPU (only uTime written). Fans are little beans (body + separate
@@ -328,10 +395,17 @@ the circular wall), all four smokes, playwright lobby/launch/arena screenshots.
 
 ## NEXT (see implementation_plan.md for full detail)
 
-- **M5b art & world remainder:** day→night light arc DONE (see above); still to do — stadium light
-  PROPS (lamps/lanterns lit at night), banners w/ fake glyphs on the rim, eliminated players seated
-  in the stands, bean face expression swaps, HUD paper skin, menu/draft camera framing (currently
-  stares from spawn).
+- **M5b — MOSTLY DONE this session** (stadium, animated crowd+jerseys+banners+elim-leave, ball skin,
+  day→night arc, real floodlights+shadows, spectate orbit/follow). LEFTOVERS still open:
+  - eliminated players SEATED in the stands (currently they just orbit-spectate; the crowd already
+    supports hide/show per section — could reuse to seat the eliminated bean among the fans).
+  - bean FACE EXPRESSION swaps (react to elim/save/near-miss — pays off in the PIP selfie cam).
+  - HUD PAPER SKIN (leaderboard/HUD get the paper-grain art treatment).
+  - MENU/DRAFT camera framing (lobby/draft currently stare from spawn — give deliberate framing).
+  - AD BOARD content: the display wall's dark LED band is ready for the digital signs (user said
+    "we'll use the signs later"). The ball textures folder also has roughness/metallic maps unused.
+  - the `onNightfall` one-shot hook is wired but unused — reserved for the light-switch-on audio
+    "bang" once M6 audio exists.
 - **M6 juice & audio:** hitstop, camera punch, squash-stretch, pooled particles (header burst,
   launch puff, elim poof, confetti), force-scaled SFX over vendored WebAudio (+`toneClip`
   placeholders), one lo-fi loop, autoplay unlock, tab-mute.

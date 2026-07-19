@@ -54,3 +54,26 @@ Giant ball, wedge zones, tick eliminations, dive-headers, card draft. Solo dev +
   leaderboard (bean-cutout icons, meter bars, animated reorder). Old hud.ts timer/meter row hidden.
 - Reload reconnects to the same seat via sessionStorage token + 20s grace.
 - All tuning constants live in `shared/src/constants.ts`; cards in `shared/src/cards/definitions.ts`.
+- **Spectate (eliminated):** V = toggle orbit-overview ↔ follow-a-player; Space = cycle players.
+  Orbit cam is a raised broadcast angle; follow is a chase cam. Hint shown at screen bottom.
+- **World/rendering gotchas (M5b, cost real rounds — heed these):**
+  · CROWD (`render/crowd.ts`) fans ARE the player bean, geometry EXTRACTED from `createBean()`.
+    When touching it: KEEP the normal attribute through extraction (stripped normals → NaN →
+    exploded mesh), de-index before merge, never merge already-merged sub-geometries. It's a
+    GPU-shader crowd (emotes in the vertex shader from a per-instance seed) — one instanced fill +
+    outline + face; do NOT animate on the CPU. Scale 1.0, row spacing ≥ fan width or it smears.
+  · Custom ShaderMaterials (grass, crowd) IGNORE three.js scene lights — day/night + floodlight
+    effects on them are done by tinting IN-SHADER via a `uNight`/`setNight(frac)` uniform, NOT by
+    the sun/spots. The sun + 4 floodlight SpotLights only light the LIT materials (beans, ball,
+    toon stadium) and cast shadows onto the grass (which receives via `getShadowMask`).
+  · FLOODLIGHTS: `decay=0` on the SpotLights (decay killed the light before the field). They're a
+    HARD on/off switch at night frac ≥ 0.9 (not a dimmer); spots start `castShadow=false`; sun
+    stops casting at night. In the grass shader the cast-shadow multiply must come AFTER the night
+    re-tint or the re-tint discards it.
+  · GROUND/APRON: never put a full disc under the pitch (z-fights the grass); use a ring dropped
+    below y=0. Never re-encode `pitch_grass.png` or touch its remap (see the locked-texture note).
+  · Ball textures live in `client/public/textures/ball_basecolor.png` + `ball_normal.png` (the
+    `Ball Texture/` source folder is gitignored).
+- Headless screenshot notes: rAF is throttled (sparse random logs miss frames — log first-N
+  instead); the `eliminate me` debug click + long mouse-move loops can crash the headless page.
+  CDP `Page.captureScreenshot` is more reliable than Playwright's (which waits on fonts).
