@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { BALL_RADIUS } from '@shared/constants.ts'
 import { addInkOutline, INK_WEIGHT, toonRamp } from './materials.ts'
+import { ballTexture } from './textures.ts'
 
 /**
  * The most-watched object in the game. Smooth sphere (the sketchy art lives
@@ -8,8 +9,9 @@ import { addInkOutline, INK_WEIGHT, toonRamp } from './materials.ts'
  * derived from actual motion — rolls exactly when grounded, keeps its spin
  * decaying through the air, and NEVER rotates while at rest.
  *
- * The ball wears a colourful world-cup-style panel skin (canvas texture) and is
- * grounded by the REAL cast shadow only — no fake blob disc.
+ * The ball wears a colourful world-cup-style panel skin (procedural canvas
+ * texture, render/textures.ts) and is grounded by the REAL cast shadow only —
+ * no fake blob disc.
  */
 
 export interface BallView {
@@ -20,22 +22,10 @@ export interface BallView {
 export function createBallView(): BallView {
   const group = new THREE.Group()
 
-  // downloaded football texture set (base colour + normal). Loaded async and
-  // swapped onto the material once ready; a plain cream fill shows until then.
-  const loader = new THREE.TextureLoader()
-  const mat = new THREE.MeshToonMaterial({ gradientMap: toonRamp(), color: 0xf5f0e2 })
-  loader.load('/textures/ball_basecolor.png', (tex) => {
-    tex.colorSpace = THREE.SRGBColorSpace
-    tex.anisotropy = 4
-    mat.map = tex
-    mat.color.setHex(0xffffff)
-    mat.needsUpdate = true
-  })
-  loader.load('/textures/ball_normal.png', (tex) => {
-    mat.normalMap = tex
-    mat.normalScale.set(0.6, 0.6)
-    mat.needsUpdate = true
-  })
+  // the world-cup-style panel skin is procedural (render/textures.ts) — painted
+  // in our canvas style, zero authored assets. Toon-shaded so it lifts on the
+  // same gradient ramp as the beans.
+  const mat = new THREE.MeshToonMaterial({ gradientMap: toonRamp(), map: ballTexture() })
   const ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 48, 32), mat)
   ball.castShadow = true
   addInkOutline(ball, INK_WEIGHT.character)

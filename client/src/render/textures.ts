@@ -26,40 +26,6 @@ function toTexture(canvas: HTMLCanvasElement, repeat = false): THREE.CanvasTextu
 }
 
 /**
- * Trait 2.1 — painted fills. Near-white tile multiplied over every albedo:
- * soft irregular blobs at low contrast so no color field is ever flat.
- */
-export function gouacheTexture(size = 256): THREE.CanvasTexture {
-  const [canvas, ctx] = makeCanvas(size, size)
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, size, size)
-
-  const blob = (fill: string, alpha: number, radius: number): void => {
-    const x = Math.random() * size
-    const y = Math.random() * size
-    const g = ctx.createRadialGradient(x, y, radius * 0.15, x, y, radius)
-    g.addColorStop(0, fill.replace('A', alpha.toFixed(3)))
-    g.addColorStop(1, fill.replace('A', '0'))
-    ctx.fillStyle = g
-    // draw wrapped so the tile repeats seamlessly-ish
-    for (const ox of [-size, 0, size]) {
-      for (const oy of [-size, 0, size]) {
-        ctx.beginPath()
-        ctx.arc(x + ox, y + oy, radius, 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
-  }
-
-  for (let i = 0; i < 70; i++) blob('rgba(90, 80, 70, A)', 0.025 + Math.random() * 0.035, size * (0.06 + Math.random() * 0.2))
-  for (let i = 0; i < 30; i++) blob('rgba(255, 255, 250, A)', 0.03 + Math.random() * 0.04, size * (0.05 + Math.random() * 0.15))
-
-  const tex = toTexture(canvas, true)
-  tex.repeat.set(2, 2)
-  return tex
-}
-
-/**
  * Trait 2.2 — stroke-break mask for ink hulls. Mostly white (line present)
  * with wobbly dark slashes and speckle where the pen "lifts".
  */
@@ -93,52 +59,6 @@ export function strokeTexture(size = 256): THREE.CanvasTexture {
   const tex = toTexture(canvas, true)
   tex.colorSpace = THREE.NoColorSpace // it's a mask, not color
   return tex
-}
-
-/**
- * Trait 2.2 — hatch ticks, dashes, pebbles: the scatter marks. Transparent
- * tile used on small decal quads along bases, corners, and the pitch.
- */
-export function tickDecalTexture(size = 128): THREE.CanvasTexture {
-  const [canvas, ctx] = makeCanvas(size, size)
-  ctx.clearRect(0, 0, size, size)
-  ctx.strokeStyle = '#4a443c'
-  ctx.lineCap = 'round'
-
-  for (let i = 0; i < 7; i++) {
-    const x = 12 + Math.random() * (size - 24)
-    const y = 12 + Math.random() * (size - 24)
-    const angle = Math.random() * Math.PI
-    const len = 5 + Math.random() * 11
-    ctx.lineWidth = 1.5 + Math.random() * 1.5
-    ctx.globalAlpha = 0.35 + Math.random() * 0.4
-    ctx.beginPath()
-    ctx.moveTo(x - Math.cos(angle) * len, y - Math.sin(angle) * len)
-    ctx.lineTo(x + Math.cos(angle) * len, y + Math.sin(angle) * len)
-    ctx.stroke()
-  }
-  // pebble dots
-  ctx.fillStyle = '#4a443c'
-  for (let i = 0; i < 5; i++) {
-    ctx.globalAlpha = 0.25 + Math.random() * 0.3
-    ctx.beginPath()
-    ctx.arc(12 + Math.random() * (size - 24), 12 + Math.random() * (size - 24), 1 + Math.random() * 2, 0, Math.PI * 2)
-    ctx.fill()
-  }
-  return toTexture(canvas)
-}
-
-/** The bean face plate: simple black rectangular eyes (reference image style). */
-export function faceTexture(size = 96): THREE.CanvasTexture {
-  const [canvas, ctx] = makeCanvas(size, size)
-  ctx.clearRect(0, 0, size, size)
-  ctx.fillStyle = '#1c1a18'
-  const eyeW = size * 0.13
-  const eyeH = size * 0.3
-  const y = size * 0.34
-  ctx.fillRect(size * 0.28 - eyeW / 2, y, eyeW, eyeH)
-  ctx.fillRect(size * 0.72 - eyeW / 2, y, eyeW, eyeH)
-  return toTexture(canvas)
 }
 
 /** Fine paper grain for the fullscreen overlay quad. */

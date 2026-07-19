@@ -5,11 +5,14 @@ Giant ball, wedge zones, tick eliminations, dive-headers, card draft. Solo dev +
 
 ## Read these before working
 
-- **`PROGRESS.md` — CURRENT STATUS + what to build next. Always start here.**
-- `idea.md` — settled game design (source of truth for rules)
-- `architecture.md` — tech decisions (Colyseus, prediction, hand-rolled physics)
-- `art_direction.md` — Messenger/abeto style spec (canvas textures, ink hulls)
-- `implementation_plan.md` — milestone plan M0-M8 with cut lines
+All design/status docs live in `docs/` (this CLAUDE.md stays at root so it auto-loads).
+
+- **`docs/PROGRESS.md` — CURRENT STATUS + what to build next. Always start here.**
+- `docs/idea.md` — settled game design (source of truth for rules)
+- `docs/architecture.md` — tech decisions (Colyseus, prediction, hand-rolled physics)
+- `docs/art_direction.md` — Messenger/abeto style spec (canvas textures, ink hulls)
+- `docs/implementation_plan.md` — milestone plan M0-M8 with cut lines
+- (code comments cite these by bare filename, e.g. `idea.md §1` — all now under `docs/`)
 
 ## Commands
 
@@ -42,7 +45,7 @@ Giant ball, wedge zones, tick eliminations, dive-headers, card draft. Solo dev +
   · `?server=wss://host` (point client at a specific server — tunnels/LAN; auto https→wss)
   · `?offline` (M1 sandbox) · `?fresh` (new room) · `?lag=100` (send delay)
   · `?fast` (create room with 0.15x phase timers).
-- **Friend playtest (no deploy): see PLAYTEST.md.** Share one link
+- **Friend playtest (no deploy): see docs/PLAYTEST.md.** Share one link
   `http://<client>/?server=<server>`. Server resolution order: ?server → saved (localStorage)
   → VITE_SERVER_URL → same-host:2567. Failed connect shows a red bar with an input to paste the
   server address + retry. Vite binds all hosts (`host:true, allowedHosts:true`) for tunnels/LAN.
@@ -72,8 +75,8 @@ Giant ball, wedge zones, tick eliminations, dive-headers, card draft. Solo dev +
     re-tint or the re-tint discards it.
   · GROUND/APRON: never put a full disc under the pitch (z-fights the grass); use a ring dropped
     below y=0. Never re-encode `pitch_grass.png` or touch its remap (see the locked-texture note).
-  · Ball textures live in `client/public/textures/ball_basecolor.png` + `ball_normal.png` (the
-    `Ball Texture/` source folder is gitignored).
+  · Ball skin is PROCEDURAL — `ballTexture()` in `render/textures.ts` (world-cup panel skin painted
+    in-style), NOT an authored asset. The old downloaded `ball_*.png` set was removed in cleanup.
 - Headless screenshot notes: rAF is throttled (sparse random logs miss frames — log first-N
   instead); the `eliminate me` debug click + long mouse-move loops can crash the headless page.
   CDP `Page.captureScreenshot` is more reliable than Playwright's (which waits on fonts).

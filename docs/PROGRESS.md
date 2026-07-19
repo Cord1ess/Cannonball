@@ -39,12 +39,12 @@ waved). `setNight(frac)` dims the whole crowd (shader ignores scene lights). GOT
 row spacing 1.25 (packing tighter than fan width = smeared carpet); the arm pivot is the real
 shoulder (0.52, 1.0); the head/face turn around the NECK, not world origin.
 
-**BALL (`ballView.ts`).** Fake disc shadow REMOVED (real cast shadow only). Uses the DOWNLOADED
-football textures in `client/public/textures/` (`ball_basecolor.png` + `ball_normal.png`) on a
-MeshToonMaterial — colourful panelled football. NOTE: those textures are UV-unwrapped for a specific
-model we don't have, so on a plain sphere they map equirect (slight pole stretch, but reads fine).
-Source `Ball Texture/` is gitignored; a procedural `ballTexture()` in textures.ts is an unused
-fallback. Zone-colour indicator gone (the `zone` param is now `_zone`).
+**BALL (`ballView.ts`).** Fake disc shadow REMOVED (real cast shadow only). Wears the PROCEDURAL
+`ballTexture()` (render/textures.ts) — a colourful world-cup-style panel skin painted in our canvas
+style (cream base, wobbly seams, teal/coral/gold accent panels, dark pentagons), equirect on the
+sphere UV — on a MeshToonMaterial. Zero authored assets. (The cleanup pass dropped the downloaded
+`ball_*.png` set and the gitignored `Ball Texture/` source in favour of this.) Zone-colour indicator
+gone (the `zone` param is now `_zone`).
 
 **DAY→NIGHT + FLOODLIGHTS (`dayNight.ts` + `arenaView.ts` + `grass.ts`).** Match-progress driven
 (elims done / elims-to-night; 6p→full night ~3 left; small lobbies stretch to the end), MONOTONIC,
@@ -307,8 +307,8 @@ chalk lines wobble + grain like hand strokes, blades darken toward their side ed
 Feedback pass 3 (top-down gaps): the floor under the blades now wears the user's freestylized
 grass_02 tile, preprocessed ONCE offline (playwright canvas: white-clover flowers masked by
 blue/green ratio > 0.62 — probed, grass tops out ~0.45 — dilated, onion-peel inpainted, then
-pastelized to palette) → `client/public/textures/pitch_grass.png` (the ONLY authored asset;
-source folder `grass_02_1k/` gitignored). **Grass upgrades (user request, all in the vertex shader — measured near-zero cost, ~2ms/frame
+pastelized to palette) → `client/public/textures/pitch_grass.png` (the ONLY authored asset; the
+`grass_02_1k/` source tiles were removed in the cleanup pass since the bake is committed). **Grass upgrades (user request, all in the vertex shader — measured near-zero cost, ~2ms/frame
 uncapped at 160k):** blade count 110k→160k; wind is now LAYERED and non-uniform (slow base sway +
 big rolling gust fronts that sweep across the field + per-blade flutter); INTERACTIVE displacement
 — up to 8 bodies (players + ball, fed each frame from online.ts/sandbox.ts via `setGrassBodies`,
