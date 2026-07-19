@@ -77,6 +77,16 @@ export const HEADER_UP_BIAS = 0.35 // fraction of header impulse aimed upward
 export const HEADER_MARGIN = 0.5 // extra reach beyond ball+player radii while diving
 export const HEADER_COOLDOWN_S = 0.35
 
+// --- goals (GOLDEN BOOT mode) -------------------------------------------------
+// a goal sits at the centre of every wall. The MOUTH is 1.5x the ball diameter
+// wide (deliberately tight — scoring is meant to be hard), and a shot counts
+// when the ball's footprint crosses into the goal band near the wall within the
+// mouth's angular half-width.
+export const GOAL_MOUTH_WIDTH = BALL_RADIUS * 2 * 1.5 // 1.5x ball diameter
+export const GOAL_DEPTH = 2.2 // how far in from the wall the goal band reaches
+export const GOAL_POST_RADIUS = 0.35 // post thickness (visual + a soft bounce)
+export const GOAL_COOLDOWN_S = 1.2 // ignore repeat triggers while the ball lingers
+
 // --- ball<->player contact solver (industry-standard trio) ---------------------
 export const BALL_MASS = 5 // vs player mass 1: the ball wins exchanges naturally
 export const PLAYER_MASS = 1

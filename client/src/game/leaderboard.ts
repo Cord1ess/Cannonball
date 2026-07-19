@@ -134,7 +134,9 @@ export function createLeaderboard(client: MatchClient): Leaderboard {
 
   return {
     update(): void {
-      // center countdown
+      const gmGolden = client.mode() === 2 // GameMode.GoldenBoot
+      // center countdown — the label frames the mode's stakes
+      timerLabel.textContent = gmGolden ? 'lowest scorer out in' : 'next elimination'
       const secs = client.elimCountdown()
       if (Number.isFinite(secs) && client.survivors() > 1) {
         timer.style.display = 'block'
@@ -145,8 +147,9 @@ export function createLeaderboard(client: MatchClient): Leaderboard {
         timer.style.display = 'none'
       }
 
-      // ball-in-my-zone prompt, blinking
-      if (client.ballInMyZone()) {
+      // ball-in-my-zone prompt, blinking — only meaningful in the ball-time modes
+      // (in GOLDEN BOOT the ball near your goal isn't inherently bad)
+      if (!gmGolden && client.ballInMyZone()) {
         const blink = Math.sin(performance.now() / 90) > -0.3
         prompt.style.display = blink ? 'block' : 'none'
       } else {
@@ -154,6 +157,7 @@ export function createLeaderboard(client: MatchClient): Leaderboard {
       }
 
       const rows: LeaderRow[] = client.leaderboard()
+      const goldenBoot = client.mode() === 2 // GameMode.GoldenBoot
       // hide unused pooled rows
       for (let i = rows.length; i < rowPool.length; i++) rowPool[i]!.wrap.style.display = 'none'
 
@@ -164,8 +168,11 @@ export function createLeaderboard(client: MatchClient): Leaderboard {
         el.icon.src = beanIcon(data.kitId, data.kitAway, data.color)
         el.name.textContent = data.isMe ? `${data.name} (you)` : data.name
         el.barFill.style.width = `${Math.round(data.frac * 100)}%`
-        // brush-stroke fill: safe green low, gold mid, rose high; ball-in-zone hot
-        const meterColor = data.ballHere ? METER.hot : data.frac > 0.5 ? METER.warn : METER.safe
+        // GOLDEN BOOT: the bar is a SCORE (higher = better) → more green as it
+        // fills. Ball-time modes: the bar is danger → hotter as it fills.
+        const meterColor = goldenBoot
+          ? data.frac > 0.5 ? METER.safe : data.frac > 0.15 ? METER.warn : METER.danger
+          : data.ballHere ? METER.hot : data.frac > 0.5 ? METER.warn : METER.safe
         el.barFill.style.background = brushFill(meterColor)
         // emphasis via the INK FRAME weight/tint (not a hard border): my row +
         // the most-at-risk (last) row get a heavier/rose frame, ball-in-zone hot

@@ -81,6 +81,8 @@ export const MatchState = schema(
     survivors: { type: 'uint8', default: 0 },
     tickRemaining: { type: 'float32', default: 30 },
     winnerSeat: { type: 'int8', default: -1 },
+    mode: { type: 'uint8', default: 0 }, // GameMode: 0 HotZone / 1 FinalWhistle / 2 GoldenBoot
+    matchTime: { type: 'uint16', default: 300 }, // total match seconds (per settings)
     windX: { type: 'float32', default: 0 },
     windZ: { type: 'float32', default: 0 },
     windStrength: { type: 'float32', default: 0 },

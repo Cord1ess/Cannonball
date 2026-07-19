@@ -178,13 +178,14 @@ if ('match' in game) {
 
   if (!devSkipMenu) {
     mainMenu = createMainMenu(match, uiBeans, {
-      startSolo(botCount: number): void {
-        // clean slate → fill bots → start; menu hides once we're playing
+      startSolo(botCount: number, mode: number, matchTime: number): void {
+        // clean slate → apply settings → fill bots → start; menu hides on play
         game.debug.send('resetLobby')
         ;('setMenuMode' in game) && game.setMenuMode(false)
         setTimeout(() => {
+          match.setSettings(mode, matchTime) // solo host owns the settings
           for (let i = 0; i < botCount; i++) match.addBot()
-          setTimeout(() => match.start(), 140)
+          setTimeout(() => match.start(), 160)
         }, 120)
         menuActive = false
         mainMenu?.setShown(false)
@@ -216,6 +217,9 @@ if ('match' in game) {
       particles.knock(ev.x, ev.y ?? 0.15, ev.z ?? 0, ev.force ?? 0.5)
     } else if (ev.type === 'elim' && ev.x !== undefined) {
       particles.eliminate(ev.x, ev.y ?? 0, ev.z ?? 0, ev.seat !== undefined ? seatHex(ev.seat) : 0xffffff)
+    } else if (ev.type === 'goal' && ev.x !== undefined) {
+      // GOLDEN BOOT goal: a celebratory confetti burst in the shooter's colour
+      particles.eliminate(ev.x, ev.y ?? 1, ev.z ?? 0, ev.seat !== undefined ? seatHex(ev.seat) : 0xffffff)
     }
   })
 }

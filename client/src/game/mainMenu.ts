@@ -1,4 +1,5 @@
 import { KITS, KIT_BY_ID, kitColors } from '@shared/cosmetics/jerseys.ts'
+import { GAME_MODES, MATCH_TIME_OPTIONS, DEFAULT_MATCH_TIME_S, gameModeInfo } from '@shared/match/modes.ts'
 import type { MatchClient, MatchPlayerInfo } from './online.ts'
 import { FONT_HAND, FONT_HEAD, INK, paperButton, paperPanel, paperTexture } from './paperSkin.ts'
 import { NEUTRAL_UI_KIT, type UiBeanSlot, type UiBeanStage } from '../render/uiBean.ts'
@@ -29,7 +30,7 @@ export interface MainMenu {
 export interface MainMenuHooks {
   /** SOLO kick-off: reset the room to a clean lobby then start with N bots.
    *  main.ts owns the reset→configure→start sequence so it's not racy. */
-  startSolo(botCount: number): void
+  startSolo(botCount: number, mode: number, matchTime: number): void
   /** ONLINE start: just start the current lobby (host only). */
   startOnline(): void
 }
@@ -38,6 +39,8 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   let view: 'home' | 'solo' | 'online' = 'home'
   let visible = true
   let botCount = 5 // solo default
+  let modeSel = 0 // GameMode id (HotZone)
+  let timeSel = DEFAULT_MATCH_TIME_S
 
   const root = document.createElement('div')
   root.style.cssText =
@@ -152,6 +155,8 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     nameInput.addEventListener('blur', commit)
     panel.appendChild(nameInput)
 
+    panel.appendChild(buildModeTimePicker(online))
+
     if (online) panel.appendChild(buildRoster())
     else panel.appendChild(buildBotSlider())
 
@@ -172,7 +177,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     go.style.cssText = 'flex:2;font-size:18px;padding:10px;'
     paperButton(go, { tint: '#58ae7c', w: 200, h: 42, big: true })
     go.addEventListener('click', () => {
-      if (!online) hooks.startSolo(botCount)
+      if (!online) hooks.startSolo(botCount, modeSel, timeSel)
       else hooks.startOnline()
     })
     // online non-hosts can't start
@@ -184,6 +189,94 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     panel.appendChild(actions)
 
     return panel
+  }
+
+  // MATCH SETTINGS: game-mode picker (3 selectable cards) + total-time presets.
+  // Online host changes propagate to everyone via setSettings; solo keeps it
+  // local (sent on kick-off). Non-host online players see it read-only.
+  function buildModeTimePicker(online: boolean): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:8px;'
+    const canEdit = !online || client.isHost()
+    // seed from the room state when online (so non-hosts see the host's choice)
+    if (online) {
+      modeSel = client.mode()
+      timeSel = client.matchTime()
+    }
+
+    // MODE cards
+    const modeLbl = document.createElement('div')
+    modeLbl.style.cssText = `font-family:${FONT_HAND};font-size:15px;text-align:center;opacity:0.8;`
+    modeLbl.textContent = 'game mode'
+    wrap.appendChild(modeLbl)
+    const modeRow = document.createElement('div')
+    modeRow.style.cssText = 'display:flex;gap:6px;'
+    const ruleLine = document.createElement('div')
+    ruleLine.style.cssText = `font-family:${FONT_HAND};font-size:13px;text-align:center;min-height:30px;line-height:1.05;color:#6b655c;`
+    const renderModes = (): void => {
+      if (online) modeSel = client.mode()
+      modeRow.replaceChildren()
+      for (const m of GAME_MODES) {
+        const b = document.createElement('button')
+        const on = m.id === modeSel
+        b.textContent = m.name
+        b.style.cssText = 'flex:1;font-size:11px;padding:8px 2px;line-height:1.05;'
+        paperButton(b, { tint: on ? '#4fa3d8' : undefined, w: 120, h: 44, big: on })
+        if (canEdit) {
+          b.addEventListener('click', () => {
+            modeSel = m.id
+            if (online) client.setSettings(modeSel, timeSel)
+            renderModes()
+          })
+        } else {
+          b.style.cursor = 'default'
+        }
+        modeRow.appendChild(b)
+      }
+      ruleLine.textContent = gameModeInfo(modeSel).rule
+    }
+    renderModes()
+    wrap.append(modeRow, ruleLine)
+
+    // TIME presets
+    const timeLbl = document.createElement('div')
+    timeLbl.style.cssText = `font-family:${FONT_HAND};font-size:15px;text-align:center;opacity:0.8;`
+    timeLbl.textContent = 'match length'
+    wrap.appendChild(timeLbl)
+    const timeRow = document.createElement('div')
+    timeRow.style.cssText = 'display:flex;gap:6px;'
+    const renderTimes = (): void => {
+      if (online) timeSel = client.matchTime()
+      timeRow.replaceChildren()
+      for (const t of MATCH_TIME_OPTIONS) {
+        const b = document.createElement('button')
+        const on = t.totalSeconds === timeSel
+        b.textContent = t.label
+        b.style.cssText = 'flex:1;font-size:11px;padding:8px 2px;'
+        paperButton(b, { tint: on ? '#e98a2b' : undefined, w: 120, h: 36, big: on })
+        if (canEdit) {
+          b.addEventListener('click', () => {
+            timeSel = t.totalSeconds
+            if (online) client.setSettings(modeSel, timeSel)
+            renderTimes()
+          })
+        } else {
+          b.style.cursor = 'default'
+        }
+        timeRow.appendChild(b)
+      }
+    }
+    renderTimes()
+    wrap.appendChild(timeRow)
+
+    // online non-hosts: keep in sync with the host's picks as state updates
+    if (online && !canEdit) {
+      ;(wrap as unknown as { __syncSettings: () => void }).__syncSettings = () => {
+        renderModes()
+        renderTimes()
+      }
+    }
+    return wrap
   }
 
   // solo: a bot-count picker (visual dots, no raw number field)

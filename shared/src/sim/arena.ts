@@ -3,6 +3,8 @@ import {
   CANNON_MUZZLE_FWD,
   CANNON_MUZZLE_UP,
   CANNON_RADIUS_OFF,
+  GOAL_DEPTH,
+  GOAL_MOUTH_WIDTH,
   GRAVITY,
   LAUNCH_AIM_ARC_DEG,
   LAUNCH_LAND_MAX_FRAC,
@@ -184,4 +186,70 @@ export function launchArcPoint(from: Vec3, vel: Vec3, flight: number, u: number)
     y: from.y + vel.y * t - 0.5 * GRAVITY * t * t,
     z: from.z + vel.z * t,
   }
+}
+
+// --- GOALS (GOLDEN BOOT mode) -----------------------------------------------
+// one goal at the centre of every wall. The mouth is GOAL_MOUTH_WIDTH wide,
+// facing inward. Shared by server goal-detection and client goal rendering so
+// the visible posts are exactly the scoring region.
+
+export interface Goal {
+  zone: number
+  /** the wall centre angle this goal sits on */
+  angle: number
+  /** centre of the mouth on the wall (post midpoint), on the floor */
+  cx: number
+  cz: number
+  /** the two goalpost positions (mouth edges), on the floor */
+  postA: { x: number; z: number }
+  postB: { x: number; z: number }
+  /** angular half-width of the mouth (radians) */
+  halfAngle: number
+}
+
+/** the goal for a given zone of an arena. */
+export function goalForZone(arena: Arena, zone: number): Goal {
+  const angle = arena.zoneAngles[zone] ?? 0
+  const r = arena.apothem
+  // mouth spans GOAL_MOUTH_WIDTH along the wall → an angular half-width at r
+  const halfAngle = Math.min(Math.PI / arena.seats - 0.02, GOAL_MOUTH_WIDTH / 2 / r)
+  const aA = angle - halfAngle
+  const aB = angle + halfAngle
+  return {
+    zone,
+    angle,
+    cx: Math.cos(angle) * r,
+    cz: Math.sin(angle) * r,
+    postA: { x: Math.cos(aA) * r, z: Math.sin(aA) * r },
+    postB: { x: Math.cos(aB) * r, z: Math.sin(aB) * r },
+    halfAngle,
+  }
+}
+
+/** all goals for the current arena. */
+export function goalsForArena(arena: Arena): Goal[] {
+  const goals: Goal[] = []
+  for (let z = 0; z < arena.seats; z++) goals.push(goalForZone(arena, z))
+  return goals
+}
+
+/**
+ * Which zone's GOAL the ball is currently scoring in, or -1. A shot counts when
+ * the ball's floor footprint is (a) deep enough — within GOAL_DEPTH of the wall,
+ * i.e. radius ≥ apothem − GOAL_DEPTH — and (b) within the goal's mouth angle.
+ * The caller decides what the goal means (whose point) and debounces repeats.
+ */
+export function ballInGoal(arena: Arena, ballX: number, ballZ: number): number {
+  const r = Math.hypot(ballX, ballZ)
+  if (r < arena.apothem - GOAL_DEPTH) return -1 // not near any wall
+  const ballAngle = Math.atan2(ballZ, ballX)
+  for (let z = 0; z < arena.seats; z++) {
+    const goal = goalForZone(arena, z)
+    let d = ballAngle - goal.angle
+    // wrap to [-π, π]
+    while (d > Math.PI) d -= Math.PI * 2
+    while (d < -Math.PI) d += Math.PI * 2
+    if (Math.abs(d) <= goal.halfAngle) return z
+  }
+  return -1
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { Arena } from '@shared/sim/arena.ts'
-import { yawTowardCenter } from '@shared/sim/arena.ts'
+import { goalForZone, yawTowardCenter } from '@shared/sim/arena.ts'
+import { BALL_RADIUS, GOAL_POST_RADIUS } from '@shared/constants.ts'
 import { KITS, type KitColors } from '@shared/cosmetics/jerseys.ts'
 import { createGrassField, type GrassBody, type GrassField, type GustCell } from './grass.ts'
 import { createDayNight, type DayNight } from './dayNight.ts'
@@ -42,6 +43,8 @@ export interface ArenaView {
   /** aim a zone's cannon during the kickoff: yaw offset (rad) + charge 0..1.
    *  moves the barrel (yaw + pitch) and fills the charge bar. */
   setCannonAim(zone: number, aimYaw: number, charge: number): void
+  /** GOLDEN BOOT: show/hide the goalposts on every wall */
+  setGoalsVisible(on: boolean): void
   /** match progress → day->night arc target (elims done / elims-to-night) */
   setMatchProgress(survivors: number, seatsAtStart: number): void
   /** MAIN MENU ONLY: drive the day↔night frac directly (0 day..1 night) */
@@ -801,10 +804,55 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   addInkOutline(island, INK_WEIGHT.arena)
   group.add(island)
 
-  // --- the morphing layer: just the cannons ------------------------------------
+  // --- the morphing layer: cannons + (GOLDEN BOOT) goals -----------------------
 
   const cannonsGroup = new THREE.Group()
   group.add(cannonsGroup)
+
+  // GOLDEN BOOT goals: two posts + a crossbar + a net at each wall centre. Built
+  // on setZones alongside the cannons; a whole-group visibility toggle shows them
+  // only in GOLDEN BOOT mode. The mouth is exactly the shared goal geometry so
+  // the posts frame the real scoring region.
+  const goalsGroup = new THREE.Group()
+  goalsGroup.visible = false
+  group.add(goalsGroup)
+  const GOAL_H = BALL_RADIUS * 2.2 // a touch taller than the ball
+
+  function buildGoal(arena: Arena, zone: number, zoneColor: number): THREE.Group {
+    const g = goalForZone(arena, zone)
+    const goal = new THREE.Group()
+    const postGeo = new THREE.CylinderGeometry(GOAL_POST_RADIUS, GOAL_POST_RADIUS, GOAL_H, 10)
+    postGeo.translate(0, GOAL_H / 2, 0)
+    const postMat = makeToonMaterial(0xf6f1e2) // clean off-white posts
+    for (const p of [g.postA, g.postB]) {
+      const post = new THREE.Mesh(postGeo, postMat)
+      post.position.set(p.x, 0, p.z)
+      post.castShadow = true
+      addInkOutline(post, INK_WEIGHT.prop)
+      goal.add(post)
+    }
+    // crossbar between the posts
+    const dx = g.postB.x - g.postA.x
+    const dz = g.postB.z - g.postA.z
+    const span = Math.hypot(dx, dz)
+    const barGeo = new THREE.CylinderGeometry(GOAL_POST_RADIUS, GOAL_POST_RADIUS, span, 10)
+    barGeo.rotateZ(Math.PI / 2)
+    const bar = new THREE.Mesh(barGeo, postMat)
+    bar.position.set((g.postA.x + g.postB.x) / 2, GOAL_H, (g.postA.z + g.postB.z) / 2)
+    bar.rotation.y = -Math.atan2(dz, dx)
+    addInkOutline(bar, INK_WEIGHT.prop)
+    goal.add(bar)
+    // a coloured net plane behind the mouth (the seat's colour so you know whose
+    // goal it is) — sits just outside the mouth, angled up to the crossbar
+    const net = new THREE.Mesh(
+      new THREE.PlaneGeometry(span, GOAL_H),
+      new THREE.MeshBasicMaterial({ color: zoneColor, transparent: true, opacity: 0.28, side: THREE.DoubleSide }),
+    )
+    net.position.set((g.postA.x + g.postB.x) / 2, GOAL_H / 2, (g.postA.z + g.postB.z) / 2)
+    net.rotation.y = -Math.atan2(dz, dx) + Math.PI / 2
+    goal.add(net)
+    return goal
+  }
 
   // per-zone cannon rig handles so the launch controller can MOVE the barrel
   // (yaw with aim, pitch with charge) and fill the charge indicator live.
@@ -919,14 +967,22 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
       disposeHierarchy(cannonsGroup)
       cannonsGroup.clear()
       cannonRigs.length = 0
+      disposeHierarchy(goalsGroup)
+      goalsGroup.clear()
       for (let zone = 0; zone < arena.seats; zone++) {
         const rig = buildCannon(arena.zoneAngles[zone] ?? 0, zoneColors[zone] ?? PALETTE.warmGray)
         cannonRigs.push(rig)
         cannonsGroup.add(rig.group)
+        // GOLDEN BOOT goals (hidden unless the mode is on, via setGoalsVisible)
+        goalsGroup.add(buildGoal(arena, zone, zoneColors[zone] ?? PALETTE.warmGray))
       }
     },
 
     setCannonAim,
+
+    setGoalsVisible(on: boolean): void {
+      goalsGroup.visible = on
+    },
 
     setMatchProgress(survivors: number, seatsAtStart: number): void {
       if (!forceNight) dayNight?.setMatchProgress(survivors, seatsAtStart)

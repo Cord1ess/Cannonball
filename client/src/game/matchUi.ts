@@ -83,6 +83,8 @@ export function createMatchUi(client: MatchClient): MatchUi {
       showBanner('KICKOFF!', 1.2)
     } else if (event.type === 'save' && event.seat !== undefined) {
       showBanner(`${nameOf(event.seat)} FREE SAVE!`, 1.5)
+    } else if (event.type === 'goal' && event.seat !== undefined) {
+      showBanner(`⚽ GOAL! ${event.seat === client.mySeat() ? 'YOU' : nameOf(event.seat)} scored!`, 1.6)
     } else if (event.type === 'emote' && event.seat !== undefined && event.id !== undefined) {
       const line = document.createElement('div')
       line.style.cssText =

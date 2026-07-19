@@ -30,6 +30,7 @@ import {
   type WindState,
 } from '@shared/sim/physics.ts'
 import { isPlayPhase, Phase, tickInterval } from '@shared/match/phases.ts'
+import { GameMode } from '@shared/match/modes.ts'
 import { ABILITIES, computeMods } from '@shared/cards/effects.ts'
 import type { CardPool } from '@shared/cards/definitions.ts'
 import { kitColors, type KitColors } from '@shared/cosmetics/jerseys.ts'
@@ -89,11 +90,13 @@ interface RemoteEntity {
 }
 
 export interface MatchEvent {
-  type: 'elim' | 'overtime' | 'volley' | 'emote' | 'save' | 'ability' | 'header' | 'knock'
+  type: 'elim' | 'overtime' | 'volley' | 'emote' | 'save' | 'ability' | 'header' | 'knock' | 'goal'
   seat?: number
   seats?: number[]
   id?: number
   abilityId?: string
+  /** GOLDEN BOOT goal: the zone whose net was scored in */
+  goalZone?: number
   /** world position of the impact (header/knock) — for spawning juice */
   x?: number
   y?: number
@@ -166,6 +169,11 @@ export interface MatchClient {
   /** true while the ball sits in MY zone (drives the "get it out" prompt) */
   ballInMyZone(): boolean
   onEvent(cb: (event: MatchEvent) => void): void
+  /** current game mode (GameMode id) + total match time (seconds) */
+  mode(): number
+  matchTime(): number
+  /** host-only: set the lobby match settings (mode + total time) */
+  setSettings(mode: number, matchTime: number): void
 }
 
 /** where the local bean is + facing, for the picture-in-picture selfie cam */
@@ -434,11 +442,13 @@ export function createOnlineGame(
       seatAlive[p.seat] = p.alive
     })
     const aliveKey = seatAlive.map((a) => (a ? 1 : 0)).join('')
-    const key = `${seats.join(',')}#${colors.join(',')}#${aliveKey}`
+    const key = `${seats.join(',')}#${colors.join(',')}#${aliveKey}#m${state.mode ?? 0}`
     if (key === arenaKey) return
     arenaKey = key
     arena = makeArena(Math.max(2, seats.length))
     arenaView.setZones(arena, colors, seatKits, seatAlive)
+    // GOLDEN BOOT: reveal the goalposts (setZones rebuilt them hidden)
+    arenaView.setGoalsVisible((state.mode ?? 0) === GameMode.GoldenBoot)
   }
 
   function pushSnap(buffer: Snap[], p: NetPlayerRead): void {
@@ -653,6 +663,12 @@ export function createOnlineGame(
     emitEvent({ type: 'ability', seat, abilityId: id }),
   )
   conn.room.onMessage('save', ({ seat }: { seat: number }) => emitEvent({ type: 'save', seat }))
+  conn.room.onMessage('goal', ({ shooter, goalZone }: { shooter: number; goalZone: number }) => {
+    // GOLDEN BOOT: spawn the burst at the scored net's mouth
+    const seatArr = state.zoneSeat
+    const anchor = seatArr ? zoneAnchor(arena, goalZone, 0.95) : null
+    emitEvent({ type: 'goal', seat: shooter, goalZone, x: anchor?.x, y: 1, z: anchor?.z })
+  })
   conn.room.onMessage('round', () => {})
 
   function blendBallToServer(dt: number): void {
@@ -732,27 +748,36 @@ export function createOnlineGame(
     seatColorHex: (seat: number) => toHex(seatColors[seat] ?? SEAT_COLORS[seat] ?? 0x888888),
     leaderboard(): LeaderRow[] {
       const phase = state.phase ?? 0
+      const gm = state.mode ?? 0
+      const goldenBoot = gm === GameMode.GoldenBoot
       const capacity =
         phase === Phase.Duel ? DUEL_METER_CAPACITY_S : tickInterval(state.survivors || 6) * 0.5
       const bz = footprintZone(arena, ball.x, ball.z)
       const ballOwner = bz >= 0 && state.zoneSeat ? state.zoneSeat[bz] : -1
+      // GOLDEN BOOT: meters = goal counts; normalize bars against the top score.
+      let topGoals = 1
+      if (goldenBoot) state.players.forEach((p) => { if (p.alive) topGoals = Math.max(topGoals, state.meters?.[p.seat] ?? 0) })
       const rows: LeaderRow[] = []
       state.players.forEach((p) => {
         if (!p.alive) return
+        const raw = state.meters?.[p.seat] ?? 0
         rows.push({
           seat: p.seat,
           name: p.name || `Player ${p.seat + 1}`,
           color: toHex(kitOf(p).primary),
           kitId: p.kitId,
           kitAway: p.kitAway,
-          frac: Math.min(1, (state.meters?.[p.seat] ?? 0) / Math.max(1, capacity)),
+          // bar fill: ball-time fraction, or (GOLDEN BOOT) score fraction of the lead
+          frac: goldenBoot ? Math.min(1, raw / Math.max(1, topGoals)) : Math.min(1, raw / Math.max(1, capacity)),
           ballHere: p.seat === ballOwner,
           isMe: p.seat === mySeat,
         })
       })
-      // risk = meter, plus a boost if the ball is in your zone right now.
-      // SAFEST first (low risk at top), MOST AT RISK last (bottom).
-      const risk = (r: LeaderRow): number => r.frac + (r.ballHere ? 0.5 : 0)
+      // SAFEST first (top), MOST AT RISK last (bottom). In ball-time modes risk
+      // rises with the meter (+ ball in your zone). In GOLDEN BOOT it INVERTS:
+      // the LOWEST scorer is most at risk, so risk = 1 - scoreFrac.
+      const risk = (r: LeaderRow): number =>
+        goldenBoot ? 1 - r.frac + (r.ballHere ? 0.05 : 0) : r.frac + (r.ballHere ? 0.5 : 0)
       rows.sort((a, b) => risk(a) - risk(b))
       return rows
     },
@@ -765,6 +790,9 @@ export function createOnlineGame(
     survivors: () => state.survivors ?? 0,
     ballInMyZone: () => alarmPulse > 0,
     onEvent: (cb) => eventListeners.push(cb),
+    mode: () => state.mode ?? 0,
+    matchTime: () => state.matchTime ?? 300,
+    setSettings: (mode: number, matchTime: number) => conn.send('settings', { mode, matchTime }),
   }
 
   return {

@@ -4,6 +4,7 @@ import {
   DRAFT_SECONDS,
   DUEL_METER_CAPACITY_S,
   FIXED_DELTA,
+  GOAL_COOLDOWN_S,
   GRACE_SECONDS,
   HANDOUT_SECONDS,
   LAUNCH_AIM_ARC_DEG,
@@ -21,6 +22,7 @@ import {
 } from '../../../shared/src/constants.ts'
 import {
   cannonMouth,
+  ballInGoal,
   footprintZone,
   footprintZoneWidths,
   launchFlightTime,
@@ -52,6 +54,13 @@ import { rollDraftOffer, rollRestartPair, type CardPool } from '../../../shared/
 import { computeMods, hasFreeSave, hasMagnetCurse } from '../../../shared/src/cards/effects.ts'
 import { DEFAULT_KIT_IDS, KIT_BY_ID, resolveKitClashes } from '../../../shared/src/cosmetics/jerseys.ts'
 import { Phase, tickInterval, type PhaseId } from '../../../shared/src/match/phases.ts'
+import {
+  DEFAULT_MATCH_TIME_S,
+  GameMode,
+  intervalForMatchTime,
+  isValidGameMode,
+  type GameModeId,
+} from '../../../shared/src/match/modes.ts'
 import { Time } from '../../../vendor/arc/scheduler/time.ts'
 import { Random } from '../../../vendor/arc/scheduler/random.ts'
 import { BallState, HandoutState, MatchState, PlayerState, type MatchStateT } from './schema.ts'
@@ -136,20 +145,37 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #freeSaves: number[] = new Array(MAX_SEATS).fill(0)
   /** how long the ball has continuously dwelt in each seat's zone (grace) */
   #zoneDwell: number[] = new Array(MAX_SEATS).fill(0)
+  /** GAME MODE settings (chosen in the lobby by the host, before start) */
+  #mode: GameModeId = GameMode.HotZone
+  #matchTime = DEFAULT_MATCH_TIME_S
+  /** GOLDEN BOOT: goals scored per seat this interval; goal debounce timer;
+   *  the last seat to header the ball (the "shooter" credited with a goal) */
+  #goals: number[] = new Array(MAX_SEATS).fill(0)
+  #goalCd = 0
+  #lastHeaderSeat = -1
 
   #scale(t: number): number {
     return this.#fast ? t * 0.15 : t
+  }
+
+  /** interval length for the current mode/settings (total time ÷ ticks). */
+  #interval(): number {
+    return intervalForMatchTime(this.#survivors, this.#seatsAtStart, this.#matchTime)
   }
 
   get #survivors(): number {
     return this.#alive.filter(Boolean).length
   }
 
-  override onCreate(options?: { fast?: boolean }): void {
+  override onCreate(options?: { fast?: boolean; mode?: number; matchTime?: number }): void {
     this.#fast = options?.fast === true
+    if (typeof options?.mode === 'number' && isValidGameMode(options.mode)) this.#mode = options.mode
+    if (typeof options?.matchTime === 'number' && options.matchTime > 0) this.#matchTime = options.matchTime
     this.setState(new MatchState())
     this.state.ball = new BallState()
     this.state.handout = new HandoutState()
+    this.state.mode = this.#mode
+    this.state.matchTime = this.#matchTime
     for (let seat = 0; seat < MAX_SEATS; seat++) this.state.meters.push(0)
     this.setPatchRate(1000 / PATCH_HZ)
 
@@ -184,6 +210,20 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       if (this.#phase !== Phase.Lobby) return
       if (client.sessionId !== this.state.hostSessionId) return
       this.#startMatch()
+    })
+
+    // lobby MATCH SETTINGS — host picks the game mode + total match time before
+    // starting. Only in the lobby (mid-match settings would break fairness).
+    this.onMessage('settings', (client, message: { mode?: number; matchTime?: number }) => {
+      if (this.#phase !== Phase.Lobby || client.sessionId !== this.state.hostSessionId) return
+      if (typeof message?.mode === 'number' && isValidGameMode(message.mode)) {
+        this.#mode = message.mode
+        this.state.mode = message.mode
+      }
+      if (typeof message?.matchTime === 'number' && message.matchTime >= 30 && message.matchTime <= 1800) {
+        this.#matchTime = Math.round(message.matchTime)
+        this.state.matchTime = this.#matchTime
+      }
     })
 
     this.onMessage('pick', (client, message: { pool?: CardPool; index?: number }) => {
@@ -770,6 +810,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     resetBall(this.#ball)
     this.#meters.fill(0)
     this.#zoneDwell.fill(0)
+    this.#goals.fill(0) // GOLDEN BOOT: goals reset each interval
+    this.#goalCd = 0
     for (const session of this.#sessions.values()) {
       const sim = session.sim
       if (!this.#alive[sim.seat]) continue
@@ -818,7 +860,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       sim.grounded = false
       sim.yaw = yawTowardCenter(land.x, land.z) // face the way you're flying
     }
-    this.#tickRemaining = this.#scale(tickInterval(this.#survivors))
+    this.#tickRemaining = this.#scale(this.#interval())
     if (this.#survivors <= 2 && this.#seatsAtStart >= 2) {
       this.#meters.fill(0) // duel meters are cumulative from zero
       this.#enter(Phase.Duel, 0)
@@ -1012,8 +1054,10 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     stepBallWithPlayers(this.#ball, sims, this.#alive, this.#arena, dt, this.#events)
 
     // include impact position/force so the client can spawn juice at the hit
-    for (const header of this.#events.headers)
+    for (const header of this.#events.headers) {
       this.broadcast('header', { seat: header.seat, x: header.x, y: header.y, z: header.z })
+      this.#lastHeaderSeat = header.seat // GOLDEN BOOT: credit goals to the shooter
+    }
     for (const knock of this.#events.knocks)
       this.broadcast('knock', { seat: knock.seat, speed: knock.speed })
     for (const ability of this.#events.abilities) this.broadcast('ability', ability)
@@ -1033,38 +1077,12 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     const zone = footprintZoneWidths(this.#arena, this.#ball.x, this.#ball.z, widths)
 
     if (this.#phase === Phase.Arena) {
-      // per-seat DWELL grace: grow the owner's dwell, decay everyone else's,
-      // so a ball only starts counting after it's SETTLED in a zone
-      const ownerSeat = zone >= 0 ? this.#zoneSeat[zone] : undefined
-      for (let s = 0; s < MAX_SEATS; s++) {
-        if (s === ownerSeat) this.#zoneDwell[s] = Math.min(2, (this.#zoneDwell[s] ?? 0) + dt)
-        else this.#zoneDwell[s] = Math.max(0, (this.#zoneDwell[s] ?? 0) - dt * 2)
-      }
-      // FINAL-WHISTLE lock-in: freeze accrual in the last second so what you
-      // see with 1s left is what resolves (no last-instant flip you can't react to)
-      const lockedIn = this.#tickRemaining <= this.#scale(TICK_LOCKIN_S)
-
-      if (ownerSeat !== undefined && this.#alive[ownerSeat] && !lockedIn) {
-        const seat = ownerSeat
-        // Free Save / Bodyguard: auto-punt the FIRST ball entering your wedge
-        if ((this.#meters[seat] ?? 0) === 0 && (this.#freeSaves[seat] ?? 0) > 0) {
-          this.#freeSaves[seat] = 0
-          const d = Math.hypot(this.#ball.x, this.#ball.z)
-          if (d > 0.5) {
-            this.#ball.vx = (-this.#ball.x / d) * 15
-            this.#ball.vz = (-this.#ball.z / d) * 15
-            this.#ball.vy = Math.max(this.#ball.vy, 6)
-          }
-          this.broadcast('save', { seat })
-        } else if ((this.#zoneDwell[seat] ?? 0) >= this.#scale(ZONE_DWELL_GRACE_S)) {
-          // only accrue once the ball has DWELT past the grace window
-          let rate = 1
-          for (const session of this.#sessions.values()) {
-            if (session.sim.seat === seat) rate = session.sim.mods.meterRate
-          }
-          this.#meters[seat] = (this.#meters[seat] ?? 0) + dt * rate
-          this.#cumulative[seat] = (this.#cumulative[seat] ?? 0) + dt
-        }
+      // GOLDEN BOOT tracks GOALS instead of ball-time; the danger meter shows
+      // each seat's score (higher = SAFER — inverted from the ball-time modes).
+      if (this.#mode === GameMode.GoldenBoot) {
+        this.#stepGoldenBoot(dt)
+      } else {
+        this.#stepBallTime(dt, zone)
       }
       this.#tickRemaining -= dt
       this.state.tickRemaining = this.#tickRemaining
@@ -1098,13 +1116,85 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     }
   }
 
+  /** HOT ZONE / FINAL WHISTLE: accrue ball-time in the zone the ball sits in.
+   *  The danger meter reflects this in both; the tick RESOLUTION differs. */
+  #stepBallTime(dt: number, zone: number): void {
+    const ownerSeat = zone >= 0 ? this.#zoneSeat[zone] : undefined
+    for (let s = 0; s < MAX_SEATS; s++) {
+      if (s === ownerSeat) this.#zoneDwell[s] = Math.min(2, (this.#zoneDwell[s] ?? 0) + dt)
+      else this.#zoneDwell[s] = Math.max(0, (this.#zoneDwell[s] ?? 0) - dt * 2)
+    }
+    // FINAL-WHISTLE lock-in: freeze accrual in the last second so what you see
+    // with 1s left is what resolves (no last-instant flip you can't react to)
+    const lockedIn = this.#tickRemaining <= this.#scale(TICK_LOCKIN_S)
+    if (ownerSeat === undefined || !this.#alive[ownerSeat] || lockedIn) return
+    const seat = ownerSeat
+    // Free Save / Bodyguard: auto-punt the FIRST ball entering your wedge
+    if ((this.#meters[seat] ?? 0) === 0 && (this.#freeSaves[seat] ?? 0) > 0) {
+      this.#freeSaves[seat] = 0
+      const d = Math.hypot(this.#ball.x, this.#ball.z)
+      if (d > 0.5) {
+        this.#ball.vx = (-this.#ball.x / d) * 15
+        this.#ball.vz = (-this.#ball.z / d) * 15
+        this.#ball.vy = Math.max(this.#ball.vy, 6)
+      }
+      this.broadcast('save', { seat })
+    } else if ((this.#zoneDwell[seat] ?? 0) >= this.#scale(ZONE_DWELL_GRACE_S)) {
+      let rate = 1
+      for (const session of this.#sessions.values()) {
+        if (session.sim.seat === seat) rate = session.sim.mods.meterRate
+      }
+      this.#meters[seat] = (this.#meters[seat] ?? 0) + dt * rate
+      this.#cumulative[seat] = (this.#cumulative[seat] ?? 0) + dt
+    }
+  }
+
+  /** GOLDEN BOOT: score in RIVALS' goals. When the ball enters a goal that
+   *  isn't the shooter's own, the last header-er (the shooter) gets a point.
+   *  The `meters` array carries goal counts so the HUD shows scores. */
+  #stepGoldenBoot(dt: number): void {
+    if (this.#goalCd > 0) this.#goalCd -= dt
+    const goalZone = ballInGoal(this.#arena, this.#ball.x, this.#ball.z)
+    if (goalZone >= 0 && this.#goalCd <= 0) {
+      const shooterSeat = this.#lastHeaderSeat
+      const goalOwner = this.#zoneSeat[goalZone] ?? -1
+      // a goal counts only if scored by someone OTHER than the goal's owner
+      // (no own-goals) and the shooter is a live player
+      if (shooterSeat >= 0 && shooterSeat !== goalOwner && this.#alive[shooterSeat]) {
+        this.#goals[shooterSeat] = (this.#goals[shooterSeat] ?? 0) + 1
+        this.#meters[shooterSeat] = this.#goals[shooterSeat]! // HUD shows the score
+        this.#goalCd = this.#scale(GOAL_COOLDOWN_S)
+        this.broadcast('goal', { shooter: shooterSeat, goalZone })
+        // kick the ball back toward centre so it doesn't sit in the goal
+        const d = Math.hypot(this.#ball.x, this.#ball.z)
+        if (d > 0.5) {
+          this.#ball.vx = (-this.#ball.x / d) * 14
+          this.#ball.vz = (-this.#ball.z / d) * 14
+          this.#ball.vy = Math.max(this.#ball.vy, 5)
+        }
+      }
+    }
+  }
+
   #resolveTick(): void {
     const occupiedAlive = this.#alive.map((a, seat) => a && this.#seatOccupied(seat))
-    const losers = tickLosers(this.#meters, occupiedAlive)
+    let losers: number[]
+    if (this.#mode === GameMode.GoldenBoot) {
+      // LOWEST scorer this interval is out (ties → overtime). Everyone starts at
+      // 0, so a 0-0-0 interval is an all-tie → overtime sorts it, never a no-op.
+      losers = this.#lowestScorers(occupiedAlive)
+    } else if (this.#mode === GameMode.FinalWhistle) {
+      // whoever's zone the ball is IN right now is out — the buzzer snapshot.
+      losers = this.#ballHolderAtWhistle(occupiedAlive)
+    } else {
+      // HOT ZONE (default): most accumulated ball-time is out.
+      losers = tickLosers(this.#meters, occupiedAlive)
+    }
     if (losers.length === 0) {
-      // nothing accrued: fresh interval, no elimination
+      // nothing to resolve (e.g. ball on the neutral disc at the whistle): fresh
+      // interval, no elimination.
       this.#meters.fill(0)
-      this.#tickRemaining = this.#scale(tickInterval(this.#survivors))
+      this.#tickRemaining = this.#scale(this.#interval())
       return
     }
     if (losers.length === 1) {
@@ -1119,6 +1209,33 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     resetBall(this.#ball)
     this.broadcast('overtime', { seats: losers })
     this.#enter(Phase.Overtime, 0)
+  }
+
+  /** FINAL WHISTLE resolution: the seat whose zone the ball's footprint is in
+   *  right now. Neutral disc / empty → nobody (no-op interval). */
+  #ballHolderAtWhistle(occupiedAlive: readonly boolean[]): number[] {
+    const zone = footprintZone(this.#arena, this.#ball.x, this.#ball.z)
+    if (zone < 0) return []
+    const seat = this.#zoneSeat[zone]
+    if (seat === undefined || !occupiedAlive[seat]) return []
+    return [seat]
+  }
+
+  /** GOLDEN BOOT resolution: the live seat(s) with the FEWEST goals this
+   *  interval (all ties out to overtime). */
+  #lowestScorers(occupiedAlive: readonly boolean[]): number[] {
+    let low = Infinity
+    for (let seat = 0; seat < MAX_SEATS; seat++) {
+      if (!occupiedAlive[seat]) continue
+      const g = this.#goals[seat] ?? 0
+      if (g < low) low = g
+    }
+    if (low === Infinity) return []
+    const losers: number[] = []
+    for (let seat = 0; seat < MAX_SEATS; seat++) {
+      if (occupiedAlive[seat] && (this.#goals[seat] ?? 0) === low) losers.push(seat)
+    }
+    return losers
   }
 
   // --- debug fast-iteration tools ------------------------------------------------
@@ -1172,7 +1289,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       sim.yaw = yawTowardCenter(anchor.x, anchor.z)
     }
     resetBall(this.#ball)
-    this.#tickRemaining = this.#scale(tickInterval(this.#survivors))
+    this.#tickRemaining = this.#scale(this.#interval())
     this.#enter(Phase.Arena, 0)
     this.broadcast('volley', {})
   }

@@ -72,6 +72,8 @@ export interface NetStateRead {
   survivors: number
   tickRemaining: number
   winnerSeat: number
+  mode: number
+  matchTime: number
   windX: number
   windZ: number
   windStrength: number
