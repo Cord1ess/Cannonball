@@ -321,32 +321,43 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
   // lamp head aimed at the pitch that lights the beans/ball and CASTS SHADOWS.
   // Its position/target are computed in WORLD space (shadows need world coords),
   // so the caller adds the light + target to the SCENE, not this tower group.
-  // decay=0 → NO distance falloff (a floodlight reaching the far pitch at full
-  // strength; with decay the light was ~zero by the time it reached the field).
-  const spot = new THREE.SpotLight(0xfff3d8, 0, 400, Math.PI / 4, 0.4, 0)
+  // decay=0 → NO distance falloff. A NARROW cone aimed at the field centre so it
+  // lights the PITCH, not the stands. Off until nightfall, then snaps fully on.
+  const spot = new THREE.SpotLight(0xfff8e6, 0, 400, Math.PI / 7, 0.35, 0)
   spot.position.set(x, baseY + H, z) // at the lamp head, world space
   spot.castShadow = true
-  spot.shadow.mapSize.set(1024, 1024)
+  spot.shadow.mapSize.set(2048, 2048)
   spot.shadow.camera.near = 10
   spot.shadow.camera.far = 400
   spot.shadow.bias = -0.0006
+  // aim at a point in THIS tower's own quadrant of the field (partway from the
+  // centre toward the tower), so the 4 narrow cones together cover the whole
+  // pitch — not all four crossing at the dead centre.
+  const towerDir = new THREE.Vector2(x, z).normalize()
   const spotTarget = new THREE.Object3D()
-  spotTarget.position.set(0, 0, 0) // aim at the pitch centre
+  spotTarget.position.set(towerDir.x * 14, 0, towerDir.y * 14)
   spot.target = spotTarget
 
   const dayCol = new THREE.Color(0x6a6656)
   const nightCol = new THREE.Color(0xfff7d2)
+  // HARD ON/OFF: the lights are a switch, not a dimmer. They stay OFF through the
+  // day + dusk, then at ONE definitive point (nightfall) SNAP fully on and stay
+  // on — so shadows only ever appear once the stadium has gone dark.
+  const LIGHTS_ON_AT = 0.9 // night frac at which the floodlights switch on
+  let lit = false
   return {
     group: tower,
     spot,
     spotTarget,
     setNight(frac: number): void {
       lampMat.color.copy(dayCol).lerp(nightCol, frac)
-      glowMat.opacity = frac * 0.85
-      // the floodlight fades on at night (real light, casts shadows like the sun).
-      // 4 towers overlap, so keep each moderate or the pitch reads like daytime.
-      spot.intensity = frac * 1.1
-      spot.castShadow = frac > 0.15
+      const on = frac >= LIGHTS_ON_AT
+      if (on !== lit) {
+        lit = on
+        glowMat.opacity = on ? 0.95 : 0
+        spot.intensity = on ? 2.6 : 0 // brighter, full-strength floodlight
+        spot.castShadow = on
+      }
     },
   }
 }

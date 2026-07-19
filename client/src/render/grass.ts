@@ -297,10 +297,15 @@ const FRAG = /* glsl */ `
     // unlit (its own shader), so it keeps a warm floodlit tone here — a touch
     // cooler + slightly deeper than day, but clearly LIT (not dark). The real
     // spotlights do the directional lighting + shadows on the beans and ball.
+    // The pitch goes DARK as night falls (dusk), then when the floodlights snap
+    // on (uNight past the switch point) it becomes bright floodlit turf — one
+    // definitive change, matching the tower lights turning on.
     if (uNight > 0.001) {
-      vec3 lit = col * vec3(0.86, 0.92, 0.84); // warm floodlit turf
-      lit *= 0.82 + 0.18 * vT;
-      col = mix(col, lit, uNight);
+      vec3 dusk = col * vec3(0.34, 0.42, 0.56); // dim dark turf before the lights
+      col = mix(col, dusk, uNight);
+      float lights = smoothstep(0.86, 0.94, uNight); // floodlights switch on here
+      vec3 flood = mix(uBase, uTip, vT) * vec3(0.95, 1.02, 0.9) * (0.72 + 0.28 * vT);
+      col = mix(col, flood, lights);
     }
 
     gl_FragColor = vec4(col, 1.0);
