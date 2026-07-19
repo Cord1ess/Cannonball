@@ -1,5 +1,6 @@
 import { kitColors } from '@shared/cosmetics/jerseys.ts'
 import type { LeaderRow, MatchClient } from './online.ts'
+import { brushFill, FONT_HAND, FONT_HEAD, INK, inkFrameUrl, METER, paperPanel, paperTexture } from './paperSkin.ts'
 
 /**
  * The match HUD (M5b): a big center "next elimination" countdown + a right-side
@@ -63,29 +64,35 @@ interface RowEl {
 
 export function createLeaderboard(client: MatchClient): Leaderboard {
   const root = document.createElement('div')
-  root.style.cssText = 'position:fixed;inset:0;pointer-events:none;font-family:system-ui,sans-serif;z-index:15;'
+  root.style.cssText = `position:fixed;inset:0;pointer-events:none;font-family:${FONT_HEAD};z-index:15;`
   document.body.appendChild(root)
 
   // --- center: next-elimination countdown ---------------------------------------
+  // a paper chip with a wobbly ink frame, hand-lettered label + big Baloo number
   const timer = document.createElement('div')
   timer.style.cssText =
-    'position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;color:#4a443c;' +
-    'text-shadow:0 2px 0 #fff8;'
+    `position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;color:${INK};` +
+    'padding:6px 22px 8px;'
+  paperPanel(timer, { w: 200, h: 92, weight: 2.6 })
   const timerLabel = document.createElement('div')
-  timerLabel.style.cssText = 'font-size:13px;font-weight:700;letter-spacing:1px;opacity:0.8;'
-  timerLabel.textContent = 'NEXT ELIMINATION'
+  timerLabel.style.cssText = `font-family:${FONT_HAND};font-size:16px;letter-spacing:0.5px;opacity:0.85;margin-top:2px;`
+  timerLabel.textContent = 'next elimination'
   const timerNum = document.createElement('div')
-  timerNum.style.cssText = 'font-size:52px;font-weight:800;line-height:1;'
+  timerNum.style.cssText = `font-size:54px;font-weight:800;line-height:0.95;`
   timer.append(timerLabel, timerNum)
   root.appendChild(timer)
 
   // --- center: "get the ball out of your zone!" alarm prompt --------------------
+  // a torn-paper danger banner: rose paper with a heavy ink frame, hand text
   const prompt = document.createElement('div')
   prompt.style.cssText =
     'position:absolute;top:44%;left:50%;transform:translate(-50%,-50%);text-align:center;' +
-    'font-size:30px;font-weight:800;color:#fff;background:#d0402fdd;padding:10px 26px;border-radius:12px;' +
-    'box-shadow:0 4px 0 #7a2419;display:none;white-space:nowrap;'
-  prompt.textContent = '⚠  GET THE BALL OUT OF YOUR ZONE!'
+    `font-family:${FONT_HEAD};font-size:30px;font-weight:800;color:${INK};` +
+    'padding:10px 30px;display:none;white-space:nowrap;' +
+    `background-image:${inkFrameUrl(440, 60, INK, 3.2)}, url("${paperTexture()}");` +
+    'background-size:100% 100%, 128px 128px;background-repeat:no-repeat, repeat;' +
+    'box-shadow:0 5px 0 rgba(74,68,60,0.22);'
+  prompt.textContent = '⚠ get the ball out of your zone!'
   root.appendChild(prompt)
 
   // --- right: leaderboard (below the PIP selfie cam) ----------------------------
@@ -102,19 +109,19 @@ export function createLeaderboard(client: MatchClient): Leaderboard {
     const wrap = document.createElement('div')
     wrap.style.cssText =
       'position:absolute;left:0;right:0;height:36px;display:flex;align-items:center;gap:8px;' +
-      'background:#fffdf5e8;border-radius:10px;padding:0 8px;border:2px solid #4a443c22;' +
-      'transition:none;will-change:transform;'
+      'padding:0 10px;transition:none;will-change:transform;'
+    paperPanel(wrap, { w: 210, h: 36, weight: 2 })
     const icon = document.createElement('img')
     icon.style.cssText = 'width:28px;height:28px;flex-shrink:0;'
     const mid = document.createElement('div')
     mid.style.cssText = 'flex:1;min-width:0;'
     const name = document.createElement('span')
     name.style.cssText =
-      'display:block;font-size:13px;font-weight:700;color:#4a443c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+      `display:block;font-family:${FONT_HAND};font-size:16px;line-height:1;color:${INK};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`
     const bar = document.createElement('div')
-    bar.style.cssText = 'height:5px;background:#4a443c22;border-radius:3px;margin-top:2px;overflow:hidden;'
+    bar.style.cssText = `height:6px;background:rgba(74,68,60,0.16);border-radius:3px;margin-top:3px;overflow:hidden;`
     const barFill = document.createElement('div')
-    barFill.style.cssText = 'height:100%;width:0%;background:#d96c6c;transition:width 160ms;'
+    barFill.style.cssText = `height:100%;width:0%;background:${brushFill(METER.danger)};transition:width 160ms;`
     bar.appendChild(barFill)
     mid.append(name, bar)
     wrap.append(icon, mid)
@@ -131,8 +138,8 @@ export function createLeaderboard(client: MatchClient): Leaderboard {
       if (Number.isFinite(secs) && client.survivors() > 1) {
         timer.style.display = 'block'
         timerNum.textContent = Math.ceil(Math.max(0, secs)).toString()
-        // pulse red as it runs low
-        timerNum.style.color = secs < 5 ? '#d0402f' : '#4a443c'
+        // pulse rose as it runs low
+        timerNum.style.color = secs < 5 ? METER.hot : INK
       } else {
         timer.style.display = 'none'
       }
@@ -156,16 +163,15 @@ export function createLeaderboard(client: MatchClient): Leaderboard {
         el.icon.src = beanIcon(data.kitId, data.kitAway, data.color)
         el.name.textContent = data.isMe ? `${data.name} (you)` : data.name
         el.barFill.style.width = `${Math.round(data.frac * 100)}%`
-        // bar color: safe green-ish low, red as it fills; ball-in-zone = bright
-        el.barFill.style.background = data.ballHere ? '#e8402e' : data.frac > 0.5 ? '#e08a2b' : '#88b06a'
-        // highlight my row + the most-at-risk (last) row
+        // brush-stroke fill: safe green low, gold mid, rose high; ball-in-zone hot
+        const meterColor = data.ballHere ? METER.hot : data.frac > 0.5 ? METER.warn : METER.safe
+        el.barFill.style.background = brushFill(meterColor)
+        // emphasis via the INK FRAME weight/tint (not a hard border): my row +
+        // the most-at-risk (last) row get a heavier/rose frame, ball-in-zone hot
         const atRisk = i === rows.length - 1 && rows.length > 1
-        el.wrap.style.border = data.isMe
-          ? '2px solid #4a443c'
-          : atRisk
-            ? '2px solid #d96c6c'
-            : '2px solid #4a443c22'
-        el.wrap.style.background = data.ballHere ? '#ffe7e0f0' : '#fffdf5e8'
+        const frameColor = data.ballHere ? METER.hot : atRisk ? METER.danger : INK
+        const frameWeight = data.isMe || atRisk || data.ballHere ? 3.2 : 2
+        el.wrap.style.backgroundImage = `${inkFrameUrl(210, 36, frameColor, frameWeight)}, url("${paperTexture()}")`
 
         // smooth vertical slide toward the target slot
         const targetY = i * ROW_H

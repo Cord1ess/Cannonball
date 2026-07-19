@@ -2,11 +2,13 @@ import { CARD_BY_ID, type CardPool } from '@shared/cards/definitions.ts'
 import { KIT_BY_ID, KITS, kitColors, type KitColors } from '@shared/cosmetics/jerseys.ts'
 import { Phase } from '@shared/match/phases.ts'
 import type { MatchClient } from './online.ts'
+import { FONT_HAND, FONT_HEAD, INK, inkFrameUrl, METER, paperButton, paperPanel, paperTexture } from './paperSkin.ts'
 
 /**
  * The match-flow overlay (M3): lobby, draft grid, launch countdown/aim,
  * elimination + handout targeting, overtime banner, duel note,
- * winner + rematch, emote feed. Plain DOM — the paper-and-ink skin is M5.
+ * winner + rematch, emote feed. Wears the paper-and-ink skin (§9): the main
+ * panel + banners are paper cards with wobbly ink frames, hand + Baloo fonts.
  */
 
 const EMOTES = ['👏', '❤️', '😂', '😱']
@@ -40,26 +42,29 @@ export function createMatchUi(client: MatchClient): MatchUi {
     client.players().find((p) => p.seat === seat)?.name ?? `P${seat + 1}`
   const root = document.createElement('div')
   root.style.cssText =
-    'position:fixed;inset:0;pointer-events:none;font-family:system-ui,sans-serif;user-select:none;z-index:20;'
+    `position:fixed;inset:0;pointer-events:none;font-family:${FONT_HEAD};user-select:none;z-index:20;`
   document.body.appendChild(root)
 
   const panel = document.createElement('div')
   panel.style.cssText =
-    'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#fffdf5f0;' +
-    'border:3px solid #4a443c;border-radius:14px;padding:22px 28px;min-width:420px;max-width:640px;' +
-    'color:#4a443c;text-align:center;pointer-events:auto;display:none;'
+    'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);' +
+    'padding:24px 30px;min-width:420px;max-width:640px;' +
+    `color:${INK};text-align:center;pointer-events:auto;display:none;`
+  paperPanel(panel, { w: 560, h: 380, weight: 3.4 })
   root.appendChild(panel)
 
   const banner = document.createElement('div')
   banner.style.cssText =
     'position:absolute;left:50%;top:20%;transform:translateX(-50%);font-size:34px;font-weight:800;' +
-    'color:#fffdf5;text-shadow:0 2px 0 #4a443c;opacity:0;transition:opacity 200ms;white-space:nowrap;'
+    `color:${INK};padding:8px 28px;opacity:0;transition:opacity 200ms;white-space:nowrap;` +
+    `background-image:${inkFrameUrl(460, 58, INK, 3.2)}, url("${paperTexture()}");` +
+    'background-size:100% 100%, 128px 128px;background-repeat:no-repeat, repeat;'
   root.appendChild(banner)
   let bannerUntil = 0
 
   const emoteFeed = document.createElement('div')
   emoteFeed.style.cssText =
-    'position:absolute;left:14px;bottom:110px;display:flex;flex-direction:column;gap:4px;font-size:20px;'
+    `position:absolute;left:14px;bottom:110px;display:flex;flex-direction:column;gap:4px;font-family:${FONT_HAND};font-size:20px;`
   root.appendChild(emoteFeed)
 
   const showBanner = (text: string, seconds = 2.5): void => {
@@ -79,7 +84,9 @@ export function createMatchUi(client: MatchClient): MatchUi {
       showBanner(`${nameOf(event.seat)} FREE SAVE!`, 1.5)
     } else if (event.type === 'emote' && event.seat !== undefined && event.id !== undefined) {
       const line = document.createElement('div')
-      line.style.cssText = `background:#fffdf5cc;border-radius:8px;padding:2px 10px;border-left:6px solid ${seatColor(event.seat)};`
+      line.style.cssText =
+        `padding:3px 12px;border-left:6px solid ${seatColor(event.seat)};color:${INK};` +
+        `background-image:url("${paperTexture()}");background-size:128px 128px;border-radius:6px;`
       line.textContent = `${nameOf(event.seat)} ${EMOTES[event.id] ?? ''}`
       emoteFeed.appendChild(line)
       setTimeout(() => line.remove(), 3000)
@@ -139,7 +146,8 @@ export function createMatchUi(client: MatchClient): MatchUi {
         nameInput.placeholder = 'your name'
         nameInput.value = client.myName()
         nameInput.style.cssText =
-          'font:600 14px system-ui;padding:5px 10px;border-radius:8px;border:2px solid #4a443c;min-width:160px;'
+          `font-family:${FONT_HAND};font-size:17px;padding:5px 12px;border-radius:8px;border:2px solid ${INK};min-width:160px;` +
+          `background:url("${paperTexture()}");background-size:128px 128px;color:${INK};`
         const commitName = (): void => {
           const v = nameInput.value.trim()
           if (v) client.setName(v)
@@ -165,9 +173,8 @@ export function createMatchUi(client: MatchClient): MatchUi {
         const arrow = (label: string, dir: number): HTMLButtonElement => {
           const btn = document.createElement('button')
           btn.textContent = label
-          btn.style.cssText =
-            'font-size:16px;font-weight:800;background:#4a443c;color:#fffdf5;border:0;border-radius:8px;' +
-            'padding:4px 12px;cursor:pointer;'
+          btn.style.cssText = 'font-size:16px;padding:4px 12px;'
+          paperButton(btn, { tint: INK, w: 40, h: 30 })
           btn.addEventListener('click', () => {
             const next = KITS[(Math.max(kitIndex, 0) + dir + KITS.length) % KITS.length]!
             client.setKit(next.id)
@@ -177,7 +184,7 @@ export function createMatchUi(client: MatchClient): MatchUi {
         const swatch = document.createElement('div')
         swatch.style.cssText = `${kitSwatchCss(myKit, seatColor(client.mySeat()))}width:26px;height:20px;border:2px solid #4a443c;border-radius:5px;`
         const kitName = document.createElement('span')
-        kitName.style.cssText = 'min-width:170px;font-size:14px;'
+        kitName.style.cssText = `min-width:170px;font-size:16px;font-family:${FONT_HAND};`
         kitName.textContent = `${KIT_BY_ID.get(myKitId)?.name ?? 'your team'}${client.myKitAway() ? ' · away kit' : ''}`
         kitRow.appendChild(arrow('‹', -1))
         kitRow.appendChild(swatch)
@@ -189,13 +196,13 @@ export function createMatchUi(client: MatchClient): MatchUi {
           botRow.style.cssText = 'display:flex;gap:8px;justify-content:center;margin-bottom:12px;'
           const addBot = document.createElement('button')
           addBot.textContent = '+ BOT'
-          addBot.style.cssText =
-            'font-size:13px;font-weight:800;background:#4fa3d8;color:#fff;border:0;border-radius:8px;padding:6px 14px;cursor:pointer;'
+          addBot.style.cssText = 'font-size:13px;padding:6px 14px;'
+          paperButton(addBot, { tint: '#4fa3d8', w: 84, h: 32 })
           addBot.addEventListener('click', () => client.addBot())
           const fillBots = document.createElement('button')
           fillBots.textContent = 'FILL WITH BOTS'
-          fillBots.style.cssText =
-            'font-size:13px;font-weight:800;background:#9678c8;color:#fff;border:0;border-radius:8px;padding:6px 14px;cursor:pointer;'
+          fillBots.style.cssText = 'font-size:13px;padding:6px 14px;'
+          paperButton(fillBots, { tint: '#9678c8', w: 140, h: 32 })
           fillBots.addEventListener('click', () => client.fillBots())
           botRow.appendChild(addBot)
           botRow.appendChild(fillBots)
@@ -203,8 +210,8 @@ export function createMatchUi(client: MatchClient): MatchUi {
 
           const startButton = document.createElement('button')
           startButton.textContent = 'START MATCH'
-          startButton.style.cssText =
-            'font-size:18px;font-weight:800;background:#58ae7c;color:#fff;border:0;border-radius:10px;padding:10px 26px;cursor:pointer;'
+          startButton.style.cssText = 'font-size:18px;padding:10px 26px;'
+          paperButton(startButton, { tint: '#58ae7c', w: 200, h: 46, big: true })
           startButton.addEventListener('click', () => client.start())
           panel.appendChild(startButton)
         } else {
@@ -237,20 +244,24 @@ export function createMatchUi(client: MatchClient): MatchUi {
             const col = document.createElement('div')
             col.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:180px;'
             const label = document.createElement('div')
-            label.style.cssText = 'font-weight:800;font-size:13px;color:#9b948a;'
+            label.style.cssText = `font-weight:800;font-size:14px;color:${INK};opacity:0.7;letter-spacing:0.5px;`
             label.textContent = POOL_LABELS[pool]
             col.appendChild(label)
             offers[pool].forEach((id, index) => {
               const def = CARD_BY_ID.get(id)
               const picked = client.picks()[pool] === id
               const btn = document.createElement('button')
-              btn.style.cssText =
-                `text-align:left;border-radius:10px;padding:8px 10px;cursor:pointer;border:3px solid ${picked ? '#58ae7c' : '#4a443c33'};background:#fff;`
+              btn.style.cssText = 'text-align:left;padding:8px 11px;'
+              // a paper card; picked = heavier green ink frame
+              paperButton(btn, { w: 180, h: 66 })
+              if (picked) {
+                btn.style.backgroundImage = `${inkFrameUrl(180, 66, METER.safe, 3.4)}, url("${paperTexture()}")`
+              }
               const rarity = def && 'rarity' in def ? def.rarity : 'common'
-              const rarityColor = rarity === 'epic' ? '#9678c8' : rarity === 'rare' ? '#4fa3d8' : '#9b948a'
-              btn.innerHTML = `<div style="font-weight:800;">${def?.name ?? id}</div>
-                <div style="font-size:10px;color:${rarityColor};font-weight:700;">${rarity.toUpperCase()}</div>
-                <div style="font-size:11px;color:#6b655c;">${def && 'blurb' in def ? def.blurb : ''}</div>`
+              const rarityColor = rarity === 'epic' ? '#9678c8' : rarity === 'rare' ? '#4fa3d8' : '#8a7f70'
+              btn.innerHTML = `<div style="font-family:${FONT_HEAD};font-weight:800;font-size:15px;">${def?.name ?? id}</div>
+                <div style="font-size:10px;color:${rarityColor};font-weight:800;letter-spacing:0.5px;">${rarity.toUpperCase()}</div>
+                <div style="font-family:${FONT_HAND};font-size:13px;color:#6b655c;line-height:1.05;">${def && 'blurb' in def ? def.blurb : ''}</div>`
               btn.addEventListener('click', () => {
                 client.pick(pool, index)
                 renderedKey = '' // repaint selection
@@ -302,7 +313,8 @@ export function createMatchUi(client: MatchClient): MatchUi {
               for (const p of alive) {
                 const chosen = (kind === 'advantage' ? advChoice : curseChoice) === p.seat
                 const btn = document.createElement('button')
-                btn.style.cssText = `background:${seatColor(p.seat)};color:#fff;border:3px solid ${chosen ? '#4a443c' : 'transparent'};border-radius:8px;padding:6px 12px;font-weight:800;cursor:pointer;`
+                btn.style.cssText = 'padding:6px 14px;font-size:15px;'
+                paperButton(btn, { tint: seatColor(p.seat), w: 96, h: 34, big: chosen })
                 btn.textContent = nameOf(p.seat)
                 btn.addEventListener('click', () => {
                   if (kind === 'advantage') advChoice = p.seat
@@ -318,7 +330,9 @@ export function createMatchUi(client: MatchClient): MatchUi {
             const ready = advChoice >= 0 && curseChoice >= 0
             confirm.textContent = 'HAND THEM OUT'
             confirm.disabled = !ready
-            confirm.style.cssText = `font-size:16px;font-weight:800;background:${ready ? '#4a443c' : '#9b948a'};color:#fff;border:0;border-radius:10px;padding:8px 20px;cursor:pointer;`
+            confirm.style.cssText = 'font-size:16px;padding:8px 20px;'
+            paperButton(confirm, { tint: ready ? INK : '#9b948a', w: 170, h: 40, big: true })
+            if (!ready) confirm.style.cursor = 'default'
             confirm.addEventListener('click', () => {
               if (advChoice >= 0 && curseChoice >= 0) client.assign(advChoice, curseChoice)
             })
@@ -353,8 +367,8 @@ export function createMatchUi(client: MatchClient): MatchUi {
         if (client.isHost()) {
           const again = document.createElement('button')
           again.textContent = 'REMATCH'
-          again.style.cssText =
-            'font-size:18px;font-weight:800;background:#58ae7c;color:#fff;border:0;border-radius:10px;padding:10px 26px;cursor:pointer;'
+          again.style.cssText = 'font-size:18px;padding:10px 26px;'
+          paperButton(again, { tint: '#58ae7c', w: 180, h: 46, big: true })
           again.addEventListener('click', () => client.rematch())
           panel.appendChild(again)
         } else {

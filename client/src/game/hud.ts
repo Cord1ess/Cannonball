@@ -1,8 +1,11 @@
 /**
- * M1 HUD: plain DOM overlay — tick timer, per-zone danger meters, wedge
- * alarm vignette, death/win overlays, pointer-lock hint. Paper-and-ink
- * skin lands in M5; this is layout + information only.
+ * The in-play HUD overlay: wedge alarm vignette, stamina brush-bar, ability
+ * chip, pointer-lock hint, death/win overlay. Wears the paper-and-ink skin
+ * (art_direction.md §9) — paper panels, wobbly ink frames, brush-stroke bars,
+ * Baloo 2 / Patrick Hand fonts. (The old tick timer + per-zone meter row are
+ * the leaderboard HUD's job now and stay hidden.)
  */
+import { brushFill, FONT_HAND, FONT_HEAD, INK, METER, paperPanel, paperTexture } from './paperSkin.ts'
 
 export interface HudZone {
   color: string
@@ -28,7 +31,7 @@ export interface Hud {
 export function createHud(): Hud {
   const root = document.createElement('div')
   root.style.cssText =
-    'position:fixed;inset:0;pointer-events:none;font-family:system-ui,sans-serif;user-select:none;'
+    `position:fixed;inset:0;pointer-events:none;font-family:${FONT_HEAD};user-select:none;`
   document.body.appendChild(root)
 
   // timer + per-zone meters are now the leaderboard HUD's job — keep the
@@ -50,19 +53,21 @@ export function createHud(): Hud {
 
   const staminaBar = document.createElement('div')
   staminaBar.style.cssText =
-    'position:absolute;bottom:64px;left:50%;transform:translateX(-50%);width:220px;height:12px;background:#fffdf5aa;border:2px solid #4a443c;border-radius:6px;overflow:hidden;'
+    'position:absolute;bottom:62px;left:50%;transform:translateX(-50%);width:224px;height:16px;padding:3px;overflow:hidden;'
+  paperPanel(staminaBar, { w: 224, h: 16, weight: 2 })
   const staminaFill = document.createElement('div')
-  staminaFill.style.cssText = 'height:100%;width:100%;background:#f2c078;transition:background 150ms;'
+  staminaFill.style.cssText = `height:100%;width:100%;border-radius:4px;background:${brushFill(METER.warn)};transition:background 150ms;`
   staminaBar.appendChild(staminaFill)
   root.appendChild(staminaBar)
 
   const abilityChip = document.createElement('div')
   abilityChip.style.cssText =
-    'position:absolute;bottom:56px;left:calc(50% + 130px);width:88px;height:26px;background:#fffdf5aa;' +
-    'border:2px solid #4a443c;border-radius:8px;overflow:hidden;font:700 11px system-ui;color:#4a443c;' +
+    'position:absolute;bottom:54px;left:calc(50% + 132px);width:92px;height:28px;overflow:hidden;' +
+    `font-family:${FONT_HAND};font-size:15px;color:${INK};` +
     'display:none;align-items:center;justify-content:center;'
+  paperPanel(abilityChip, { w: 92, h: 28, weight: 2 })
   const abilityFill = document.createElement('div')
-  abilityFill.style.cssText = 'position:absolute;inset:0;background:#4fa3d888;transform-origin:left;'
+  abilityFill.style.cssText = 'position:absolute;inset:2px;border-radius:6px;background:rgba(79,163,216,0.55);transform-origin:left;'
   const abilityLabel = document.createElement('span')
   abilityLabel.style.cssText = 'position:relative;'
   abilityChip.appendChild(abilityFill)
@@ -71,14 +76,21 @@ export function createHud(): Hud {
 
   const hint = document.createElement('div')
   hint.style.cssText =
-    'position:absolute;bottom:26px;left:50%;transform:translateX(-50%);font-size:16px;color:#4a443c;background:#fffdf5cc;padding:6px 14px;border-radius:8px;'
+    `position:absolute;bottom:24px;left:50%;transform:translateX(-50%);font-family:${FONT_HAND};font-size:18px;color:${INK};padding:6px 18px;`
+  paperPanel(hint, { w: 720, h: 34, weight: 2 })
   hint.textContent =
     'click to grab the mouse — WASD run, Shift sprint, Space jump, Click/Ctrl mid-air to DIVE, Q/E tilt'
   root.appendChild(hint)
 
   const end = document.createElement('div')
   end.style.cssText =
-    'position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:42px;font-weight:800;color:#fffdf5;background:rgba(74,68,60,0.55);text-align:center;white-space:pre-line;'
+    'position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;white-space:pre-line;' +
+    `font-family:${FONT_HEAD};font-size:44px;font-weight:800;color:${INK};` +
+    `background:rgba(246,241,226,0.30);backdrop-filter:blur(1px);`
+  const endCard = document.createElement('div')
+  endCard.style.cssText = `padding:26px 54px;color:${INK};`
+  paperPanel(endCard, { w: 520, h: 180, weight: 3.4 })
+  end.appendChild(endCard)
   root.appendChild(end)
 
   const bars: HTMLDivElement[] = []
@@ -115,7 +127,7 @@ export function createHud(): Hud {
       }
       alarm.style.opacity = state.alarm ? '1' : '0'
       staminaFill.style.width = `${Math.max(0, Math.min(100, state.stamina * 100)).toFixed(1)}%`
-      staminaFill.style.background = state.stamina < 0.3 ? '#d96c6c' : '#f2c078'
+      staminaFill.style.background = brushFill(state.stamina < 0.3 ? METER.danger : METER.warn)
       if (state.ability) {
         abilityChip.style.display = 'flex'
         abilityLabel.textContent = state.ability.cdFrac > 0.01 ? state.ability.id : `${state.ability.id} ✔`
@@ -129,7 +141,7 @@ export function createHud(): Hud {
       if (text === null) {
         end.style.display = 'none'
       } else {
-        end.textContent = text
+        endCard.textContent = text
         end.style.display = 'flex'
       }
     },
