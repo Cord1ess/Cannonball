@@ -159,6 +159,9 @@ export function createDayNight(
 
     sun.color.copy(DAY.sunColor).lerp(NIGHT.sunColor, f)
     sun.intensity = DAY.sunIntensity + (NIGHT.sunIntensity - DAY.sunIntensity) * f
+    // once the floodlights take over (nightfall), the sun stops casting its
+    // shadow so the pitch shows only the 4 floodlight shadows, not a stray sun one
+    sun.castShadow = f < 0.9
 
     hemi.color.copy(DAY.hemiSky).lerp(NIGHT.hemiSky, f)
     hemi.groundColor.copy(DAY.hemiGround).lerp(NIGHT.hemiGround, f)

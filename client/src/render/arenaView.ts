@@ -323,9 +323,9 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
   // so the caller adds the light + target to the SCENE, not this tower group.
   // decay=0 → NO distance falloff. A NARROW cone aimed at the field centre so it
   // lights the PITCH, not the stands. Off until nightfall, then snaps fully on.
-  const spot = new THREE.SpotLight(0xfff8e6, 0, 400, Math.PI / 7, 0.35, 0)
+  const spot = new THREE.SpotLight(0xfff8e6, 0, 400, Math.PI / 5, 0.35, 0)
   spot.position.set(x, baseY + H, z) // at the lamp head, world space
-  spot.castShadow = true
+  spot.castShadow = false // starts OFF (day); the switch turns it on at nightfall
   spot.shadow.mapSize.set(2048, 2048)
   spot.shadow.camera.near = 10
   spot.shadow.camera.far = 400
@@ -335,7 +335,10 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
   // pitch — not all four crossing at the dead centre.
   const towerDir = new THREE.Vector2(x, z).normalize()
   const spotTarget = new THREE.Object3D()
-  spotTarget.position.set(towerDir.x * 14, 0, towerDir.y * 14)
+  // aim only slightly into this tower's quadrant, close to centre, so all four
+  // wide cones OVERLAP across the middle → a player near centre is lit by all 4
+  // (4 shadows), while the pool still reaches this tower's side of the pitch.
+  spotTarget.position.set(towerDir.x * 8, 0, towerDir.y * 8)
   spot.target = spotTarget
 
   const dayCol = new THREE.Color(0x6a6656)
