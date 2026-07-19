@@ -86,11 +86,17 @@ interface RemoteEntity {
 }
 
 export interface MatchEvent {
-  type: 'elim' | 'overtime' | 'volley' | 'emote' | 'save' | 'ability'
+  type: 'elim' | 'overtime' | 'volley' | 'emote' | 'save' | 'ability' | 'header' | 'knock'
   seat?: number
   seats?: number[]
   id?: number
   abilityId?: string
+  /** world position of the impact (header/knock) — for spawning juice */
+  x?: number
+  y?: number
+  z?: number
+  /** normalized impact strength 0..1 (header force / knock speed) */
+  force?: number
 }
 
 export interface MatchPlayerInfo {
@@ -596,14 +602,33 @@ export function createOnlineGame(
     draftOffers = offers
     for (const pool of Object.keys(myPicks) as CardPool[]) delete myPicks[pool]
   })
-  conn.room.onMessage('header', ({ seat }: { seat: number }) => {
-    if (seat === mySeat) return
-    for (const remote of remotes.values()) if (remote.seat === seat) remote.bean.header()
+  // resolve a seat's current world x/z (local predicted, or a remote's stub)
+  const posOfSeat = (seat: number): { x: number; z: number } | null => {
+    if (seat === mySeat && localSim) return { x: localSim.x, z: localSim.z }
+    for (const remote of remotes.values()) if (remote.seat === seat) return { x: remote.stub.x, z: remote.stub.z }
+    return null
+  }
+  conn.room.onMessage(
+    'header',
+    ({ seat, x, y, z }: { seat: number; x: number; y: number; z: number }) => {
+      // remote beans play the header animation (the local one is predicted)
+      if (seat !== mySeat) for (const remote of remotes.values()) if (remote.seat === seat) remote.bean.header()
+      // camera punch on YOUR header; VFX burst at the contact for everyone
+      if (seat === mySeat) camera.kick(0.7)
+      emitEvent({ type: 'header', seat, x, y, z, force: seat === mySeat ? 1 : 0.7 })
+    },
+  )
+  conn.room.onMessage('knock', ({ seat, speed }: { seat: number; speed: number }) => {
+    const f = Math.max(0.2, Math.min(1, (speed ?? 0) / 12))
+    if (seat === mySeat) camera.kick(0.5 + f * 0.6)
+    // knock spawns dust at the bean's feet — resolve its current world position
+    const p = posOfSeat(seat)
+    if (p) emitEvent({ type: 'knock', seat, x: p.x, y: 0.15, z: p.z, force: f })
   })
-  conn.room.onMessage('knock', ({ seat }: { seat: number }) => {
-    if (seat === mySeat) camera.kick(0.9)
+  conn.room.onMessage('elim', ({ seat }: { seat: number }) => {
+    const p = posOfSeat(seat)
+    emitEvent({ type: 'elim', seat, x: p?.x, y: 0, z: p?.z })
   })
-  conn.room.onMessage('elim', ({ seat }: { seat: number }) => emitEvent({ type: 'elim', seat }))
   conn.room.onMessage('overtime', ({ seats }: { seats: number[] }) => emitEvent({ type: 'overtime', seats }))
   conn.room.onMessage('volley', () => emitEvent({ type: 'volley' }))
   conn.room.onMessage('emote', ({ seat, id }: { seat: number; id: number }) =>

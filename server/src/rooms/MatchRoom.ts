@@ -853,8 +853,11 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     collidePlayers(sims, this.#alive, this.#events)
     stepBallWithPlayers(this.#ball, sims, this.#alive, this.#arena, dt, this.#events)
 
-    for (const header of this.#events.headers) this.broadcast('header', { seat: header.seat })
-    for (const knock of this.#events.knocks) this.broadcast('knock', { seat: knock.seat })
+    // include impact position/force so the client can spawn juice at the hit
+    for (const header of this.#events.headers)
+      this.broadcast('header', { seat: header.seat, x: header.x, y: header.y, z: header.z })
+    for (const knock of this.#events.knocks)
+      this.broadcast('knock', { seat: knock.seat, speed: knock.speed })
     for (const ability of this.#events.abilities) this.broadcast('ability', ability)
     clearEvents(this.#events)
 

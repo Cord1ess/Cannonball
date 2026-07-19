@@ -14,6 +14,7 @@ import { createGrainOverlay } from './render/grain.ts'
 import { PALETTE } from './render/palette.ts'
 import { makeSky } from './render/sky.ts'
 import { createClouds } from './render/clouds.ts'
+import { createParticles } from './render/particles.ts'
 import type { WorldLighting } from './render/arenaView.ts'
 
 /**
@@ -101,6 +102,9 @@ scene.add(sky)
 // real 3D bubbly toon clouds drifting in the sky (random each session, alive)
 const clouds = createClouds()
 scene.add(clouds.group)
+// M6 VFX: pooled particle bursts (headers, knocks, elims, launches)
+const particles = createParticles()
+scene.add(particles.group)
 // bundle the world lighting the day->night arc drives (owned here, passed
 // into the game so its arenaView can ease it toward night as players drop)
 const lighting: WorldLighting = { scene, sun, hemi, sky }
@@ -160,6 +164,19 @@ let leaderboard: Leaderboard | null = null
 if ('match' in game) {
   matchUi = createMatchUi(game.match)
   leaderboard = createLeaderboard(game.match)
+
+  // M6 juice: spawn particle bursts off match events (positions come from the
+  // server for headers/knocks, resolved bean positions for elims)
+  const seatHex = (seat: number): number => parseInt(game.match.seatColorHex(seat).slice(1), 16)
+  game.match.onEvent((ev) => {
+    if (ev.type === 'header' && ev.x !== undefined) {
+      particles.header(ev.x, ev.y ?? 1, ev.z ?? 0, ev.force ?? 0.7)
+    } else if (ev.type === 'knock' && ev.x !== undefined) {
+      particles.knock(ev.x, ev.y ?? 0.15, ev.z ?? 0, ev.force ?? 0.5)
+    } else if (ev.type === 'elim' && ev.x !== undefined) {
+      particles.eliminate(ev.x, ev.y ?? 0, ev.z ?? 0, ev.seat !== undefined ? seatHex(ev.seat) : 0xffffff)
+    }
+  })
 }
 
 renderer.domElement.addEventListener('click', () => {
@@ -225,6 +242,7 @@ function frame(nowMs: number): void {
 
   game.frameUpdate(time.unscaledDelta, time.alpha, input.axis('lean'))
   clouds.update(time.unscaledDelta)
+  particles.update(time.unscaledDelta)
 
   hud.update({
     // tick timer + zone meters moved to the leaderboard HUD; the plain HUD
