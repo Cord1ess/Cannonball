@@ -314,17 +314,57 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
   glow.position.set(0, H, 1.0)
   tower.add(glow)
 
-  // REAL floodlight: a SpotLight aimed from the lamp head at the pitch centre,
-  // OFF by day and switched on at night so the field is lit like a night match.
+  // REAL floodlight: a SpotLight aimed from the lamp head at the pitch centre.
   const spot = new THREE.SpotLight(0xfff3d8, 0, 160, Math.PI / 5, 0.5, 1.0)
   spot.position.set(0, H, 0.3)
   // aim at the arena centre: yawTowardCenter makes local +Z point at the centre,
   // so the centre sits at local (0, 2-baseY, +dist) where dist = hypot(x,z).
+  const dist = Math.hypot(x, z)
+  const aimLocal = new THREE.Vector3(0, 2 - baseY, dist * 0.55)
   const target = new THREE.Object3D()
-  target.position.set(0, 2 - baseY, Math.hypot(x, z))
+  target.position.copy(aimLocal)
   tower.add(target)
   spot.target = target
   tower.add(spot)
+
+  // VISIBLE VOLUMETRIC BEAM: a translucent additive cone from the lamp head down
+  // to the field, so at night you SEE the shaft of light beaming to the pitch.
+  const headLocal = new THREE.Vector3(0, H, 0.6)
+  const beamVec = aimLocal.clone().sub(headLocal)
+  const beamLen = beamVec.length()
+  // cone: apex at the head, widening to the field. Cylinder geo runs along +Y;
+  // build it apex-up then orient it along the beam direction.
+  // cone body along +Y: narrow (0.4) at y=0 = lamp head, wide at y=beamLen = field
+  const beamGeo = new THREE.CylinderGeometry(beamLen * 0.42, 0.4, beamLen, 20, 1, true)
+  beamGeo.translate(0, beamLen / 2, 0)
+  // fade the beam along its length (bright at the lamp, fainter at the field)
+  const cnt = beamGeo.getAttribute('position').count
+  const fade = new Float32Array(cnt)
+  const posAttr = beamGeo.getAttribute('position')
+  for (let i = 0; i < cnt; i++) fade[i] = 1 - Math.min(1, posAttr.getY(i) / beamLen) // 1 at head → 0 at field
+  beamGeo.setAttribute('aFade', new THREE.BufferAttribute(fade, 1))
+  const beamMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    uniforms: { uOpacity: { value: 0 }, uColor: { value: new THREE.Color(0xfff3c8) } },
+    vertexShader: `
+      attribute float aFade; varying float vFade;
+      void main(){ vFade = aFade; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+    `,
+    fragmentShader: `
+      uniform float uOpacity; uniform vec3 uColor; varying float vFade;
+      void main(){ gl_FragColor = vec4(uColor, uOpacity * (0.22 + 0.78 * vFade)); }
+    `,
+  })
+  const beam = new THREE.Mesh(beamGeo, beamMat)
+  beam.position.copy(headLocal)
+  // orient local +Y (the cone's narrow apex end points up) DOWN the beam vector
+  beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), beamVec.clone().normalize())
+  beam.renderOrder = 4
+  beam.frustumCulled = false
+  tower.add(beam)
 
   const dayCol = new THREE.Color(0x6a6656)
   const nightCol = new THREE.Color(0xfff7d2)
@@ -333,7 +373,8 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
     setNight(frac: number): void {
       lampMat.color.copy(dayCol).lerp(nightCol, frac)
       glowMat.opacity = frac * 0.85
-      spot.intensity = frac * 2.4 // floodlight fades on at night
+      spot.intensity = frac * 2.4
+      beamMat.uniforms.uOpacity!.value = frac // the visible beam fades on at night
     },
   }
 }
