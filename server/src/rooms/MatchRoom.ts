@@ -7,7 +7,6 @@ import {
   GRACE_SECONDS,
   GRAVITY,
   HANDOUT_SECONDS,
-  HALFTIME_PAUSE_S,
   LAUNCH_AIM_ARC_DEG,
   LAUNCH_COUNTDOWN_S,
   LAUNCH_FLIGHT_S,
@@ -50,7 +49,7 @@ import type { NetInput } from '../../../shared/src/sim/net.ts'
 import { rollDraftOffer, rollRestartPair, type CardPool } from '../../../shared/src/cards/definitions.ts'
 import { computeMods, hasFreeSave, hasMagnetCurse } from '../../../shared/src/cards/effects.ts'
 import { DEFAULT_KIT_IDS, KIT_BY_ID, resolveKitClashes } from '../../../shared/src/cosmetics/jerseys.ts'
-import { isHalftimeAt, Phase, tickInterval, type PhaseId } from '../../../shared/src/match/phases.ts'
+import { Phase, tickInterval, type PhaseId } from '../../../shared/src/match/phases.ts'
 import { Time } from '../../../vendor/arc/scheduler/time.ts'
 import { Random } from '../../../vendor/arc/scheduler/random.ts'
 import { BallState, HandoutState, MatchState, PlayerState, type MatchStateT } from './schema.ts'
@@ -58,7 +57,7 @@ import { BallState, HandoutState, MatchState, PlayerState, type MatchStateT } fr
 /**
  * M3: the full match spine (idea.md §2). Phase transitions live ONLY here.
  *
- * LOBBY -> DRAFT -> LAUNCH -> ARENA --tick--> RESTART(±halftime) -> LAUNCH ...
+ * LOBBY -> DRAFT -> LAUNCH -> ARENA --tick--> RESTART -> LAUNCH ...
  *                        \-> DUEL (at 2 survivors) -> END -> (rematch) LOBBY
  * Ties at a tick insert OVERTIME before RESTART.
  *
@@ -106,7 +105,6 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #cumulative: number[] = new Array(MAX_SEATS).fill(0) // leader = lowest
   #tickRemaining = 30
   #eliminations = 0
-  #halftimeDone = false
   #overtimeSeats: number[] = []
   #handoutTimer = 0
   #activeHandoutIds = new Set<string>()
@@ -530,9 +528,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#cumulative.fill(0)
     this.#zoneSeat = []
     this.#eliminations = 0
-    this.#halftimeDone = false
     this.state.winnerSeat = -1
-    this.state.halftime = false
     this.#clearHandout()
     this.#activeCards = Array.from({ length: MAX_SEATS }, () => [])
     this.#freeSaves.fill(0)
@@ -570,7 +566,6 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#meters.fill(0)
     this.#cumulative.fill(0)
     this.#eliminations = 0
-    this.#halftimeDone = false
     this.state.winnerSeat = -1
     this.#clearHandout()
 
@@ -611,16 +606,10 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#beginLaunch()
   }
 
-  /** rebuild arena for current survivors; zoneSeat = alive seats (shuffled at halftime) */
-  #morphArena(shuffle = false): void {
+  /** rebuild arena for current survivors; zoneSeat = alive seats, order stable */
+  #morphArena(): void {
     this.#zoneSeat = []
     for (let seat = 0; seat < MAX_SEATS; seat++) if (this.#alive[seat]) this.#zoneSeat.push(seat)
-    if (shuffle) {
-      for (let i = this.#zoneSeat.length - 1; i > 0; i--) {
-        const j = Math.floor(this.#rng.next() * (i + 1))
-        ;[this.#zoneSeat[i], this.#zoneSeat[j]] = [this.#zoneSeat[j]!, this.#zoneSeat[i]!]
-      }
-    }
     this.#arena = makeArena(Math.max(2, this.#zoneSeat.length))
     this.state.zoneSeat.splice(0, this.state.zoneSeat.length)
     for (const seat of this.#zoneSeat) this.state.zoneSeat.push(seat)
@@ -700,9 +689,6 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#meters.fill(0)
     // handed-out cards expire at the next Restart Kickoff (idea.md §2)
     for (let seat = 0; seat < MAX_SEATS; seat++) this.#activeCards[seat] = []
-    const halftime = !this.#halftimeDone && isHalftimeAt(this.#survivors, this.#seatsAtStart)
-    if (halftime) this.#halftimeDone = true
-    this.state.halftime = halftime
 
     const pair = rollRestartPair(this.#rng, this.#activeHandoutIds)
     const handout = this.state.handout
@@ -714,7 +700,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     handout.revealed = false
     this.#handoutTimer = this.#scale(HANDOUT_SECONDS)
 
-    const pauseTotal = this.#scale(halftime ? HALFTIME_PAUSE_S : RESTART_PAUSE_S)
+    const pauseTotal = this.#scale(RESTART_PAUSE_S)
     this.#enter(Phase.Restart, pauseTotal)
 
     // eliminated bot or disconnected player? auto-assign immediately
@@ -747,7 +733,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#activeCards[curseTo] = [...(this.#activeCards[curseTo] ?? []), handout.curseCardId]
     this.#activeHandoutIds = new Set([handout.advCardId, handout.curseCardId])
     // shorten the rest of the pause to the reveal beat
-    this.#phaseT = Math.min(this.#phaseT, this.#scale(this.state.halftime ? REVEAL_S * 3 : REVEAL_S))
+    this.#phaseT = Math.min(this.#phaseT, this.#scale(REVEAL_S))
     this.state.phaseRemaining = this.#phaseT
   }
 
@@ -788,8 +774,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
           if (this.#handoutTimer <= 0) this.#autoAssignHandout()
         }
         if (this.#phaseT <= 0) {
-          this.#morphArena(this.state.halftime)
-          this.state.halftime = false
+          this.#morphArena()
           this.#clearHandout()
           this.#beginLaunch()
         }
@@ -991,8 +976,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
         break
       case Phase.Restart:
         if (!this.state.handout.revealed) this.#autoAssignHandout()
-        this.#morphArena(this.state.halftime)
-        this.state.halftime = false
+        this.#morphArena()
         this.#clearHandout()
         this.#beginLaunch()
         break

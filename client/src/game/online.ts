@@ -131,7 +131,6 @@ export interface MatchClient {
   players(): MatchPlayerInfo[]
   handout(): NetHandoutRead | null
   winnerSeat(): number
-  halftime(): boolean
   overtimeSeats(): number[]
   draftOffers(): Record<CardPool, string[]> | null
   picks(): Partial<Record<CardPool, string>>
@@ -656,7 +655,6 @@ export function createOnlineGame(
     },
     handout: () => state.handout ?? null,
     winnerSeat: () => state.winnerSeat ?? -1,
-    halftime: () => state.halftime ?? false,
     overtimeSeats(): number[] {
       const seats: number[] = []
       const raw = state.overtimeSeats

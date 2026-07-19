@@ -71,7 +71,6 @@ export interface NetStateRead {
   hostSessionId: string
   survivors: number
   tickRemaining: number
-  halftime: boolean
   winnerSeat: number
   windX: number
   windZ: number

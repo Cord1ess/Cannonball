@@ -5,7 +5,7 @@ import type { MatchClient } from './online.ts'
 
 /**
  * The match-flow overlay (M3): lobby, draft grid, launch countdown/aim,
- * elimination + handout targeting, halftime/overtime banners, duel note,
+ * elimination + handout targeting, overtime banner, duel note,
  * winner + rematch, emote feed. Plain DOM — the paper-and-ink skin is M5.
  */
 
@@ -279,13 +279,6 @@ export function createMatchUi(client: MatchClient): MatchUi {
       if (renderedKey !== key) {
         renderedKey = key
         panel.replaceChildren()
-        const halftime = client.halftime()
-        if (halftime) {
-          const h = document.createElement('div')
-          h.style.cssText = 'font-size:26px;font-weight:800;color:#e98a2b;margin-bottom:8px;'
-          h.textContent = 'HALFTIME — wedges reshuffled!'
-          panel.appendChild(h)
-        }
         if (handout && handout.elimSeat >= 0) {
           const isMe = handout.elimSeat === client.mySeat()
           if (!handout.revealed && isMe) {

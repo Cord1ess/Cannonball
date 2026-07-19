@@ -35,11 +35,6 @@ export function tickInterval(survivors: number): number {
   return survivors * TICK_SECONDS_PER_SURVIVOR
 }
 
-/** halftime upgrades the restart where survivors first hit 3 (4-6p matches) */
-export function isHalftimeAt(survivors: number, seatsAtStart: number): boolean {
-  return seatsAtStart >= 4 && survivors === 3
-}
-
 export function isPlayPhase(phase: number): boolean {
   return phase === Phase.Arena || phase === Phase.Overtime || phase === Phase.Duel
 }

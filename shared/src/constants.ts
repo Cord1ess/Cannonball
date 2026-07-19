@@ -37,7 +37,6 @@ export const TICK_LOCKIN_S = 1.0 // meters freeze this long before the tick reso
 export const DRAFT_SECONDS = 25
 export const HANDOUT_SECONDS = 8
 export const RESTART_PAUSE_S = 10
-export const HALFTIME_PAUSE_S = 20
 export const LAUNCH_COUNTDOWN_S = 3
 
 // --- movement (tune in M1 fun-test) -----------------------------------------

@@ -80,7 +80,6 @@ export const MatchState = schema(
     hostSessionId: { type: 'string', default: '' },
     survivors: { type: 'uint8', default: 0 },
     tickRemaining: { type: 'float32', default: 30 },
-    halftime: { type: 'boolean', default: false },
     winnerSeat: { type: 'int8', default: -1 },
     windX: { type: 'float32', default: 0 },
     windZ: { type: 'float32', default: 0 },
