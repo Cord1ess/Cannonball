@@ -302,7 +302,9 @@ const FRAG = /* glsl */ `
     // shadow-map read per fragment, grass never self-casts). At night the pitch
     // is darker so the shadows read stronger.
     float shadowMask = getShadowMask();
-    float shadowStrength = mix(0.45, 0.7, uNight);
+    // night shadows kept SUBTLE (~70% lighter than before) so they read as a
+    // soft cast, not harsh black patches under the floodlights
+    float shadowStrength = mix(0.45, 0.22, uNight);
     col *= mix(1.0, shadowMask, shadowStrength);
 
     gl_FragColor = vec4(col, 1.0);

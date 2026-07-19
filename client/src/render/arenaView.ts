@@ -252,6 +252,8 @@ interface LightTower {
   /** the real shadow-casting floodlight + its target (added to the SCENE) */
   spot: THREE.SpotLight
   spotTarget: THREE.Object3D
+  /** the subtle visible light beam (world-space; added to the arena group) */
+  beam: THREE.Mesh
   /** dim/bright the bulbs + turn the floodlight on toward the pitch at night */
   setNight(frac: number): void
 }
@@ -341,6 +343,46 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
   spotTarget.position.set(towerDir.x * 8, 0, towerDir.y * 8)
   spot.target = spotTarget
 
+  // SUBTLE light BEAM: a very soft, low-opacity cone from the lamp head down to
+  // the pitch that just SIGNIFIES the light (unlike the harsh solid cone before).
+  // Fades to nothing at the soft edges + toward the ground so it's a gentle haze.
+  const headW = new THREE.Vector3(x, baseY + H, z)
+  const aimW = new THREE.Vector3(towerDir.x * 8, 0, towerDir.y * 8)
+  const beamVec = aimW.clone().sub(headW)
+  const beamLen = beamVec.length()
+  const beamGeo = new THREE.CylinderGeometry(beamLen * 0.3, 0.6, beamLen, 24, 1, true)
+  beamGeo.translate(0, beamLen / 2, 0) // narrow apex at y=0 (the head)
+  const bp = beamGeo.getAttribute('position')
+  const bfade = new Float32Array(bp.count)
+  for (let i = 0; i < bp.count; i++) bfade[i] = 1 - Math.min(1, bp.getY(i) / beamLen) // 1 head → 0 ground
+  beamGeo.setAttribute('aFade', new THREE.BufferAttribute(bfade, 1))
+  const beamMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    uniforms: { uOpacity: { value: 0 } },
+    vertexShader: `
+      attribute float aFade; varying float vFade; varying vec3 vN;
+      void main(){ vFade = aFade; vN = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+    `,
+    fragmentShader: `
+      uniform float uOpacity; varying float vFade; varying vec3 vN;
+      void main(){
+        // soft FRESNEL edge fade (thin at the cone's silhouette, faint overall)
+        float edge = pow(1.0 - abs(vN.z), 1.5);
+        float a = uOpacity * vFade * (0.10 + 0.14 * edge);
+        gl_FragColor = vec4(1.0, 0.97, 0.85, a);
+      }
+    `,
+  })
+  const beam = new THREE.Mesh(beamGeo, beamMat)
+  beam.position.copy(headW)
+  beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), beamVec.clone().normalize())
+  beam.renderOrder = 3
+  beam.frustumCulled = false
+
   const dayCol = new THREE.Color(0x6a6656)
   const nightCol = new THREE.Color(0xfff7d2)
   // HARD ON/OFF: the lights are a switch, not a dimmer. They stay OFF through the
@@ -352,6 +394,7 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
     group: tower,
     spot,
     spotTarget,
+    beam,
     setNight(frac: number): void {
       lampMat.color.copy(dayCol).lerp(nightCol, frac)
       const on = frac >= LIGHTS_ON_AT
@@ -362,6 +405,7 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
         // a good exposure without 4x-blowing-out the beans/ball at the centre.
         spot.intensity = on ? 0.7 : 0
         spot.castShadow = on
+        beamMat.uniforms.uOpacity!.value = on ? 1 : 0 // subtle beam on with the light
       }
     },
   }
@@ -689,6 +733,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
     const t = buildLightTower(tx, tz, rimTop)
     lightTowers.push(t)
     group.add(t.group)
+    group.add(t.beam) // beam is world-space → goes on the arena group, not the tower
     if (lighting) {
       lighting.scene.add(t.spot)
       lighting.scene.add(t.spotTarget)
