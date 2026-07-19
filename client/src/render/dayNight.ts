@@ -57,7 +57,7 @@ const NIGHT = {
   sunIntensity: 0.4,
   hemiSky: new THREE.Color(0x39476e),
   hemiGround: new THREE.Color(0x222a3c),
-  hemiIntensity: 0.55,
+  hemiIntensity: 0.3, // low night ambient so the floodlight shadows read as dark
   fog: new THREE.Color(0x2a3350), // deep dusk blue
   fogNear: 40,
   fogFar: 200,
@@ -131,12 +131,11 @@ export function createDayNight(
     map: discTex,
     transparent: true,
     depthWrite: false,
-    depthTest: false, // always on the sky, behind everything
+    depthTest: true, // occluded by the stadium so it never bleeds through it
     blending: THREE.AdditiveBlending,
     fog: false,
   })
   const disc = new THREE.Sprite(discMat)
-  disc.renderOrder = -1 // with the sky dome
   scene.add(disc)
 
   function apply(): void {

@@ -358,7 +358,9 @@ function buildLightTower(x: number, z: number, baseY: number): LightTower {
       if (on !== lit) {
         lit = on
         glowMat.opacity = on ? 0.95 : 0
-        spot.intensity = on ? 2.6 : 0 // brighter, full-strength floodlight
+        // 4 towers OVERLAP on the pitch, so each is MODERATE — combined they give
+        // a good exposure without 4x-blowing-out the beans/ball at the centre.
+        spot.intensity = on ? 0.7 : 0
         spot.castShadow = on
       }
     },
