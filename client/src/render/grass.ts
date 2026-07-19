@@ -286,20 +286,9 @@ const FRAG = /* glsl */ `
     // trodden blades read a touch darker (pressed, in shadow)
     col *= 1.0 - vFlat * 0.22;
 
-    // CAST SHADOWS: one shadow-map read per fragment (no per-blade cost, grass
-    // never self-casts). Beans/ball/props darken the turf they stand on. The
-    // sun's arc rotates + lengthens these across the match. Softened so the
-    // stylised pitch never goes muddy — a gentle contact darkening, not black.
-    float shadowMask = getShadowMask();
-    col *= mix(1.0, shadowMask, 0.45);
-
-    // NIGHT: the pitch is FLOODLIT by the tower spotlights at night. The grass is
-    // unlit (its own shader), so it keeps a warm floodlit tone here — a touch
-    // cooler + slightly deeper than day, but clearly LIT (not dark). The real
-    // spotlights do the directional lighting + shadows on the beans and ball.
-    // The pitch goes DARK as night falls (dusk), then when the floodlights snap
-    // on (uNight past the switch point) it becomes bright floodlit turf — one
-    // definitive change, matching the tower lights turning on.
+    // NIGHT: the pitch goes DARK as night falls (dusk), then when the floodlights
+    // snap on it becomes bright floodlit turf — one definitive change matching the
+    // tower lights turning on.
     if (uNight > 0.001) {
       vec3 dusk = col * vec3(0.34, 0.42, 0.56); // dim dark turf before the lights
       col = mix(col, dusk, uNight);
@@ -307,6 +296,14 @@ const FRAG = /* glsl */ `
       vec3 flood = mix(uBase, uTip, vT) * vec3(0.95, 1.02, 0.9) * (0.72 + 0.28 * vT);
       col = mix(col, flood, lights);
     }
+
+    // CAST SHADOWS — applied LAST so they survive the night floodlit re-tint
+    // (getShadowMask covers the sun by day + all 4 floodlights at night; one
+    // shadow-map read per fragment, grass never self-casts). At night the pitch
+    // is darker so the shadows read stronger.
+    float shadowMask = getShadowMask();
+    float shadowStrength = mix(0.45, 0.7, uNight);
+    col *= mix(1.0, shadowMask, shadowStrength);
 
     gl_FragColor = vec4(col, 1.0);
   }
