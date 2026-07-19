@@ -41,6 +41,7 @@ export function createMatchUi(client: MatchClient): MatchUi {
   const nameOf = (seat: number): string =>
     client.players().find((p) => p.seat === seat)?.name ?? `P${seat + 1}`
   const root = document.createElement('div')
+  root.className = 'game-overlay' // hidden while the main menu is up
   root.style.cssText =
     `position:fixed;inset:0;pointer-events:none;font-family:${FONT_HEAD};user-select:none;z-index:20;`
   document.body.appendChild(root)

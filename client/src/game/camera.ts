@@ -54,6 +54,19 @@ export class ChaseCamera {
     this.#camera.lookAt(this.#look)
   }
 
+  /** MAIN MENU orbit: camera INSIDE the pitch, LOW to the ground, revolving
+   *  slowly around the centre and looking slightly UP at the action — a lively,
+   *  immersive backdrop of the match, not a broadcast overview. */
+  updateMenuOrbit(dt: number, radius = 20, height = 2.2): void {
+    this.yaw += dt * 0.06 // slow, smooth revolve
+    this.#pos.set(Math.cos(this.yaw) * radius, height, Math.sin(this.yaw) * radius)
+    this.#camera.position.copy(this.#pos)
+    // look toward the centre, a touch ABOVE the horizon so beans + ball read big
+    // against the sky/stands — low and looking slightly up into the play
+    this.#look.set(0, 4.5, 0)
+    this.#camera.lookAt(this.#look)
+  }
+
   /** spectate FOLLOW: a chase cam behind a chosen player, so you see their view */
   followPlayer(dt: number, tx: number, ty: number, tz: number, tyaw: number): void {
     const dist = 9

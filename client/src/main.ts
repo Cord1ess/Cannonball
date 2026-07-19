@@ -15,6 +15,8 @@ import { PALETTE } from './render/palette.ts'
 import { makeSky } from './render/sky.ts'
 import { createClouds } from './render/clouds.ts'
 import { createParticles } from './render/particles.ts'
+import { createUiBeanStage } from './render/uiBean.ts'
+import { createMainMenu, type MainMenu } from './game/mainMenu.ts'
 import type { WorldLighting } from './render/arenaView.ts'
 
 /**
@@ -161,9 +163,47 @@ if (wantOffline) {
 const debugPanel = createDebugPanel(renderer, scene, game.debug)
 let matchUi: MatchUi | null = null
 let leaderboard: Leaderboard | null = null
+// lively UI characters (menu jersey picker + lobby roster) + the main menu
+const uiBeans = createUiBeanStage()
+let mainMenu: MainMenu | null = null
+// menuActive = the player is at the menu (not in their own live match). The
+// backdrop is a bot match (instantArena); starting a real match hides the menu.
+let menuActive = 'match' in game
+const devSkipMenu = new URLSearchParams(location.search).has('dev')
 if ('match' in game) {
   matchUi = createMatchUi(game.match)
   leaderboard = createLeaderboard(game.match)
+  const match = game.match
+
+  if (!devSkipMenu) {
+    mainMenu = createMainMenu(match, uiBeans, {
+      startSolo(botCount: number): void {
+        // clean slate → fill bots → start; menu hides once we're playing
+        game.debug.send('resetLobby')
+        ;('setMenuMode' in game) && game.setMenuMode(false)
+        setTimeout(() => {
+          for (let i = 0; i < botCount; i++) match.addBot()
+          setTimeout(() => match.start(), 140)
+        }, 120)
+        menuActive = false
+        mainMenu?.setShown(false)
+      },
+      startOnline(): void {
+        ;('setMenuMode' in game) && game.setMenuMode(false)
+        match.start()
+        menuActive = false
+        mainMenu?.setShown(false)
+      },
+    })
+    // hide the in-match overlays (HUD/leaderboard/matchUi) while the menu is up
+    const menuCss = document.createElement('style')
+    menuCss.textContent = '.menu-mode .game-overlay{display:none!important;}'
+    document.head.appendChild(menuCss)
+    // the match behind the menu is a pure backdrop — no tags, no labels
+    if ('setMenuMode' in game) game.setMenuMode(true)
+    // kick off the cosmetic bot match behind the menu
+    game.debug.send('instantArena')
+  }
 
   // M6 juice: spawn particle bursts off match events (positions come from the
   // server for headers/knocks, resolved bean positions for elims)
@@ -180,6 +220,7 @@ if ('match' in game) {
 }
 
 renderer.domElement.addEventListener('click', () => {
+  if (menuActive) return // menu is up — don't grab the mouse
   if (!isPointerLocked(document)) void requestPointerLock(renderer.domElement)
 })
 
@@ -247,19 +288,29 @@ function frame(nowMs: number): void {
   clouds.update(time.unscaledDelta)
   particles.update(time.unscaledDelta)
 
-  hud.update({
-    // tick timer + zone meters moved to the leaderboard HUD; the plain HUD
-    // now only carries stamina, the ability chip, the danger vignette + hint
-    tickRemaining: game.tickRemaining,
-    zones: game.hudZones(),
-    alarm: game.ballAlarm(),
-    stamina: game.staminaFrac(),
-    ability: game.abilityInfo(),
-    locked,
-  })
+  // MAIN MENU: while up, override the camera with the cinematic low inside-pitch
+  // orbit and suppress the in-match HUD/leaderboard — the bot match plays behind.
+  if (menuActive && mainMenu) {
+    chase.updateMenuOrbit(time.unscaledDelta)
+    mainMenu.update(time.unscaledDelta)
+    uiBeans.update(time.unscaledDelta)
+  }
+  document.body.classList.toggle('menu-mode', menuActive)
 
-  matchUi?.update()
-  leaderboard?.update()
+  if (!menuActive) {
+    hud.update({
+      // tick timer + zone meters moved to the leaderboard HUD; the plain HUD
+      // now only carries stamina, the ability chip, the danger vignette + hint
+      tickRemaining: game.tickRemaining,
+      zones: game.hudZones(),
+      alarm: game.ballAlarm(),
+      stamina: game.staminaFrac(),
+      ability: game.abilityInfo(),
+      locked,
+    })
+    matchUi?.update()
+    leaderboard?.update()
+  }
   debugPanel.update(time.unscaledDelta)
 
   // spectate control hint
@@ -276,6 +327,14 @@ function frame(nowMs: number): void {
 
   renderer.clear()
   renderer.render(scene, camera3)
+
+  // MENU: render the lively UI beans into their card viewports (over the scene,
+  // under the grain). Only while the menu is up. The PIP selfie cam is skipped.
+  if (menuActive && mainMenu?.visible) {
+    uiBeans.render(renderer)
+    grain.render(renderer)
+    return
+  }
 
   // PICTURE-IN-PICTURE selfie cam: a second view framed on the local bean's
   // face, top-right, so you see your character's expressions + motion live.

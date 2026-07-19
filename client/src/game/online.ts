@@ -196,6 +196,9 @@ export interface OnlineGame {
   spectateInfo(): { mode: 'orbit' | 'follow'; name: string }
   /** local bean pose for the PIP selfie cam (null in sandbox) */
   selfView?(): SelfView
+  /** MENU MODE: the match plays as a pure backdrop — suppress ALL name tags,
+   *  zone labels + spectate hints so it reads as clean gameplay behind the menu. */
+  setMenuMode(on: boolean): void
   readonly match: MatchClient
   readonly debug: DebugHooks
 }
@@ -259,6 +262,7 @@ export function createOnlineGame(
   const serverBall = { x: 0, y: BALL_RADIUS, z: 0, vx: 0, vy: 0, vz: 0 }
   const ballCorr = { x: 0, y: 0, z: 0 }
   const events = makeEvents()
+  let menuMode = false // match is a menu backdrop → hide all tags/labels
   let timeOffset: number | null = null
   let lastPatchAt = 0
   const serverMe = { x: 0, y: 0, z: 0, has: false }
@@ -808,6 +812,10 @@ export function createOnlineGame(
       return { ...selfPose }
     },
 
+    setMenuMode(on: boolean): void {
+      menuMode = on
+    },
+
     fixedStep(input: PlayerInputFrame): void {
       ensureLocal()
       if (!localSim) return
@@ -1018,8 +1026,9 @@ export function createOnlineGame(
         }
         const selfVisible = aliveOf(mySeat) || (state.phase ?? 0) === Phase.Lobby
         myBean.group.visible = selfVisible
-        // my own name tag floats over my head too (lobby AND in-match)
-        myTag.setVisible(selfVisible)
+        // my own name tag floats over my head too (lobby AND in-match) — but
+        // NEVER while the match is a menu backdrop (clean, tag-free gameplay).
+        myTag.setVisible(selfVisible && !menuMode)
         if (selfVisible) myTag.place(selfX, selfY, selfZ)
         // record pose for the PIP selfie cam
         selfPose.x = selfX
@@ -1034,7 +1043,7 @@ export function createOnlineGame(
         const remoteAlive = aliveOf(remote.seat)
         const vis = remoteAlive || (state.phase ?? 0) === Phase.Lobby
         remote.bean.group.visible = vis
-        remote.tag.setVisible(vis)
+        remote.tag.setVisible(vis && !menuMode)
         if (!remoteAlive) continue
         const pose = sampleSnaps(remote.snaps, renderTime)
         if (!pose) continue
@@ -1132,7 +1141,8 @@ export function createOnlineGame(
       // it reads as territory (not a floating player tag).
       const zoneCount = zoneSeatArr?.length ?? 0
       // no ground name markers while spectating (the leaderboard names everyone)
-      const showZoneLabels = isPlayPhase(state.phase ?? 0) && !this.spectating()
+      // or while the match is a menu backdrop
+      const showZoneLabels = isPlayPhase(state.phase ?? 0) && !this.spectating() && !menuMode
       for (let i = 0; i < zoneLabels.length; i++) {
         const label = zoneLabels[i]!
         if (!showZoneLabels || i >= zoneCount) {

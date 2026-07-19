@@ -30,6 +30,7 @@ export interface Hud {
 
 export function createHud(): Hud {
   const root = document.createElement('div')
+  root.className = 'game-overlay' // hidden while the main menu is up
   root.style.cssText =
     `position:fixed;inset:0;pointer-events:none;font-family:${FONT_HEAD};user-select:none;`
   document.body.appendChild(root)

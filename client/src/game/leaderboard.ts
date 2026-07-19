@@ -64,6 +64,7 @@ interface RowEl {
 
 export function createLeaderboard(client: MatchClient): Leaderboard {
   const root = document.createElement('div')
+  root.className = 'game-overlay' // hidden while the main menu is up
   root.style.cssText = `position:fixed;inset:0;pointer-events:none;font-family:${FONT_HEAD};z-index:15;`
   document.body.appendChild(root)
 
