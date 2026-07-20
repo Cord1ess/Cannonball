@@ -1,0 +1,16 @@
+# Railway/Nixpacks config for the Colyseus SERVER.
+# The server runs from TypeScript source via tsx — NO build step is needed.
+# We override the build phase to a no-op so Nixpacks does not try to build the
+# client (which is deployed separately to itch.io) and fail the deploy.
+
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm install --include=dev"]
+
+[phases.build]
+cmds = ["echo 'no build needed — server runs from source via tsx'"]
+
+[start]
+cmd = "npm start"
