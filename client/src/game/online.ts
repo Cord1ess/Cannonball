@@ -375,7 +375,6 @@ export function createOnlineGame(
   // and does so again every time it falls back to the lobby
   const devMode = false // deployment: ?dev instant-arena/auto-bot path disabled
   let lastPhaseSeen = -1
-  let faceFieldFrames = 0 // >0 = force the chase cam to face the field (kickoff)
   if (devMode) conn.send('debug', { cmd: 'instantArena' })
 
   function aliveOf(seat: number): boolean {
@@ -473,12 +472,6 @@ export function createOnlineGame(
     const phaseNow = state.phase ?? 0
     if (devMode && phaseNow === Phase.Lobby && lastPhaseSeen > Phase.Lobby) {
       conn.send('debug', { cmd: 'instantArena' })
-    }
-    // ON ENTERING LAUNCH: face the chase camera at the FIELD (behind the player,
-    // looking at the pitch), not the cannon. Handled in frameUpdate from the
-    // player's live position so it's robust to server yaw lag — arm it here.
-    if (phaseNow === Phase.Launch && lastPhaseSeen !== Phase.Launch) {
-      faceFieldFrames = 30 // force field-facing for ~0.5s at kickoff
     }
     lastPhaseSeen = phaseNow
     // identity colors first — the arena/bean paths below read them
@@ -1238,20 +1231,15 @@ export function createOnlineGame(
         }
         if (!followed) camera.updateOrbit(dt, arena.radius + 21, 22) // just past the cannons
       } else {
-        // KICKOFF: force the camera behind the player facing the field (yaw
-        // toward center from the player's live position) for the first frames of
-        // Launch, so it never opens pointing back at the cannon.
-        if (faceFieldFrames > 0) {
-          faceFieldFrames--
-          // camera BEHIND the player looking at the field: forward must point
-          // FROM the player's rim spot TOWARD the arena centre. forward=(sin,cos)
-          // pointing to (-x,-z) → yaw=atan2(-x,-z). Guard the near-centre case.
+        // KICKOFF CAMERA: for the WHOLE Launch phase, force the chase cam to look
+        // toward the arena centre (over the player's shoulder at the field) — the
+        // player stands on the rim cannon, so forward must point INWARD (toward
+        // (-x,-z)); the boom then swings the camera to the crowd side (clamped to
+        // the wall) looking in. Hold it every frame so it can't wear off and
+        // revert to the stale mouse-look yaw (the "camera faces the player" bug).
+        if ((state.phase ?? 0) === Phase.Launch) {
           const r = Math.hypot(selfX, selfZ)
-          // forward pointing OUTWARD (from centre toward the player) puts the
-          // camera on the field side looking at the player+crowd — the observed
-          // bug. We want the opposite: forward toward centre. Empirically the
-          // camera sits behind when yaw points from centre→player, i.e. atan2(x,z).
-          if (r > 0.5) camera.yaw = Math.atan2(selfX, selfZ)
+          if (r > 0.5) camera.yaw = Math.atan2(-selfX, -selfZ)
         }
         camera.update(dt, selfX, selfY, selfZ)
       }

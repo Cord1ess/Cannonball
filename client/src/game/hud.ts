@@ -85,8 +85,8 @@ export function createHud(): Hud {
   const abilityFill = document.createElement('div')
   abilityFill.style.cssText =
     'position:absolute;left:6px;right:6px;top:5px;bottom:5px;border-radius:6px;background:rgba(79,163,216,0.5);transform-origin:left;transition:transform 90ms linear;'
-  const abilityLabel = document.createElement('span')
-  abilityLabel.style.cssText = 'position:relative;padding:0 6px;line-height:1.05;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100px;'
+  const abilityLabel = document.createElement('div')
+  abilityLabel.style.cssText = 'position:relative;padding:0 6px;text-align:center;overflow:hidden;max-width:104px;'
   abilityChip.appendChild(abilityFill)
   abilityChip.appendChild(abilityLabel)
   root.appendChild(abilityChip)
@@ -147,8 +147,14 @@ export function createHud(): Hud {
       staminaFill.style.background = brushFill(state.stamina < 0.3 ? METER.danger : METER.warn)
       if (state.ability) {
         abilityChip.style.display = 'flex'
-        abilityLabel.textContent = state.ability.cdFrac > 0.01 ? state.ability.id : `${state.ability.id} ✔`
+        const ready = state.ability.cdFrac <= 0.01
+        const nm = state.ability.id.toUpperCase()
+        // name on top, status below — "RMB · READY" when off cooldown
+        abilityLabel.innerHTML =
+          `<div style="font-size:13px;line-height:1.1;">${nm}</div>` +
+          `<div style="font-size:9px;letter-spacing:1px;opacity:0.8;">${ready ? 'RMB · READY' : 'CHARGING…'}</div>`
         abilityFill.style.transform = `scaleX(${(1 - state.ability.cdFrac).toFixed(3)})`
+        abilityFill.style.background = ready ? 'rgba(88,174,124,0.55)' : 'rgba(79,163,216,0.5)'
       } else {
         abilityChip.style.display = 'none'
       }

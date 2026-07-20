@@ -1,6 +1,6 @@
 import { kitColors } from '@shared/cosmetics/jerseys.ts'
 import type { LeaderRow, MatchClient } from './online.ts'
-import { brushFill, FONT_HAND, FONT_HEAD, INK, inkFrameUrl, METER, paperPanel, paperTexture } from './paperSkin.ts'
+import { brushFill, FONT_HAND, FONT_HEAD, INK, inkFrameUrl, METER, PAPER, paperPanel, paperTexture } from './paperSkin.ts'
 
 /**
  * The match HUD (M5b): a big center "next elimination" countdown + a right-side
@@ -108,17 +108,19 @@ export function createLeaderboard(client: MatchClient): Leaderboard {
     let r = rowPool[i]
     if (r) return r
     const wrap = document.createElement('div')
+    // FILLED paper card + generous inset padding so the icon/name/bar always sit
+    // INSIDE the wobbly ink outline (they were bleeding past a hollow frame).
     wrap.style.cssText =
-      'position:absolute;left:0;right:0;height:36px;display:flex;align-items:center;gap:8px;' +
-      'padding:0 10px;transition:none;will-change:transform;'
-    paperPanel(wrap, { w: 210, h: 36, weight: 2 })
+      'position:absolute;left:0;right:0;height:38px;display:flex;align-items:center;gap:8px;' +
+      'padding:0 16px;box-sizing:border-box;transition:none;will-change:transform;'
+    paperPanel(wrap, { w: 210, h: 38, weight: 2 })
     const icon = document.createElement('img')
-    icon.style.cssText = 'width:28px;height:28px;flex-shrink:0;'
+    icon.style.cssText = 'width:26px;height:26px;flex-shrink:0;'
     const mid = document.createElement('div')
     mid.style.cssText = 'flex:1;min-width:0;'
     const name = document.createElement('span')
     name.style.cssText =
-      `display:block;font-family:${FONT_HAND};font-size:16px;line-height:1;color:${INK};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`
+      `display:block;font-family:${FONT_HAND};font-size:15px;line-height:1;color:${INK};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`
     const bar = document.createElement('div')
     bar.style.cssText = `height:6px;background:rgba(74,68,60,0.16);border-radius:3px;margin-top:3px;overflow:hidden;`
     const barFill = document.createElement('div')
@@ -179,7 +181,9 @@ export function createLeaderboard(client: MatchClient): Leaderboard {
         const atRisk = i === rows.length - 1 && rows.length > 1
         const frameColor = data.ballHere ? METER.hot : atRisk ? METER.danger : INK
         const frameWeight = data.isMe || atRisk || data.ballHere ? 3.2 : 2
-        el.wrap.style.backgroundImage = `${inkFrameUrl(210, 36, frameColor, frameWeight)}, url("${paperTexture()}")`
+        // FILLED with cream (PAPER) so the row is a solid card the content can't
+        // bleed out of — the emphasis colour only tints the outline.
+        el.wrap.style.backgroundImage = `${inkFrameUrl(210, 38, frameColor, frameWeight, PAPER)}, url("${paperTexture()}")`
 
         // smooth vertical slide toward the target slot
         const targetY = i * ROW_H
