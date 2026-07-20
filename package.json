@@ -14,8 +14,12 @@
     "dev:client": "npm -w client run dev",
     "dev:server": "npm -w server run dev",
     "build": "npm -w client run build",
+    "start": "node --import tsx server/src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "tsx": "^4.23.1"
   },
   "devDependencies": {
     "playwright": "^1.61.1",
