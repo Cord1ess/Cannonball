@@ -13,7 +13,7 @@ import {
   SPRINT_SPEED,
   STAMINA_MAX,
 } from '@shared/constants.ts'
-import { footprintZone, makeArena, zoneAnchor, type Arena } from '@shared/sim/arena.ts'
+import { footprintZone, makeArena, yawTowardCenter, zoneAnchor, type Arena } from '@shared/sim/arena.ts'
 import type { NetHandoutRead, NetInput, NetPlayerRead, NetStateRead } from '@shared/sim/net.ts'
 import {
   applyWindToPlayer,
@@ -375,6 +375,7 @@ export function createOnlineGame(
   // and does so again every time it falls back to the lobby
   const devMode = false // deployment: ?dev instant-arena/auto-bot path disabled
   let lastPhaseSeen = -1
+  let faceFieldFrames = 0 // >0 = force the chase cam to face the field (kickoff)
   if (devMode) conn.send('debug', { cmd: 'instantArena' })
 
   function aliveOf(seat: number): boolean {
@@ -473,13 +474,11 @@ export function createOnlineGame(
     if (devMode && phaseNow === Phase.Lobby && lastPhaseSeen > Phase.Lobby) {
       conn.send('debug', { cmd: 'instantArena' })
     }
-    // ON ENTERING LAUNCH: snap the chase camera to face the FIELD (behind the
-    // player, looking at the pitch) — the player spawns at the cannon rim facing
-    // center, so matching the camera to the player's yaw puts the field ahead,
-    // not the cannon. Fixes "camera faces the cannon at kickoff".
+    // ON ENTERING LAUNCH: face the chase camera at the FIELD (behind the player,
+    // looking at the pitch), not the cannon. Handled in frameUpdate from the
+    // player's live position so it's robust to server yaw lag — arm it here.
     if (phaseNow === Phase.Launch && lastPhaseSeen !== Phase.Launch) {
-      const meNow = state.players?.get?.(conn.sessionId)
-      if (meNow) camera.yaw = meNow.yaw
+      faceFieldFrames = 30 // force field-facing for ~0.5s at kickoff
     }
     lastPhaseSeen = phaseNow
     // identity colors first — the arena/bean paths below read them
@@ -1239,6 +1238,13 @@ export function createOnlineGame(
         }
         if (!followed) camera.updateOrbit(dt, arena.radius + 21, 22) // just past the cannons
       } else {
+        // KICKOFF: force the camera behind the player facing the field (yaw
+        // toward center from the player's live position) for the first frames of
+        // Launch, so it never opens pointing back at the cannon.
+        if (faceFieldFrames > 0) {
+          faceFieldFrames--
+          camera.yaw = yawTowardCenter(selfX, selfZ)
+        }
         camera.update(dt, selfX, selfY, selfZ)
       }
     },
