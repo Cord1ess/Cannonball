@@ -52,20 +52,32 @@ export function createBallView(): BallView {
       const center = new THREE.Vector3()
       box.getCenter(center)
       model.position.set(-center.x * s, -center.y * s, -center.z * s)
+      // RESTYLE to our flat toon look while KEEPING the model's perfect pentagon
+      // pattern (its own UV base-colour texture). We throw away the realistic PBR
+      // material (shiny/normal-mapped) and put the pattern texture on a flat
+      // MeshToonMaterial toned toward CREAM, so the ball matches the world's
+      // matte, sketch-shaded style instead of looking like a photoreal football.
+      const ramp = toonRamp()
       model.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) {
           const m = o as THREE.Mesh
           m.castShadow = true
-          // keep the model's OWN material (the good football texture); just tame
-          // any high metalness so it reads under our toon/flat light rig
-          const mat = m.material as THREE.MeshStandardMaterial
-          if (mat && 'metalness' in mat) mat.metalness = Math.min(mat.metalness ?? 0, 0.1)
-          // NOTE: do NOT run addInkOutline on the GLB — makeHullGeometry() calls
-          // mergeVertices(), which is O(n²)-ish and FROZE the main thread on this
-          // dense model (the "loads 1 frame then stuck" bug). The model has its
-          // own detailed look; the sketch outline isn't worth freezing the game.
+          const src = m.material as THREE.MeshStandardMaterial
+          const patternTex = src?.map ?? null
+          if (patternTex) patternTex.colorSpace = THREE.SRGBColorSpace
+          const toon = new THREE.MeshToonMaterial({
+            gradientMap: ramp,
+            map: patternTex, // the perfect black/white pentagon pattern
+            // tone the stark white toward warm cream so it sits in the palette;
+            // the black pentagons stay dark, the whites read as cream paper
+            color: 0xf2ecdc,
+          })
+          m.material = toon
+          if (src) src.dispose() // drop the PBR material + its normal map
         }
       })
+      // NOTE: no addInkOutline on the GLB — makeHullGeometry()/mergeVertices() is
+      // O(n²)-ish and froze the main thread on this dense model.
       spinner.remove(placeholder)
       placeholder.geometry.dispose()
       ;(placeholder.material as THREE.Material).dispose()
