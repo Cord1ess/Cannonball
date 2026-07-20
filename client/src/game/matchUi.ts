@@ -254,17 +254,22 @@ export function createMatchUi(client: MatchClient): MatchUi {
               const def = CARD_BY_ID.get(id)
               const picked = client.picks()[pool] === id
               const btn = document.createElement('button')
-              btn.style.cssText = 'text-align:left;padding:8px 11px;'
+              // AUTO height with generous padding + word-wrap so the name/blurb
+              // NEVER spill past the card edge; the ink frame (background-size
+              // 100% 100%) stretches to whatever height the text needs.
+              const cardH = 84
+              btn.style.cssText =
+                `text-align:left;padding:10px 13px;min-height:${cardH}px;height:auto;box-sizing:border-box;white-space:normal;overflow-wrap:break-word;word-break:break-word;`
               // a paper card; picked = heavier green ink frame
-              paperButton(btn, { w: 180, h: 66 })
+              paperButton(btn, { w: 180, h: cardH })
               if (picked) {
-                btn.style.backgroundImage = `${inkFrameUrl(180, 66, METER.safe, 3.4)}, url("${paperTexture()}")`
+                btn.style.backgroundImage = `${inkFrameUrl(180, cardH, METER.safe, 3.4)}, url("${paperTexture()}")`
               }
               const rarity = def && 'rarity' in def ? def.rarity : 'common'
               const rarityColor = rarity === 'epic' ? '#9678c8' : rarity === 'rare' ? '#4fa3d8' : '#8a7f70'
-              btn.innerHTML = `<div style="font-family:${FONT_HEAD};font-weight:800;font-size:15px;">${def?.name ?? id}</div>
-                <div style="font-size:10px;color:${rarityColor};font-weight:800;letter-spacing:0.5px;">${rarity.toUpperCase()}</div>
-                <div style="font-family:${FONT_HAND};font-size:13px;color:#6b655c;line-height:1.05;">${def && 'blurb' in def ? def.blurb : ''}</div>`
+              btn.innerHTML = `<div style="font-family:${FONT_HEAD};font-weight:800;font-size:14px;line-height:1.1;">${def?.name ?? id}</div>
+                <div style="font-size:10px;color:${rarityColor};font-weight:800;letter-spacing:0.5px;margin:2px 0;">${rarity.toUpperCase()}</div>
+                <div style="font-family:${FONT_HAND};font-size:12px;color:#6b655c;line-height:1.1;">${def && 'blurb' in def ? def.blurb : ''}</div>`
               btn.addEventListener('click', () => {
                 client.pick(pool, index)
                 renderedKey = '' // repaint selection

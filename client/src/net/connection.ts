@@ -120,9 +120,11 @@ export async function connect(): Promise<Connection> {
   const params = new URLSearchParams(location.search)
   // dev implies fresh: every reload is a brand-new instant arena, never a
   // reconnect into a spectator seat
-  const fresh = params.has('fresh') || params.has('dev')
-  // dev implies fast: restart pauses shrink too while iterating
-  const roomOptions = params.has('fast') || params.has('dev') ? { fast: true } : {}
+  // DEPLOYMENT: dev-only flags (dev/fast/lag) are disabled — only `fresh` (used
+  // by the party create/join reload) and `server` remain. No fast timers, no
+  // artificial lag, no auto-bot dev room in production.
+  const fresh = params.has('fresh')
+  const roomOptions = {}
 
   let room: Room | null = null
 
@@ -193,7 +195,7 @@ export async function connect(): Promise<Connection> {
     console.error(`[net] room error ${code}: ${message}`)
   })
 
-  const lag = Number(params.get('lag') ?? 0)
+  const lag = 0 // deployment: artificial send-lag disabled
   const send =
     lag > 0
       ? (type: string, payload?: unknown): void => {

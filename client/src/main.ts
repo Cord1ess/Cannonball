@@ -141,7 +141,7 @@ const grain = createGrainOverlay()
 const time = new Time()
 
 let game: Sandbox | OnlineGame
-const wantOffline = new URLSearchParams(location.search).has('offline')
+const wantOffline = false // deployment: ?offline sandbox disabled (online only)
 if (wantOffline) {
   game = createSandbox(scene, chase, hud, lighting)
   console.log('[cannonball] offline sandbox mode')
@@ -191,7 +191,7 @@ let mainMenu: MainMenu | null = null
 // backdrop is a bot match (instantArena); starting a real match hides the menu.
 let menuActive = 'match' in game
 let menuClock = 0 // drives the menu's looping day↔night cycle
-const devSkipMenu = new URLSearchParams(location.search).has('dev')
+const devSkipMenu = false // deployment: ?dev menu-skip disabled — always show menu
 if ('match' in game) {
   matchUi = createMatchUi(game.match)
   leaderboard = createLeaderboard(game.match)

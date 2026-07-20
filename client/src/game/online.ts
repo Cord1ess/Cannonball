@@ -373,7 +373,7 @@ export function createOnlineGame(
 
   // ?dev: reload-and-play — the room jumps straight to a live 6-bean arena,
   // and does so again every time it falls back to the lobby
-  const devMode = new URLSearchParams(location.search).has('dev')
+  const devMode = false // deployment: ?dev instant-arena/auto-bot path disabled
   let lastPhaseSeen = -1
   if (devMode) conn.send('debug', { cmd: 'instantArena' })
 
@@ -472,6 +472,14 @@ export function createOnlineGame(
     const phaseNow = state.phase ?? 0
     if (devMode && phaseNow === Phase.Lobby && lastPhaseSeen > Phase.Lobby) {
       conn.send('debug', { cmd: 'instantArena' })
+    }
+    // ON ENTERING LAUNCH: snap the chase camera to face the FIELD (behind the
+    // player, looking at the pitch) — the player spawns at the cannon rim facing
+    // center, so matching the camera to the player's yaw puts the field ahead,
+    // not the cannon. Fixes "camera faces the cannon at kickoff".
+    if (phaseNow === Phase.Launch && lastPhaseSeen !== Phase.Launch) {
+      const meNow = state.players?.get?.(conn.sessionId)
+      if (meNow) camera.yaw = meNow.yaw
     }
     lastPhaseSeen = phaseNow
     // identity colors first — the arena/bean paths below read them

@@ -241,7 +241,9 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     // lobby MATCH SETTINGS — host picks the game mode + total match time before
     // starting. Only in the lobby (mid-match settings would break fairness).
     this.onMessage('settings', (client, message: { mode?: number; matchTime?: number }) => {
-      if (this.#phase !== Phase.Lobby || client.sessionId !== this.state.hostSessionId) return
+      // any player in the lobby may set the mode/time (party game — no reason to
+      // lock it to the first joiner, which left non-hosts unable to change it)
+      if (this.#phase !== Phase.Lobby || !this.#sessions.has(client.sessionId)) return
       if (typeof message?.mode === 'number' && isValidGameMode(message.mode)) {
         this.#mode = message.mode
         this.state.mode = message.mode

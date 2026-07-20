@@ -233,7 +233,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   function buildModeTimePicker(online: boolean): HTMLElement {
     const wrap = document.createElement('div')
     wrap.style.cssText = 'display:flex;flex-direction:column;gap:4px;'
-    const canEdit = !online || client.isHost()
+    const canEdit = true // any lobby player can set mode/time (server allows it)
     // seed from the room state when online (so non-hosts see the host's choice)
     if (online) {
       modeSel = client.mode()
