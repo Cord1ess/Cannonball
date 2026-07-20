@@ -1,5 +1,4 @@
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { BALL_RADIUS } from '@shared/constants.ts'
 import { addInkOutline, INK_WEIGHT, toonRamp } from './materials.ts'
 import { ballTexture } from './textures.ts'
@@ -9,10 +8,13 @@ import { ballTexture } from './textures.ts'
  * derived from actual motion — rolls exactly when grounded, keeps its spin
  * decaying through the air, and NEVER rotates while at rest.
  *
- * The ball is a downloaded GLB football model (`client/public/ball.glb`),
- * scaled to BALL_RADIUS and given an ink outline in our style. Until the model
- * loads (async) a procedural painted sphere stands in, so the ball is never
- * missing. Grounded by the REAL cast shadow only — no fake blob disc.
+ * The ball is OUR simple sphere (so it takes a clean toon ink outline + toon
+ * shading, unlike the dense downloaded model whose 32k unmerged verts explode
+ * the hull), wearing `ball_pattern.png` — the classic pentagon/hexagon football
+ * pattern BAKED to an equirectangular texture from the downloaded model, so the
+ * pattern is perfect AND it maps cleanly to the sphere's UVs. Near-white, matte.
+ * The texture loads async; a procedural sphere stands in until it's ready.
+ * Grounded by the REAL cast shadow only — no fake blob disc.
  */
 
 export interface BallView {
@@ -22,76 +24,27 @@ export interface BallView {
 
 export function createBallView(): BallView {
   const group = new THREE.Group()
-  // the SPINNER carries all rolling rotation; its child is swapped from the
-  // stand-in sphere to the loaded GLB model without touching the roll state.
+  // the SPINNER carries all rolling rotation
   const spinner = new THREE.Group()
   group.add(spinner)
 
-  // stand-in: the procedural painted sphere (shows until the GLB loads)
-  const placeholder = new THREE.Mesh(
-    new THREE.SphereGeometry(BALL_RADIUS, 48, 32),
-    new THREE.MeshToonMaterial({ gradientMap: toonRamp(), map: ballTexture() }),
-  )
-  placeholder.castShadow = true
-  addInkOutline(placeholder, INK_WEIGHT.character)
-  spinner.add(placeholder)
+  // OUR sphere — clean geometry that takes a proper ink outline. Starts on the
+  // procedural painted texture, swaps to the baked football pattern once loaded.
+  const mat = new THREE.MeshToonMaterial({ gradientMap: toonRamp(), map: ballTexture() })
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 48, 32), mat)
+  ball.castShadow = true
+  addInkOutline(ball, INK_WEIGHT.character) // the clean toon rim — works on our sphere
+  spinner.add(ball)
 
-  // load the real football model; swap it in once ready
-  new GLTFLoader().load(
-    '/ball.glb',
-    (gltf) => {
-      const model = gltf.scene
-      // scale the model so its widest extent == the ball diameter
-      const box = new THREE.Box3().setFromObject(model)
-      const size = new THREE.Vector3()
-      box.getSize(size)
-      const maxDim = Math.max(size.x, size.y, size.z) || 1
-      const s = (BALL_RADIUS * 2) / maxDim
-      model.scale.setScalar(s)
-      // recenter on its own centroid so it spins about its middle, not a corner
-      const center = new THREE.Vector3()
-      box.getCenter(center)
-      model.position.set(-center.x * s, -center.y * s, -center.z * s)
-      // RESTYLE to our flat toon look while KEEPING the model's perfect pentagon
-      // pattern (its own UV base-colour texture). We throw away the realistic PBR
-      // material (shiny/normal-mapped) and put the pattern texture on a flat
-      // MeshToonMaterial toned toward CREAM, so the ball matches the world's
-      // matte, sketch-shaded style instead of looking like a photoreal football.
-      const ramp = toonRamp()
-      // collect meshes first — attaching a hull child mid-traverse would make
-      // traverse() also visit the hull, recursing.
-      const meshes: THREE.Mesh[] = []
-      model.traverse((o) => {
-        if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh)
-      })
-      for (const m of meshes) {
-        m.castShadow = true
-        const src = m.material as THREE.MeshStandardMaterial
-        const patternTex = src?.map ?? null
-        if (patternTex) patternTex.colorSpace = THREE.SRGBColorSpace
-        m.material = new THREE.MeshToonMaterial({
-          gradientMap: ramp,
-          map: patternTex, // the perfect black/white pentagon pattern
-          // near-white, just a hair warm so it isn't a clinical pure white but
-          // reads clearly as a white football (whiter than the earlier cream)
-          color: 0xfbf7ee,
-        })
-        if (src) src.dispose() // drop the PBR material + its normal map
-        // NO ink outline on the GLB: this model's 32k vertices are ALL unique
-        // (mergeVertices merges nothing → 347ms of wasted work AND split normals
-        // that tear an inverted-hull into spikes). A sphere silhouette reads fine
-        // without a rim; the outline isn't worth the model's geometry problems.
-      }
-      spinner.remove(placeholder)
-      placeholder.geometry.dispose()
-      ;(placeholder.material as THREE.Material).dispose()
-      spinner.add(model)
-    },
-    undefined,
-    () => {
-      // load failed → keep the procedural sphere (never a missing ball)
-    },
-  )
+  // swap in the baked football pattern (equirect → wraps our sphere perfectly)
+  new THREE.TextureLoader().load('/ball_pattern.png', (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.anisotropy = 4
+    mat.map = tex
+    // tone toward near-white (a hair warm) so it reads as a clean white football
+    mat.color.setHex(0xfbf7ee)
+    mat.needsUpdate = true
+  })
 
   const rollAxis = new THREE.Vector3()
   const airAxis = new THREE.Vector3(1, 0, 0)
