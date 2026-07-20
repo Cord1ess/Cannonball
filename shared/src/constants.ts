@@ -89,7 +89,7 @@ export const HEADER_COOLDOWN_S = 0.35
 // wide (deliberately tight — scoring is meant to be hard), and a shot counts
 // when the ball's footprint crosses into the goal band near the wall within the
 // mouth's angular half-width.
-export const GOAL_MOUTH_WIDTH = BALL_RADIUS * 2 * 1.5 // 1.5x ball diameter
+export const GOAL_MOUTH_WIDTH = BALL_RADIUS * 2 * 1.5 * 1.6 // 1.5x ball dia, +60% bigger goals
 export const GOAL_DEPTH = 2.2 // how far in from the wall the goal band reaches
 export const GOAL_POST_RADIUS = 0.35 // post thickness (visual + a soft bounce)
 export const GOAL_COOLDOWN_S = 1.2 // ignore repeat triggers while the ball lingers

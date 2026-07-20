@@ -816,7 +816,7 @@ export function createArenaView(radius = 28, lighting?: WorldLighting): ArenaVie
   const goalsGroup = new THREE.Group()
   goalsGroup.visible = false
   group.add(goalsGroup)
-  const GOAL_H = BALL_RADIUS * 2.2 // a touch taller than the ball
+  const GOAL_H = BALL_RADIUS * 2.2 * 1.6 // taller than the ball, +60% bigger goals
 
   function buildGoal(arena: Arena, zone: number, zoneColor: number): THREE.Group {
     const g = goalForZone(arena, zone)

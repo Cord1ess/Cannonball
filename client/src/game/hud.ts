@@ -52,44 +52,46 @@ export function createHud(): Hud {
     'position:absolute;inset:0;box-shadow:inset 0 0 90px 24px rgba(217,108,108,0.55);opacity:0;transition:opacity 140ms;'
   root.appendChild(alarm)
 
-  // STAMINA — a labelled bar; the fill is inset well INSIDE the wobbly ink frame
-  // (rounded track) so the coloured fill can never poke past the sketched outline.
+  // BOTTOM CONTROL CLUSTER: stamina bar + ability chip together, one tidy row
+  // centred above the hint. Reads as one intentional UI, not scattered boxes.
+  const cluster = document.createElement('div')
+  cluster.style.cssText =
+    'position:absolute;bottom:64px;left:50%;transform:translateX(-50%);display:flex;align-items:flex-end;gap:12px;'
+  root.appendChild(cluster)
+
+  // STAMINA — labelled bar; fill inset INSIDE the wobbly frame so it never bleeds.
   const staminaWrap = document.createElement('div')
-  staminaWrap.style.cssText =
-    'position:absolute;bottom:58px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:3px;'
+  staminaWrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;'
   const staminaLabel = document.createElement('div')
-  staminaLabel.style.cssText = `font-family:${FONT_HEAD};font-size:11px;letter-spacing:2px;color:${INK};opacity:0.8;`
+  staminaLabel.style.cssText = `font-family:${FONT_HEAD};font-size:11px;letter-spacing:2px;color:${INK};opacity:0.75;text-shadow:0 1px 0 #fff8;`
   staminaLabel.textContent = 'STAMINA'
   const staminaBar = document.createElement('div')
-  staminaBar.style.cssText = 'position:relative;width:240px;height:20px;'
-  paperPanel(staminaBar, { w: 240, h: 20, weight: 2.4 })
-  // the TRACK is inset 5px from the frame on all sides + rounded, so the fill
-  // stays strictly inside the wobbly outline
+  staminaBar.style.cssText = 'position:relative;width:230px;height:22px;'
+  paperPanel(staminaBar, { w: 230, h: 22, weight: 2.4 })
   const staminaTrack = document.createElement('div')
   staminaTrack.style.cssText =
-    'position:absolute;left:6px;right:6px;top:5px;bottom:5px;border-radius:6px;overflow:hidden;background:rgba(74,68,60,0.12);'
+    'position:absolute;left:7px;right:7px;top:6px;bottom:6px;border-radius:6px;overflow:hidden;background:rgba(74,68,60,0.14);'
   const staminaFill = document.createElement('div')
   staminaFill.style.cssText = `height:100%;width:100%;background:${brushFill(METER.warn)};transition:width 90ms linear,background 150ms;`
   staminaTrack.appendChild(staminaFill)
   staminaBar.appendChild(staminaTrack)
   staminaWrap.append(staminaLabel, staminaBar)
-  root.appendChild(staminaWrap)
+  cluster.appendChild(staminaWrap)
 
-  // ABILITY — a labelled chip to the right of the stamina bar; the cooldown wipe
-  // is inset inside the frame the same way.
+  // ABILITY — a chip beside the stamina bar; the cooldown wipe is inset too.
   const abilityChip = document.createElement('div')
   abilityChip.style.cssText =
-    'position:absolute;bottom:58px;left:calc(50% + 150px);width:112px;height:44px;' +
-    `font-family:${FONT_HEAD};font-size:13px;color:${INK};display:none;align-items:center;justify-content:center;text-align:center;`
-  paperPanel(abilityChip, { w: 112, h: 44, weight: 2.4 })
+    'position:relative;width:120px;height:48px;' +
+    `font-family:${FONT_HEAD};color:${INK};display:none;align-items:center;justify-content:center;text-align:center;`
+  paperPanel(abilityChip, { w: 120, h: 48, weight: 2.4 })
   const abilityFill = document.createElement('div')
   abilityFill.style.cssText =
-    'position:absolute;left:6px;right:6px;top:5px;bottom:5px;border-radius:6px;background:rgba(79,163,216,0.5);transform-origin:left;transition:transform 90ms linear;'
+    'position:absolute;left:7px;right:7px;top:6px;bottom:6px;border-radius:6px;background:rgba(79,163,216,0.5);transform-origin:left;transition:transform 90ms linear;'
   const abilityLabel = document.createElement('div')
-  abilityLabel.style.cssText = 'position:relative;padding:0 6px;text-align:center;overflow:hidden;max-width:104px;'
+  abilityLabel.style.cssText = 'position:relative;padding:0 8px;text-align:center;overflow:hidden;max-width:112px;'
   abilityChip.appendChild(abilityFill)
   abilityChip.appendChild(abilityLabel)
-  root.appendChild(abilityChip)
+  cluster.appendChild(abilityChip)
 
   const hint = document.createElement('div')
   hint.style.cssText =

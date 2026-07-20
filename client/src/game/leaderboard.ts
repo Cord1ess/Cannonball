@@ -96,10 +96,10 @@ export function createLeaderboard(client: MatchClient): Leaderboard {
   prompt.textContent = '⚠ get the ball out of your zone!'
   root.appendChild(prompt)
 
-  // --- right: leaderboard (below the PIP selfie cam) ----------------------------
+  // --- right: leaderboard (PIP selfie cam is disabled, so it can sit high) ------
   const board = document.createElement('div')
   board.style.cssText =
-    'position:absolute;top:290px;right:16px;width:210px;'
+    'position:absolute;top:20px;right:16px;width:212px;'
   root.appendChild(board)
 
   const ROW_H = 42

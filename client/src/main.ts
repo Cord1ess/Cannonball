@@ -409,40 +409,9 @@ function frame(nowMs: number): void {
     return
   }
 
-  // PICTURE-IN-PICTURE selfie cam: a second view framed on the local bean's
-  // face, top-right, so you see your character's expressions + motion live.
-  if ('selfView' in game && game.selfView) {
-    const sv = game.selfView()
-    if (sv.visible) {
-      const fx = Math.sin(sv.yaw)
-      const fz = Math.cos(sv.yaw)
-      // stand in FRONT of the bean looking back at its face, slightly above
-      pipCam.position.set(sv.x + fx * 3.2, sv.y + 1.7, sv.z + fz * 3.2)
-      pipCam.lookAt(sv.x, sv.y + 1.05, sv.z)
-
-      const W = window.innerWidth
-      const H = window.innerHeight
-      const d = Math.round(Math.min(140, W * 0.12)) // SMALL square (circle diameter)
-      const px = W - d - 16
-      const py = H - d - 16 // gl viewport origin is bottom-left → top-right
-      renderer.setViewport(px, py, d, d)
-      renderer.setScissor(px, py, d, d)
-      renderer.setScissorTest(true)
-      pipCam.aspect = 1
-      pipCam.updateProjectionMatrix()
-      renderer.render(scene, pipCam)
-      renderer.setScissorTest(false)
-      renderer.setViewport(0, 0, W, H)
-      for (const el of [pipFrame, pipMask]) {
-        el.style.display = 'block'
-        el.style.width = `${d}px`
-        el.style.height = `${d}px`
-      }
-    } else {
-      pipFrame.style.display = 'none'
-      pipMask.style.display = 'none'
-    }
-  }
+  // PICTURE-IN-PICTURE selfie cam DISABLED — keep the frame/mask hidden.
+  pipFrame.style.display = 'none'
+  pipMask.style.display = 'none'
 
   grain.render(renderer)
 }

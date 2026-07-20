@@ -179,16 +179,15 @@ export function createGameAudio(): GameAudio {
     const clip = clips.get('music')
     if (clip === undefined) return
     if (musicHandle !== null) backend.stop(musicHandle)
-    // theme up front, crowd a soft bed under it (was 0.5/0.35 → music felt faint
-    // vs the crowd; bring the theme forward and pull the crowd back)
-    musicHandle = backend.play(clip, { loop: true, volume: 0.85 })
+    // music sits LOW under the match; the crowd carries the atmosphere loudly
+    musicHandle = backend.play(clip, { loop: true, volume: 0.16 })
   }
   function startCrowdInternal(): void {
     if (!backend || !unlocked) return
     const clip = clips.get('crowd')
     if (clip === undefined) return
     if (crowdHandle !== null) backend.stop(crowdHandle)
-    crowdHandle = backend.play(clip, { loop: true, volume: 0.18 })
+    crowdHandle = backend.play(clip, { loop: true, volume: 0.7 })
   }
 
   return {
