@@ -120,9 +120,31 @@ const audio = createGameAudio()
 audio.startMusic()
 audio.startCrowd()
 void audio.load()
+// VISIBLE sound toggle (top-left) — reflects mute state + gives a reliable
+// unmute control (a stale persisted mute, or the browser autoplay gate, is the
+// usual "I can't hear anything" cause; this makes the state obvious + fixable).
+const soundBtn = document.createElement('button')
+soundBtn.style.cssText =
+  'position:fixed;top:12px;left:12px;z-index:40;width:42px;height:42px;border-radius:10px;' +
+  'border:2px solid #4a443c;background:#f6f1e2;color:#4a443c;font-size:20px;cursor:pointer;' +
+  'box-shadow:0 2px 0 rgba(74,68,60,0.2);line-height:1;padding:0;'
+const paintSound = (): void => {
+  soundBtn.textContent = audio.muted() ? '🔇' : '🔊'
+  soundBtn.title = audio.muted() ? 'Sound off — click to unmute (M)' : 'Sound on — click to mute (M)'
+}
+paintSound()
+soundBtn.addEventListener('click', (e) => {
+  e.stopPropagation()
+  audio.toggleMute()
+  paintSound()
+})
+document.body.appendChild(soundBtn)
 // M key toggles mute (any time)
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'KeyM' && !e.repeat) audio.toggleMute()
+  if (e.code === 'KeyM' && !e.repeat) {
+    audio.toggleMute()
+    paintSound()
+  }
 })
 // a soft UI click on any button press (menu, lobby, settings)
 document.addEventListener('click', (e) => {

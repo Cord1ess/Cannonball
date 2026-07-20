@@ -69,8 +69,25 @@ export interface GameAudio {
 
 const STORE_VOL = 'cannonball.audio.vol'
 const STORE_MUTE = 'cannonball.audio.mute'
+// one-time reset marker: clears any STALE persisted mute / zero-volume left over
+// from development so a returning player is never silenced by an old flag. Bump
+// the suffix to force another reset on a future build.
+const STORE_RESET = 'cannonball.audio.reset.v1'
+
+function resetStaleAudioPrefs(): void {
+  try {
+    if (localStorage.getItem(STORE_RESET) === '1') return
+    localStorage.setItem(STORE_RESET, '1')
+    localStorage.setItem(STORE_MUTE, '0') // unmute
+    const v = Number(localStorage.getItem(STORE_VOL))
+    if (!(v > 0)) localStorage.setItem(STORE_VOL, '0.8') // sane volume
+  } catch {
+    /* no localStorage → nothing to reset */
+  }
+}
 
 export function createGameAudio(): GameAudio {
+  resetStaleAudioPrefs()
   // headless / no-AudioContext → a silent no-op audio so the game still runs
   let backend: AudioBackend | null = null
   try {
