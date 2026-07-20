@@ -3,6 +3,7 @@ import {
   BALL_RADIUS,
   DRAFT_SECONDS,
   DUEL_METER_CAPACITY_S,
+  DUEL_TIMEOUT_S,
   FIXED_DELTA,
   GOAL_COOLDOWN_S,
   GRACE_SECONDS,
@@ -10,6 +11,7 @@ import {
   LAUNCH_AIM_ARC_DEG,
   LAUNCH_COUNTDOWN_S,
   LAUNCH_DEFAULT_CHARGE,
+  OVERTIME_TIMEOUT_S,
   PATCH_HZ,
   PLAYERS_MAX,
   RESTART_PAUSE_S,
@@ -723,6 +725,16 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#activeCards = Array.from({ length: MAX_SEATS }, () => [])
     this.#freeSaves.fill(0)
     this.#frozen = false
+    // full reset so a rematch starts clean (mode-era + interval state)
+    this.#goals.fill(0)
+    this.#goalCd = 0
+    this.#lastHeaderSeat = -1
+    this.#zoneDwell.fill(0)
+    this.#overtimeSeats = []
+    this.state.overtimeSeats.splice(0, this.state.overtimeSeats.length)
+    this.#tickRemaining = this.#scale(this.#interval())
+    // reopen the room to newcomers now that we're back in the lobby
+    void this.unlock().catch(() => undefined)
     for (const session of this.#sessions.values()) {
       session.picks = {}
       session.offers = null
@@ -749,6 +761,10 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #startMatch(): void {
     const count = this.#sessions.size
     if (count < 1) return
+    // LOCK the room for the whole match so joinOrCreate routes newcomers to a
+    // FRESH lobby room instead of throwing 'match in progress' in onJoin. Existing
+    // players (reconnection) are unaffected. Unlocked again in #toLobby.
+    void this.lock().catch(() => undefined)
     this.#seatsAtStart = count
     this.state.seatsAtStart = count
     this.#alive.fill(false)
@@ -863,7 +879,8 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#tickRemaining = this.#scale(this.#interval())
     if (this.#survivors <= 2 && this.#seatsAtStart >= 2) {
       this.#meters.fill(0) // duel meters are cumulative from zero
-      this.#enter(Phase.Duel, 0)
+      // a hard timeout so the duel can never hang if the ball stays neutral
+      this.#enter(Phase.Duel, this.#scale(DUEL_TIMEOUT_S))
     } else {
       this.#enter(Phase.Arena, 0)
     }
@@ -981,9 +998,27 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
         break
       }
 
-      case Phase.Arena:
       case Phase.Overtime:
+        // force a resolution if overtime drags (ball loitering on the neutral
+        // disc) so a match can NEVER hang; else run the tied-zone race
+        if (this.#phaseT <= 0) {
+          this.#forceResolveOvertime()
+          break
+        }
+        this.#stepPlay(dt)
+        break
+
       case Phase.Duel:
+        // hard timeout so the duel never hangs: whoever's duel meter is higher
+        // (tie → higher cumulative) loses. Should resolve on the meter first.
+        if (this.#phaseT <= 0) {
+          this.#forceResolveDuel()
+          break
+        }
+        this.#stepPlay(dt)
+        break
+
+      case Phase.Arena:
         this.#stepPlay(dt)
         break
 
@@ -1106,12 +1141,13 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
         }
       }
     } else if (this.#phase === Phase.Duel) {
-      // cumulative duel meters — first to capacity loses (idea.md §2)
+      // cumulative duel meters — first to capacity loses (idea.md §2). Capacity
+      // is fast-scaled so dev/test duels aren't disproportionately long.
       if (zone >= 0) {
         const seat = this.#zoneSeat[zone]
         if (seat !== undefined && this.#alive[seat]) {
           this.#meters[seat] = (this.#meters[seat] ?? 0) + dt
-          if ((this.#meters[seat] ?? 0) >= DUEL_METER_CAPACITY_S) {
+          if ((this.#meters[seat] ?? 0) >= this.#scale(DUEL_METER_CAPACITY_S)) {
             this.#eliminate(seat)
             return
           }
@@ -1205,14 +1241,65 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
       this.#eliminate(losers[0]!)
       return
     }
-    // exact tie -> OVERTIME micro-round: ball recenters, only tied zones live
+    // exact tie -> OVERTIME micro-round: ball recenters, only tied zones live.
+    // Enter with a TIMEOUT so a ball loitering on the neutral disc can't hang the
+    // match — if it expires the phase update force-resolves it (#stepPlay).
     this.#overtimeSeats = losers
     this.state.overtimeSeats.splice(0, this.state.overtimeSeats.length)
     for (const seat of losers) this.state.overtimeSeats.push(seat)
     this.#meters.fill(0)
     resetBall(this.#ball)
     this.broadcast('overtime', { seats: losers })
-    this.#enter(Phase.Overtime, 0)
+    this.#enter(Phase.Overtime, this.#scale(OVERTIME_TIMEOUT_S))
+  }
+
+  /** OVERTIME force-resolve when the timer runs out (ball never entered a tied
+   *  zone). Pick the loser deterministically among the tied seats: the one with
+   *  the most cumulative ball-time this match (the "most deserving" to go), or
+   *  just the lowest seat if cumulative is level. Never hangs. */
+  #forceResolveOvertime(): void {
+    const tied = this.#overtimeSeats.filter((s) => this.#alive[s])
+    this.#overtimeSeats = []
+    this.state.overtimeSeats.splice(0, this.state.overtimeSeats.length)
+    if (tied.length === 0) {
+      // everyone tied got eliminated somehow → just restart the interval
+      this.#beginRestart(this.#alive.findIndex(Boolean))
+      return
+    }
+    let loser = tied[0]!
+    let worst = -Infinity
+    for (const s of tied) {
+      const c = this.#cumulative[s] ?? 0
+      if (c > worst) {
+        worst = c
+        loser = s
+      }
+    }
+    this.#eliminate(loser)
+  }
+
+  /** DUEL force-resolve on timeout: the alive duellist with the higher duel
+   *  meter loses (tie → higher cumulative, else lowest seat). Never hangs. */
+  #forceResolveDuel(): void {
+    const alive: number[] = []
+    for (let s = 0; s < MAX_SEATS; s++) if (this.#alive[s]) alive.push(s)
+    if (alive.length <= 1) {
+      // already down to a winner somehow → end it
+      const winner = alive[0] ?? this.#alive.findIndex(Boolean)
+      this.state.winnerSeat = winner
+      this.#enter(Phase.End, 0)
+      return
+    }
+    let loser = alive[0]!
+    let worst = -Infinity
+    for (const s of alive) {
+      const score = (this.#meters[s] ?? 0) * 1000 + (this.#cumulative[s] ?? 0)
+      if (score > worst) {
+        worst = score
+        loser = s
+      }
+    }
+    this.#eliminate(loser)
   }
 
   /** FINAL WHISTLE resolution: the seat whose zone the ball's footprint is in

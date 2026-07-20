@@ -27,6 +27,13 @@ export const PILLAR_COUNT = 4
 export const TICK_SECONDS_PER_SURVIVOR = 10 // interval = survivors x 10s — longer rounds for playtesting
 export const TIE_EPSILON_S = 0.05 // meters within this = tied -> overtime
 export const DUEL_METER_CAPACITY_S = 30 // sudden kickoff cumulative meter (longer duel)
+// overtime can't run forever: if the ball loiters on the neutral disc and no
+// tied zone accrues, force a resolution after this so a match never hangs.
+export const OVERTIME_TIMEOUT_S = 20
+// the sudden-kickoff duel likewise can't hang: a hard cap after which whoever
+// has the higher duel meter (or cumulative) loses. Generous — the duel should
+// resolve on the meter well before this.
+export const DUEL_TIMEOUT_S = 75
 // grace so a ball that just grazes your zone in the final moment can't doom
 // you: the ball must DWELL in your zone this long before it accrues meter, and
 // accrual freezes this long before the tick fires (a "final whistle" lock-in)
