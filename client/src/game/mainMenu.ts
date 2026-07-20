@@ -71,17 +71,20 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   root.appendChild(left)
 
   // --- RIGHT: action column (home buttons OR a sliding panel) --------------------
+  // wider column so the online lobby has room to breathe (server status, party
+  // code, roster, ping) and mode/time button labels never overflow their buttons.
+  const PANEL_W = 500
   const right = document.createElement('div')
   right.style.cssText =
-    'align-self:center;margin:0 5vw 0 0;width:min(420px,40vw);pointer-events:auto;' +
-    'display:flex;flex-direction:column;gap:16px;'
+    'align-self:center;margin:0 4vw 0 0;width:min(500px,46vw);pointer-events:auto;' +
+    'display:flex;flex-direction:column;gap:14px;'
   root.appendChild(right)
 
   const bigBtn = (label: string, tint: string): HTMLButtonElement => {
     const b = document.createElement('button')
     b.textContent = label
     b.style.cssText = 'font-size:26px;padding:18px 10px;width:100%;'
-    paperButton(b, { tint, w: 380, h: 66, big: true })
+    paperButton(b, { tint, w: 480, h: 66, big: true })
     return b
   }
   const soloBtn = bigBtn('PLAY SOLO', '#58ae7c')
@@ -89,8 +92,8 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
 
   // the panel container that solo/online slide into
   const panel = document.createElement('div')
-  panel.style.cssText = 'display:flex;flex-direction:column;gap:11px;padding:18px 22px;'
-  paperPanel(panel, { w: 400, h: 420, weight: 3.2 })
+  panel.style.cssText = 'display:flex;flex-direction:column;gap:11px;padding:18px 24px;'
+  paperPanel(panel, { w: PANEL_W, h: 420, weight: 3.2 })
 
   // The wobbly ink frame is a baked SVG stretched to the panel via
   // background-size:100% 100%. Content height is dynamic (solo vs online, host
@@ -98,7 +101,6 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   // whenever it changes — otherwise the bottom of the content (roster, +BOT,
   // action buttons) spills PAST the frame edge (idea.md §menu fit). Runs on the
   // next frame so layout has settled; re-run after the async roster fills in.
-  const PANEL_W = 400
   const refitPanel = (): void => {
     const h = Math.round(panel.getBoundingClientRect().height)
     if (h < 40) return
@@ -147,22 +149,25 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     kitRow.append(arrowL, beanCard, kitName, arrowR)
     panel.appendChild(kitRow)
 
-    // bind the lively bean to the jersey card
+    // bind the lively bean to the jersey card. The selected kit is tracked
+    // LOCALLY and applied to the model + label IMMEDIATELY on each cycle, then
+    // sent to the server in the background — the old code re-read the kit from
+    // server state 60ms after sending, before the round-trip landed, so the
+    // model + text never changed (the "jersey swap not working" bug).
     jerseyBean?.dispose()
-    const startKit = kitColors(client.myKitId(), client.myKitAway()) ?? NEUTRAL_UI_KIT
-    jerseyBean = beans.slot(beanCard, startKit)
+    let selectedKitId = client.myKitId() || KITS[0]!.id
+    if (!KITS.some((k) => k.id === selectedKitId)) selectedKitId = KITS[0]!.id
+    jerseyBean = beans.slot(beanCard, kitColors(selectedKitId, false) ?? NEUTRAL_UI_KIT)
     const refreshKit = (): void => {
-      const id = client.myKitId()
-      kitName.textContent = `${KIT_BY_ID.get(id)?.name ?? 'your team'}${client.myKitAway() ? ' · away' : ''}`
-      jerseyBean?.setKit(kitColors(id, client.myKitAway()) ?? NEUTRAL_UI_KIT)
+      kitName.textContent = KIT_BY_ID.get(selectedKitId)?.name ?? 'your team'
+      jerseyBean?.setKit(kitColors(selectedKitId, false) ?? NEUTRAL_UI_KIT)
       jerseyBean?.pop()
     }
     const cycleKit = (dir: number): void => {
-      const idx = KITS.findIndex((k) => k.id === client.myKitId())
-      const next = KITS[(Math.max(idx, 0) + dir + KITS.length) % KITS.length]!
-      client.setKit(next.id)
-      // give the server a beat, then reflect
-      setTimeout(refreshKit, 60)
+      const idx = KITS.findIndex((k) => k.id === selectedKitId)
+      selectedKitId = KITS[(Math.max(idx, 0) + dir + KITS.length) % KITS.length]!.id
+      refreshKit() // reflect INSTANTLY (local), then persist to the server
+      client.setKit(selectedKitId)
     }
     arrowL.addEventListener('click', () => cycleKit(-1))
     arrowR.addEventListener('click', () => cycleKit(1))
@@ -250,8 +255,11 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
         const b = document.createElement('button')
         const on = m.id === modeSel
         b.textContent = m.name
-        b.style.cssText = 'flex:1;font-size:11px;padding:8px 2px;line-height:1.05;'
-        paperButton(b, { tint: on ? '#4fa3d8' : undefined, w: 120, h: 44, big: on })
+        // wrap multi-word labels ("FINAL WHISTLE"/"GOLDEN BOOT") to a 2nd line so
+        // they never spill past the button edge; taller button holds two lines.
+        b.style.cssText =
+          'flex:1;font-size:11px;padding:9px 6px;line-height:1.08;white-space:normal;overflow-wrap:break-word;min-width:0;'
+        paperButton(b, { tint: on ? '#4fa3d8' : undefined, w: 150, h: 52, big: on })
         if (canEdit) {
           b.addEventListener('click', () => {
             modeSel = m.id
@@ -282,8 +290,9 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
         const b = document.createElement('button')
         const on = t.totalSeconds === timeSel
         b.textContent = t.label
-        b.style.cssText = 'flex:1;font-size:11px;padding:8px 2px;'
-        paperButton(b, { tint: on ? '#e98a2b' : undefined, w: 120, h: 36, big: on })
+        b.style.cssText =
+          'flex:1;font-size:11px;padding:8px 6px;white-space:normal;overflow-wrap:break-word;line-height:1.08;min-width:0;'
+        paperButton(b, { tint: on ? '#e98a2b' : undefined, w: 150, h: 44, big: on })
         if (canEdit) {
           b.addEventListener('click', () => {
             timeSel = t.totalSeconds
@@ -309,31 +318,33 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     return wrap
   }
 
-  // solo: a bot-count picker (visual dots, no raw number field)
+  // solo: an opponents SLIDER (1..5 bots) — a real range input styled to the
+  // paper skin, replacing the old click-dots.
   function buildBotSlider(): HTMLElement {
     const wrap = document.createElement('div')
     wrap.style.cssText = 'text-align:center;'
     const lbl = document.createElement('div')
-    lbl.style.cssText = `font-family:${FONT_HAND};font-size:17px;margin-bottom:4px;`
-    const dots = document.createElement('div')
-    dots.style.cssText = 'display:flex;gap:8px;justify-content:center;'
+    lbl.style.cssText = `font-family:${FONT_HAND};font-size:17px;margin-bottom:6px;`
+    const slider = document.createElement('input')
+    slider.type = 'range'
+    slider.min = '1'
+    slider.max = '5'
+    slider.step = '1'
+    slider.value = String(botCount)
+    slider.className = 'bot-slider'
+    slider.style.cssText = 'width:82%;cursor:pointer;'
     const render = (): void => {
       lbl.textContent = `opponents: ${botCount} bot${botCount === 1 ? '' : 's'}`
-      dots.replaceChildren()
-      for (let i = 1; i <= 5; i++) {
-        const d = document.createElement('button')
-        d.style.cssText =
-          `width:34px;height:34px;border-radius:8px;cursor:pointer;border:2px solid ${INK};` +
-          (i <= botCount ? `background:#e98a2b;` : `background:url("${paperTexture()}");background-size:128px;`)
-        d.addEventListener('click', () => {
-          botCount = i
-          render()
-        })
-        dots.appendChild(d)
-      }
+      // paint the filled track up to the thumb (accent), rest cream
+      const pct = ((botCount - 1) / 4) * 100
+      slider.style.background = `linear-gradient(90deg, #e98a2b 0 ${pct}%, #d8cfb8 ${pct}% 100%)`
     }
+    slider.addEventListener('input', () => {
+      botCount = Number(slider.value)
+      render()
+    })
     render()
-    wrap.append(lbl, dots)
+    wrap.append(lbl, slider)
     return wrap
   }
 
@@ -394,7 +405,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
       const tag = document.createElement('div')
       tag.style.cssText =
         `font-family:${FONT_HAND};font-size:11px;text-align:center;color:${INK};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`
-      tag.textContent = `${p.bot ? '🤖 ' : ''}${p.name}`
+      tag.textContent = p.name
       card.append(beanBox, tag)
       rosterEl.appendChild(card)
       const kit = kitColors(p.kitId, p.kitAway) ?? NEUTRAL_UI_KIT

@@ -79,6 +79,27 @@ import { BallState, HandoutState, MatchState, PlayerState, type MatchStateT } fr
 
 const MAX_SEATS = 6
 const WS_CLOSE_CONSENTED = 4000
+// bots wear plain footballer surnames (no "Bot" label, no emoji) — made-up but
+// realistic, no real-person likeness. Picked uniquely per room so no two bots
+// share a name.
+const BOT_NAMES = [
+  'Rossi',
+  'Vidic',
+  'Silva',
+  'Costa',
+  'Muller',
+  'Kovac',
+  'Moreno',
+  'Okafor',
+  'Haaland',
+  'Petrov',
+  'Suarez',
+  'Torres',
+  'Nakamura',
+  'Bianchi',
+  'Diallo',
+  'Sorensen',
+]
 const ADV_IDS = ['overdrive', 'titan', 'slimzone', 'slowmeter', 'bodyguard', 'doubleboost']
 const CURSE_IDS = ['leadboots', 'softheader', 'widezone', 'fastmeter', 'magnet', 'jammed']
 const REVEAL_S = 2 // handout reveal beat after assignment
@@ -481,6 +502,15 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     return -1
   }
 
+  /** a footballer surname not already worn by another player/bot in the room */
+  #pickBotName(): string {
+    const taken = new Set<string>()
+    this.state.players.forEach((p) => taken.add(p.name))
+    const free = BOT_NAMES.filter((n) => !taken.has(n))
+    const pool = free.length > 0 ? free : BOT_NAMES
+    return pool[Math.floor(this.#rng.next() * pool.length)] ?? 'Rossi'
+  }
+
   #addBot(): boolean {
     const seat = this.#freeSeat()
     if (seat === -1) return false
@@ -504,7 +534,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     ps.sessionId = id
     ps.seat = seat
     ps.bot = true
-    ps.name = `Bot ${seat + 1}`
+    ps.name = this.#pickBotName()
     this.state.players.set(id, ps)
     this.#resolveKits()
     console.log(`[room ${this.roomId}] bot -> seat ${seat}`)

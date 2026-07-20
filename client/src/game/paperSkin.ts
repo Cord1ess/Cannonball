@@ -32,6 +32,27 @@ if (typeof document !== 'undefined' && !document.getElementById('crayonara-face'
   document.head.appendChild(style)
 }
 
+// paper-button press feel: a quick pop on hover + a satisfying SCALE-DOWN on
+// click (the "click scale effect"). One shared rule so every paperButton gets it.
+if (typeof document !== 'undefined' && !document.getElementById('paper-btn-press')) {
+  const style = document.createElement('style')
+  style.id = 'paper-btn-press'
+  // INK #4a443c / PAPER #f6f1e2 as literals (the exported consts are declared
+  // later in this module, so we can't reference them from this top-level block).
+  style.textContent =
+    '.paper-btn{transition:transform 90ms ease,filter 90ms ease;transform-origin:center;}' +
+    '.paper-btn:hover:not(:disabled){transform:scale(1.04);}' +
+    '.paper-btn:active:not(:disabled){transform:scale(0.92);filter:drop-shadow(0 1px 0 rgba(74,68,60,0.18))!important;}' +
+    '.paper-btn:disabled{cursor:default;opacity:0.85;}' +
+    // paper-skin range slider (the solo opponents picker): a chunky inked track
+    // + a round cream thumb with an ink border.
+    '.bot-slider{-webkit-appearance:none;appearance:none;height:12px;border-radius:8px;border:2px solid #4a443c;outline:none;}' +
+    '.bot-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:26px;height:26px;border-radius:50%;background:#f6f1e2;border:3px solid #4a443c;cursor:pointer;box-shadow:0 2px 0 rgba(74,68,60,0.2);margin-top:-1px;}' +
+    '.bot-slider::-moz-range-thumb{width:24px;height:24px;border-radius:50%;background:#f6f1e2;border:3px solid #4a443c;cursor:pointer;}' +
+    '.bot-slider::-moz-range-track{height:12px;border-radius:8px;background:transparent;}'
+  document.head.appendChild(style)
+}
+
 export const INK = '#4a443c' // the palette ink — warm dark gray-brown, never black
 export const PAPER = '#f6f1e2' // warm cream paper
 export const FONT_HEAD = "'Bungee', system-ui, sans-serif" // boxy signage headers
@@ -193,4 +214,5 @@ export function paperButton(
   // drop shadow OFFSET so it doesn't leak past the wobble either
   btn.style.boxShadow = 'none'
   btn.style.filter = 'drop-shadow(0 2px 0 rgba(74,68,60,0.18))'
+  btn.classList.add('paper-btn') // hover pop + click scale-down (see stylesheet)
 }

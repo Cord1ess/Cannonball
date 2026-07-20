@@ -71,6 +71,54 @@ export const KITS: readonly Kit[] = [
     home: { primary: 0x4a443c, secondary: 0xefebe0, pattern: 'stripes', shorts: 0xefebe0 },
     away: { primary: 0xefebe0, secondary: 0x4a443c, pattern: 'solid', shorts: 0x4a443c },
   },
+  {
+    id: 'teal',
+    name: 'Teal Harbour',
+    home: { primary: 0x2fb3a6, secondary: 0xefebe0, pattern: 'solid', shorts: 0x4a443c },
+    away: { primary: 0x1c5e58, secondary: 0x2fb3a6, pattern: 'hoops', shorts: 0xefebe0 },
+  },
+  {
+    id: 'scarlet',
+    name: 'Scarlet Kings',
+    home: { primary: 0xb02a3a, secondary: 0xe8c04a, pattern: 'stripes', shorts: 0x4a443c },
+    away: { primary: 0xe8c04a, secondary: 0xb02a3a, pattern: 'solid', shorts: 0xb02a3a },
+  },
+  {
+    id: 'navy',
+    name: 'Navy Mariners',
+    home: { primary: 0x2b3a67, secondary: 0xefebe0, pattern: 'stripes', shorts: 0xefebe0 },
+    away: { primary: 0xefebe0, secondary: 0x2b3a67, pattern: 'solid', shorts: 0x2b3a67 },
+  },
+  {
+    id: 'lime',
+    name: 'Lime Foresters',
+    home: { primary: 0xa4cc3c, secondary: 0x2e4d1f, pattern: 'hoops', shorts: 0x2e4d1f },
+    away: { primary: 0x2e4d1f, secondary: 0xa4cc3c, pattern: 'solid', shorts: 0xa4cc3c },
+  },
+  {
+    id: 'coral',
+    name: 'Coral Reef',
+    home: { primary: 0xf07a5a, secondary: 0x2fb3a6, pattern: 'solid', shorts: 0x2fb3a6 },
+    away: { primary: 0x2fb3a6, secondary: 0xf07a5a, pattern: 'stripes', shorts: 0xefebe0 },
+  },
+  {
+    id: 'plum',
+    name: 'Plum City',
+    home: { primary: 0x6d3b6e, secondary: 0xefb53c, pattern: 'stripes', shorts: 0x4a443c },
+    away: { primary: 0xefb53c, secondary: 0x6d3b6e, pattern: 'hoops', shorts: 0x6d3b6e },
+  },
+  {
+    id: 'sky',
+    name: 'Sky Wanderers',
+    home: { primary: 0x8fd0e8, secondary: 0x2b3a67, pattern: 'solid', shorts: 0x2b3a67 },
+    away: { primary: 0x2b3a67, secondary: 0x8fd0e8, pattern: 'hoops', shorts: 0x8fd0e8 },
+  },
+  {
+    id: 'sand',
+    name: 'Sand Bay FC',
+    home: { primary: 0xd8b878, secondary: 0x6e4a2c, pattern: 'hoops', shorts: 0x6e4a2c },
+    away: { primary: 0x6e4a2c, secondary: 0xd8b878, pattern: 'solid', shorts: 0xd8b878 },
+  },
 ]
 
 export const KIT_BY_ID: ReadonlyMap<string, Kit> = new Map(KITS.map((kit) => [kit.id, kit]))
