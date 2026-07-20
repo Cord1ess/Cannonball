@@ -3,6 +3,7 @@ import { GAME_MODES, MATCH_TIME_OPTIONS, DEFAULT_MATCH_TIME_S, gameModeInfo } fr
 import type { MatchClient, MatchPlayerInfo } from './online.ts'
 import { FONT_HAND, FONT_HEAD, INK, PAPER, inkFrameUrl, paperButton, paperPanel, paperTexture } from './paperSkin.ts'
 import { NEUTRAL_UI_KIT, type UiBeanSlot, type UiBeanStage } from '../render/uiBean.ts'
+import { requestCreateParty, requestJoinParty } from '../net/connection.ts'
 
 /**
  * MAIN MENU + LOBBY (rapid remake). Over a cinematic low-orbit view of a live
@@ -353,14 +354,55 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   const rosterBeans = new Map<number, UiBeanSlot>()
   let rosterSig = ''
   function buildRoster(): HTMLElement {
-    // compact single-row roster so all 6 seats fit inside the panel (never wraps
-    // to a 2nd row that would spill past the ink frame — idea.md §menu fit)
+    const box = document.createElement('div')
+    box.style.cssText = 'display:flex;flex-direction:column;gap:8px;'
+
+    // --- PARTY bar: server status + party code (copy) + player count ---------
+    const bar = document.createElement('div')
+    bar.style.cssText =
+      `display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;font-family:${FONT_HAND};font-size:14px;`
+    // server status dot (connected because we ARE in a room here)
+    const status = document.createElement('div')
+    status.style.cssText = 'display:flex;align-items:center;gap:6px;'
+    status.innerHTML =
+      `<span style="width:10px;height:10px;border-radius:50%;background:#58ae7c;border:1.5px solid ${INK};display:inline-block;"></span>` +
+      `<span>server online</span>`
+    // player count (live-updated in syncRoster)
+    const count = document.createElement('div')
+    count.id = 'party-count'
+    count.style.cssText = 'opacity:0.85;'
+    bar.append(status, count)
+    box.appendChild(bar)
+
+    // party CODE row + COPY button (the code IS the room id — share it)
+    const codeRow = document.createElement('div')
+    codeRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;'
+    const codeChip = document.createElement('div')
+    codeChip.style.cssText =
+      `font-family:${FONT_HEAD};font-weight:800;font-size:20px;letter-spacing:2px;padding:5px 14px;border:2px solid ${INK};border-radius:8px;background:url("${paperTexture()}");background-size:128px;color:${INK};`
+    codeChip.textContent = client.roomId
+    const copyBtn = document.createElement('button')
+    copyBtn.textContent = 'COPY'
+    copyBtn.style.cssText = 'font-size:13px;padding:6px 14px;'
+    paperButton(copyBtn, { tint: '#4fa3d8', w: 84, h: 34 })
+    copyBtn.addEventListener('click', () => {
+      void navigator.clipboard?.writeText(client.roomId).catch(() => {})
+      copyBtn.textContent = 'COPIED!'
+      setTimeout(() => (copyBtn.textContent = 'COPY'), 1200)
+    })
+    const codeLbl = document.createElement('span')
+    codeLbl.style.cssText = `font-family:${FONT_HAND};font-size:14px;opacity:0.85;`
+    codeLbl.textContent = 'party code:'
+    codeRow.append(codeLbl, codeChip, copyBtn)
+    box.appendChild(codeRow)
+
+    // --- roster: all seats, one row -----------------------------------------
     rosterEl.style.cssText = 'display:flex;flex-wrap:nowrap;gap:4px;justify-content:center;min-height:74px;'
-    const code = document.createElement('div')
-    code.style.cssText = `font-family:${FONT_HAND};font-size:14px;text-align:center;width:100%;line-height:1.1;`
-    code.textContent = `room ${client.roomId} · friends join automatically`
+    box.appendChild(rosterEl)
+
+    // --- controls: host bot buttons + party create/join ---------------------
     const host = document.createElement('div')
-    host.style.cssText = 'display:flex;gap:8px;width:100%;justify-content:center;'
+    host.style.cssText = 'display:flex;gap:8px;width:100%;justify-content:center;flex-wrap:wrap;'
     if (client.isHost()) {
       const addBot = document.createElement('button')
       addBot.textContent = '+ BOT'
@@ -374,9 +416,43 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
       fill.addEventListener('click', () => client.fillBots())
       host.append(addBot, fill)
     }
-    const box = document.createElement('div')
-    box.style.cssText = 'display:flex;flex-direction:column;gap:6px;'
-    box.append(code, rosterEl, host)
+    box.appendChild(host)
+
+    // party create / join-by-code — reloading into your OWN room makes YOU host
+    // (so you can pick mode/time), and friends join by pasting the same code.
+    const partyRow = document.createElement('div')
+    partyRow.style.cssText = 'display:flex;gap:8px;width:100%;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:2px;'
+    const createBtn = document.createElement('button')
+    createBtn.textContent = 'NEW PARTY'
+    createBtn.style.cssText = 'font-size:13px;padding:7px 14px;'
+    paperButton(createBtn, { tint: '#58ae7c', w: 120, h: 34 })
+    createBtn.addEventListener('click', () => {
+      requestCreateParty()
+      location.href = `${location.pathname}?fresh`
+    })
+    const joinInput = document.createElement('input')
+    joinInput.placeholder = 'paste code'
+    joinInput.maxLength = 24
+    joinInput.style.cssText =
+      `font-family:${FONT_HAND};font-size:15px;padding:6px 10px;border-radius:8px;border:2px solid ${INK};width:120px;text-align:center;` +
+      `background:url("${paperTexture()}");background-size:128px;color:${INK};`
+    const joinBtn = document.createElement('button')
+    joinBtn.textContent = 'JOIN'
+    joinBtn.style.cssText = 'font-size:13px;padding:7px 14px;'
+    paperButton(joinBtn, { tint: '#e98a2b', w: 84, h: 34 })
+    const doJoin = (): void => {
+      const c = joinInput.value.trim()
+      if (!c) return
+      requestJoinParty(c)
+      location.href = `${location.pathname}?fresh`
+    }
+    joinBtn.addEventListener('click', doJoin)
+    joinInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doJoin()
+    })
+    partyRow.append(createBtn, joinInput, joinBtn)
+    box.appendChild(partyRow)
+
     return box
   }
 
@@ -387,6 +463,13 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     if (sig === rosterSig) return
     rosterSig = sig
     scheduleRefit() // roster count/size changed → re-fit the panel frame
+    // live player count (humans vs bots) in the party bar
+    const countEl = document.getElementById('party-count')
+    if (countEl) {
+      const humans = players.filter((p) => !p.bot).length
+      const bots = players.length - humans
+      countEl.textContent = `${players.length}/6 players · ${humans} human${humans === 1 ? '' : 's'}${bots ? ` · ${bots} bot${bots === 1 ? '' : 's'}` : ''}`
+    }
     // drop stale slots
     const seats = new Set(players.map((p) => p.seat))
     for (const [seat, slot] of rosterBeans) {

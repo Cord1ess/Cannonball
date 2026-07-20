@@ -25,6 +25,23 @@ import { Client, type Room } from '@colyseus/sdk'
 const TOKEN_KEY = 'cannonball:reconnection'
 const SERVER_KEY = 'cannonball:server'
 const WS_CLOSE_CONSENTED = 4000
+// PARTY intent (set by the menu, honored on the next boot):
+//   'create'    -> make a fresh PRIVATE room; the creator is host + gets a code
+//   '<roomId>'  -> join THAT specific room by id (a shared party code)
+const PARTY_KEY = 'cannonball:party'
+
+/** Ask for a fresh private party on the next reload (menu → "Create Party"). */
+export function requestCreateParty(): void {
+  sessionStorage.setItem(PARTY_KEY, 'create')
+  sessionStorage.removeItem(TOKEN_KEY) // don't resume the old seat
+}
+/** Ask to join a specific party room id on the next reload (menu → "Join"). */
+export function requestJoinParty(code: string): void {
+  const c = code.trim()
+  if (!c) return
+  sessionStorage.setItem(PARTY_KEY, c)
+  sessionStorage.removeItem(TOKEN_KEY)
+}
 
 /** Normalize a user-typed address into a ws/wss URL. Accepts bare host,
  *  host:port, http(s)://, or ws(s)://. Tunnels (https) -> wss automatically. */
@@ -109,9 +126,24 @@ export async function connect(): Promise<Connection> {
 
   let room: Room | null = null
 
+  // 0) PARTY intent takes priority — a one-shot from the menu (create/join code).
+  const party = sessionStorage.getItem(PARTY_KEY)
+  sessionStorage.removeItem(PARTY_KEY) // consume it (one boot only)
+  if (party === 'create') {
+    room = await withTimeout(client.create('match', roomOptions), 6000, 'create-party')
+  } else if (party) {
+    // join a specific room by its code; fall back to a fresh room if it's gone
+    try {
+      room = await withTimeout(client.joinById(party, roomOptions), 6000, 'join-party')
+    } catch (error) {
+      console.warn(`[net] party ${party} unavailable (full/ended), creating a new one:`, error)
+      room = await withTimeout(client.create('match', roomOptions), 6000, 'create-fallback')
+    }
+  }
+
   // 1) try to resume the previous session (time-boxed)
   const stored = sessionStorage.getItem(TOKEN_KEY)
-  if (stored && !fresh) {
+  if (!room && stored && !fresh) {
     try {
       room = await withTimeout(client.reconnect(stored), 4000, 'reconnect')
       console.log('[net] reconnected to previous session')
