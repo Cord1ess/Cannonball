@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { BALL_RADIUS } from '@shared/constants.ts'
-import { addInkOutline, INK_WEIGHT, makeInkMaterial, toonRamp } from './materials.ts'
+import { addInkOutline, INK_WEIGHT, toonRamp } from './materials.ts'
 import { ballTexture } from './textures.ts'
 
 /**
@@ -77,14 +77,10 @@ export function createBallView(): BallView {
           color: 0xfbf7ee,
         })
         if (src) src.dispose() // drop the PBR material + its normal map
-        // TOON OUTLINE the CHEAP way: an inverted-hull child that REUSES the
-        // mesh's OWN geometry (already has normals). No makeHullGeometry /
-        // mergeVertices — that O(n²) pass is what froze the game. The ink shader
-        // pushes verts out along their normal, so a shared-geometry BackSide hull
-        // is a clean sketch outline for free, riding the mesh's exact transform.
-        const hull = new THREE.Mesh(m.geometry, makeInkMaterial(INK_WEIGHT.character))
-        hull.castShadow = false
-        m.add(hull)
+        // NO ink outline on the GLB: this model's 32k vertices are ALL unique
+        // (mergeVertices merges nothing → 347ms of wasted work AND split normals
+        // that tear an inverted-hull into spikes). A sphere silhouette reads fine
+        // without a rim; the outline isn't worth the model's geometry problems.
       }
       spinner.remove(placeholder)
       placeholder.geometry.dispose()
