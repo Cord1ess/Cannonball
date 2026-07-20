@@ -16,18 +16,26 @@
 // self-hosted webfonts (bundled by vite, no CDN) — §9. Latin subset only:
 // the game text is English, so we skip the Devanagari/other-script weights.
 // Abeto-style pairing (messenger.abeto.co): a BOLD BOXY signage face for titles
-// + headers (Bungee) and a THIN crayon/pen handwriting for labels + notes
-// (Caveat). Replaces the earlier Baloo/Patrick-Hand which read too comic-sans.
+// + headers (Bungee), and CRAYONARA — the actual thin crayon font from the
+// reference — for labels + notes. Bungee is bundled via Fontsource; Crayonara is
+// a self-hosted TTF (client/public/fonts/) registered by @font-face below.
 import '@fontsource/bungee/latin-400.css'
-import '@fontsource/caveat/latin-500.css'
-import '@fontsource/caveat/latin-700.css'
 
 import { PALETTE } from '../render/palette.ts'
+
+// register the crayon font once (idempotent — guarded so HMR doesn't dup it)
+if (typeof document !== 'undefined' && !document.getElementById('crayonara-face')) {
+  const style = document.createElement('style')
+  style.id = 'crayonara-face'
+  style.textContent =
+    "@font-face{font-family:'Crayonara';src:url('/fonts/Crayonara-Regular.ttf') format('truetype');font-weight:400;font-display:swap;}"
+  document.head.appendChild(style)
+}
 
 export const INK = '#4a443c' // the palette ink — warm dark gray-brown, never black
 export const PAPER = '#f6f1e2' // warm cream paper
 export const FONT_HEAD = "'Bungee', system-ui, sans-serif" // boxy signage headers
-export const FONT_HAND = "'Caveat', 'Bungee', cursive" // thin crayon handwriting
+export const FONT_HAND = "'Crayonara', 'Bungee', cursive" // thin crayon handwriting
 
 function hex(n: number): string {
   return `#${n.toString(16).padStart(6, '0')}`

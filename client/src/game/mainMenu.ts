@@ -62,7 +62,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     `text-shadow:2px 2px 0 ${INK}, 4px 4px 0 ${INK}, 6px 6px 0 ${INK}, 5px 5px 0 ${INK};`
   title.innerHTML = 'CANNON<br>BALL'
   const tag = document.createElement('div')
-  // Caveat is a thin script → it reads small for its size, so bump it up
+  // Crayonara is a thin crayon script → reads small for its size, so bump it up
   tag.style.cssText =
     `font-family:${FONT_HAND};font-weight:500;font-size:clamp(22px,2.4vw,34px);margin-top:16px;` +
     `color:#fdfaf0;text-shadow:2px 2px 0 ${INK};line-height:1.05;`
