@@ -1243,7 +1243,15 @@ export function createOnlineGame(
         // Launch, so it never opens pointing back at the cannon.
         if (faceFieldFrames > 0) {
           faceFieldFrames--
-          camera.yaw = yawTowardCenter(selfX, selfZ)
+          // camera BEHIND the player looking at the field: forward must point
+          // FROM the player's rim spot TOWARD the arena centre. forward=(sin,cos)
+          // pointing to (-x,-z) → yaw=atan2(-x,-z). Guard the near-centre case.
+          const r = Math.hypot(selfX, selfZ)
+          // forward pointing OUTWARD (from centre toward the player) puts the
+          // camera on the field side looking at the player+crowd — the observed
+          // bug. We want the opposite: forward toward centre. Empirically the
+          // camera sits behind when yaw points from centre→player, i.e. atan2(x,z).
+          if (r > 0.5) camera.yaw = Math.atan2(selfX, selfZ)
         }
         camera.update(dt, selfX, selfY, selfZ)
       }

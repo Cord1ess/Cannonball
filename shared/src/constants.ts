@@ -41,7 +41,7 @@ export const ZONE_DWELL_GRACE_S = 0.6 // ball must sit in a zone this long befor
 export const TICK_LOCKIN_S = 1.0 // meters freeze this long before the tick resolves
 
 // --- match flow pauses -------------------------------------------------------
-export const DRAFT_SECONDS = 25
+export const DRAFT_SECONDS = 15
 export const HANDOUT_SECONDS = 8
 export const RESTART_PAUSE_S = 10
 export const LAUNCH_COUNTDOWN_S = 3
@@ -58,7 +58,7 @@ export const PLAYER_RADIUS = 0.45
 export const PLAYER_HEIGHT = 1.4
 
 // --- stamina -------------------------------------------------------------------
-export const STAMINA_MAX = 100
+export const STAMINA_MAX = 140 // +40% headroom for more sprinting/diving
 export const SPRINT_DRAIN = 22 // per second while sprinting
 export const STAMINA_REGEN = 16 // per second while not sprinting
 export const DIVE_COST = 30 // stamina consumed per dive
