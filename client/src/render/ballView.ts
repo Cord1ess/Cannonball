@@ -60,8 +60,10 @@ export function createBallView(): BallView {
           // any high metalness so it reads under our toon/flat light rig
           const mat = m.material as THREE.MeshStandardMaterial
           if (mat && 'metalness' in mat) mat.metalness = Math.min(mat.metalness ?? 0, 0.1)
-          // ink outline per sub-mesh (addInkOutline needs a real geometry)
-          addInkOutline(m, INK_WEIGHT.character)
+          // NOTE: do NOT run addInkOutline on the GLB — makeHullGeometry() calls
+          // mergeVertices(), which is O(n²)-ish and FROZE the main thread on this
+          // dense model (the "loads 1 frame then stuck" bug). The model has its
+          // own detailed look; the sketch outline isn't worth freezing the game.
         }
       })
       spinner.remove(placeholder)

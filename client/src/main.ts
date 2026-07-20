@@ -344,10 +344,6 @@ function frame(nowMs: number): void {
     chase.updateMenuOrbit(time.unscaledDelta)
     mainMenu.update(time.unscaledDelta)
     uiBeans.update(time.unscaledDelta)
-    // loop the sky day→night→day so the menu is alive (noticeable, not timelapse):
-    // a full cycle in ~34s. A raised cosine gives smooth dwell at day AND night.
-    // loop the sky day→night→day so the menu is alive (noticeable, not timelapse):
-    // a raised cosine gives a full cycle in ~34s with a smooth dwell at both ends.
     menuClock += time.unscaledDelta
     const frac = 0.5 - 0.5 * Math.cos((menuClock / 17) * Math.PI)
     if ('setMenuDayNight' in game) game.setMenuDayNight(frac)
@@ -430,6 +426,17 @@ function frame(nowMs: number): void {
   }
 
   grain.render(renderer)
+}
+
+// PRE-WARM the shaders before the first animated frame. three.js compiles a
+// material's program the first time it's rendered; with our custom shader
+// materials (grass/crowd) + 4 spotlights + shadows that first compile is a big
+// synchronous stall (seen as a ~340ms "GPU stall / ReadPixels" hitch on some
+// drivers that froze the opening frames). compile() does it up front instead.
+try {
+  renderer.compile(scene, camera3)
+} catch {
+  /* compile is best-effort — never block startup on it */
 }
 
 requestAnimationFrame(frame)
