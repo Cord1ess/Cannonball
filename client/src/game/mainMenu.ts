@@ -74,11 +74,11 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   // --- RIGHT: action column (home buttons OR a sliding panel) --------------------
   // wider column so the online lobby has room to breathe (server status, party
   // code, roster, ping) and mode/time button labels never overflow their buttons.
-  const PANEL_W = 500
+  const PANEL_W = 640
   const right = document.createElement('div')
   right.style.cssText =
-    'align-self:center;margin:0 4vw 0 0;width:min(500px,46vw);pointer-events:auto;' +
-    'display:flex;flex-direction:column;gap:14px;'
+    'align-self:center;margin:0 3vw 0 0;width:min(640px,54vw);pointer-events:auto;' +
+    'display:flex;flex-direction:column;gap:10px;'
   root.appendChild(right)
 
   const bigBtn = (label: string, tint: string): HTMLButtonElement => {
@@ -93,7 +93,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
 
   // the panel container that solo/online slide into
   const panel = document.createElement('div')
-  panel.style.cssText = 'display:flex;flex-direction:column;gap:11px;padding:18px 24px;'
+  panel.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:14px 26px;'
   paperPanel(panel, { w: PANEL_W, h: 420, weight: 3.2 })
 
   // The wobbly ink frame is a baked SVG stretched to the panel via
@@ -125,18 +125,18 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     // WHITE header (with a solid ink drop shadow like the title) — dark ink on
     // the cream panel read as near-black and barely legible.
     h.style.cssText =
-      `font-size:24px;font-weight:800;text-align:center;margin-bottom:2px;color:#fdfaf0;text-shadow:2px 2px 0 ${INK};`
+      `font-size:22px;font-weight:800;text-align:center;margin-bottom:0;color:#fdfaf0;text-shadow:2px 2px 0 ${INK};line-height:1;`
     h.textContent = online ? 'ONLINE LOBBY' : 'SOLO MATCH'
     panel.appendChild(h)
 
     // --- your jersey: a LIVELY 3D bean in a framed SQUARE box + kit cycler ----
     const kitRow = document.createElement('div')
-    kitRow.style.cssText = 'display:flex;align-items:center;gap:10px;justify-content:center;margin:4px 0;'
+    kitRow.style.cssText = 'display:flex;align-items:center;gap:10px;justify-content:center;margin:0;'
     // a clean framed square the 3D model renders INTO — its own paper card so the
     // model always has a defined box (no half-models bleeding across the panel).
     const beanCard = document.createElement('div')
-    beanCard.style.cssText = 'width:112px;height:112px;flex-shrink:0;border-radius:12px;overflow:hidden;'
-    paperPanel(beanCard, { w: 112, h: 112, weight: 2.6 })
+    beanCard.style.cssText = 'width:92px;height:92px;flex-shrink:0;border-radius:12px;overflow:hidden;'
+    paperPanel(beanCard, { w: 92, h: 92, weight: 2.6 })
     const arrowL = document.createElement('button')
     arrowL.textContent = '‹'
     arrowL.style.cssText = 'font-size:22px;padding:6px 12px;'
@@ -180,7 +180,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     nameInput.placeholder = 'your name'
     nameInput.value = client.myName()
     nameInput.style.cssText =
-      `font-family:${FONT_HAND};font-size:17px;padding:6px 12px;border-radius:8px;border:2px solid ${INK};` +
+      `font-family:${FONT_HAND};font-size:16px;padding:5px 12px;border-radius:8px;border:2px solid ${INK};` +
       `background:url("${paperTexture()}");background-size:128px 128px;color:${INK};text-align:center;`
     const commit = (): void => {
       const v = nameInput.value.trim()
@@ -232,7 +232,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   // local (sent on kick-off). Non-host online players see it read-only.
   function buildModeTimePicker(online: boolean): HTMLElement {
     const wrap = document.createElement('div')
-    wrap.style.cssText = 'display:flex;flex-direction:column;gap:8px;'
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:4px;'
     const canEdit = !online || client.isHost()
     // seed from the room state when online (so non-hosts see the host's choice)
     if (online) {
@@ -242,13 +242,13 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
 
     // MODE cards
     const modeLbl = document.createElement('div')
-    modeLbl.style.cssText = `font-family:${FONT_HAND};font-size:15px;text-align:center;opacity:0.8;`
+    modeLbl.style.cssText = `font-family:${FONT_HAND};font-size:14px;text-align:center;opacity:0.8;line-height:1;`
     modeLbl.textContent = 'game mode'
     wrap.appendChild(modeLbl)
     const modeRow = document.createElement('div')
     modeRow.style.cssText = 'display:flex;gap:6px;'
     const ruleLine = document.createElement('div')
-    ruleLine.style.cssText = `font-family:${FONT_HAND};font-size:13px;text-align:center;min-height:30px;line-height:1.05;color:#6b655c;`
+    ruleLine.style.cssText = `font-family:${FONT_HAND};font-size:12px;text-align:center;min-height:16px;line-height:1.05;color:#6b655c;`
     const renderModes = (): void => {
       if (online) modeSel = client.mode()
       modeRow.replaceChildren()
@@ -256,11 +256,11 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
         const b = document.createElement('button')
         const on = m.id === modeSel
         b.textContent = m.name
-        // wrap multi-word labels ("FINAL WHISTLE"/"GOLDEN BOOT") to a 2nd line so
-        // they never spill past the button edge; taller button holds two lines.
+        // wide panel gives each of the 3 buttons ~185px — labels fit on one line;
+        // keep wrap enabled as a safety net on very narrow viewports.
         b.style.cssText =
-          'flex:1;font-size:11px;padding:9px 6px;line-height:1.08;white-space:normal;overflow-wrap:break-word;min-width:0;'
-        paperButton(b, { tint: on ? '#4fa3d8' : undefined, w: 150, h: 52, big: on })
+          'flex:1;font-size:12px;padding:8px 6px;line-height:1.05;white-space:normal;overflow-wrap:break-word;min-width:0;'
+        paperButton(b, { tint: on ? '#4fa3d8' : undefined, w: 185, h: 40, big: on })
         if (canEdit) {
           b.addEventListener('click', () => {
             modeSel = m.id
@@ -292,8 +292,8 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
         const on = t.totalSeconds === timeSel
         b.textContent = t.label
         b.style.cssText =
-          'flex:1;font-size:11px;padding:8px 6px;white-space:normal;overflow-wrap:break-word;line-height:1.08;min-width:0;'
-        paperButton(b, { tint: on ? '#e98a2b' : undefined, w: 150, h: 44, big: on })
+          'flex:1;font-size:12px;padding:8px 6px;white-space:normal;overflow-wrap:break-word;line-height:1.05;min-width:0;'
+        paperButton(b, { tint: on ? '#e98a2b' : undefined, w: 185, h: 38, big: on })
         if (canEdit) {
           b.addEventListener('click', () => {
             timeSel = t.totalSeconds
@@ -355,7 +355,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   let rosterSig = ''
   function buildRoster(): HTMLElement {
     const box = document.createElement('div')
-    box.style.cssText = 'display:flex;flex-direction:column;gap:8px;'
+    box.style.cssText = 'display:flex;flex-direction:column;gap:6px;'
 
     // --- PARTY bar: server status + party code (copy) + player count ---------
     const bar = document.createElement('div')
@@ -397,7 +397,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     box.appendChild(codeRow)
 
     // --- roster: all seats, one row -----------------------------------------
-    rosterEl.style.cssText = 'display:flex;flex-wrap:nowrap;gap:4px;justify-content:center;min-height:74px;'
+    rosterEl.style.cssText = 'display:flex;flex-wrap:nowrap;gap:6px;justify-content:center;min-height:62px;'
     box.appendChild(rosterEl)
 
     // --- controls: host bot buttons + party create/join ---------------------
@@ -482,9 +482,9 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     for (const p of players) {
       // narrow cards so all 6 fit one row inside the panel; name clipped to width
       const card = document.createElement('div')
-      card.style.cssText = 'width:56px;height:74px;position:relative;flex-shrink:0;'
+      card.style.cssText = 'width:64px;height:62px;position:relative;flex-shrink:0;'
       const beanBox = document.createElement('div')
-      beanBox.style.cssText = 'width:56px;height:58px;'
+      beanBox.style.cssText = 'width:64px;height:48px;'
       const tag = document.createElement('div')
       tag.style.cssText =
         `font-family:${FONT_HAND};font-size:11px;text-align:center;color:${INK};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`
