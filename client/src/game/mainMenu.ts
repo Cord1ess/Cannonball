@@ -1,7 +1,7 @@
 import { KITS, KIT_BY_ID, kitColors } from '@shared/cosmetics/jerseys.ts'
 import { GAME_MODES, MATCH_TIME_OPTIONS, DEFAULT_MATCH_TIME_S, gameModeInfo } from '@shared/match/modes.ts'
 import type { MatchClient, MatchPlayerInfo } from './online.ts'
-import { FONT_HAND, FONT_HEAD, INK, paperButton, paperPanel, paperTexture } from './paperSkin.ts'
+import { FONT_HAND, FONT_HEAD, INK, PAPER, inkFrameUrl, paperButton, paperPanel, paperTexture } from './paperSkin.ts'
 import { NEUTRAL_UI_KIT, type UiBeanSlot, type UiBeanStage } from '../render/uiBean.ts'
 
 /**
@@ -16,7 +16,7 @@ import { NEUTRAL_UI_KIT, type UiBeanSlot, type UiBeanStage } from '../render/uiB
  * menu hides itself and the real HUD takes over.
  */
 
-const TAGLINE = 'Six beans, one giant ball — survive the kickoff or get bounced.'
+const TAGLINE = 'Six players, one ball. Survive the kickoff or get bounced.'
 
 export interface MainMenu {
   /** true while the menu is showing (lobby/pre-match) — hides HUD, orbits cam */
@@ -89,8 +89,25 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
 
   // the panel container that solo/online slide into
   const panel = document.createElement('div')
-  panel.style.cssText = 'display:flex;flex-direction:column;gap:12px;padding:20px 22px;'
+  panel.style.cssText = 'display:flex;flex-direction:column;gap:11px;padding:18px 22px;'
   paperPanel(panel, { w: 400, h: 420, weight: 3.2 })
+
+  // The wobbly ink frame is a baked SVG stretched to the panel via
+  // background-size:100% 100%. Content height is dynamic (solo vs online, host
+  // vs not, roster fill), so RE-BAKE the frame at the panel's REAL rendered size
+  // whenever it changes — otherwise the bottom of the content (roster, +BOT,
+  // action buttons) spills PAST the frame edge (idea.md §menu fit). Runs on the
+  // next frame so layout has settled; re-run after the async roster fills in.
+  const PANEL_W = 400
+  const refitPanel = (): void => {
+    const h = Math.round(panel.getBoundingClientRect().height)
+    if (h < 40) return
+    // rebuild only the frame layer (first bg image); keep the paper texture layer
+    panel.style.backgroundImage = `${inkFrameUrl(PANEL_W, h, INK, 3.2, PAPER)}, url("${paperTexture()}")`
+  }
+  const scheduleRefit = (): void => {
+    requestAnimationFrame(() => requestAnimationFrame(refitPanel))
+  }
 
   function showHome(): void {
     view = 'home'
@@ -102,15 +119,21 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   function buildSettings(online: boolean): HTMLElement {
     panel.replaceChildren()
     const h = document.createElement('div')
-    h.style.cssText = 'font-size:24px;font-weight:800;text-align:center;margin-bottom:2px;'
+    // WHITE header (with a solid ink drop shadow like the title) — dark ink on
+    // the cream panel read as near-black and barely legible.
+    h.style.cssText =
+      `font-size:24px;font-weight:800;text-align:center;margin-bottom:2px;color:#fdfaf0;text-shadow:2px 2px 0 ${INK};`
     h.textContent = online ? 'ONLINE LOBBY' : 'SOLO MATCH'
     panel.appendChild(h)
 
-    // --- your jersey: a LIVELY 3D bean + kit cycler --------------------------
+    // --- your jersey: a LIVELY 3D bean in a framed SQUARE box + kit cycler ----
     const kitRow = document.createElement('div')
-    kitRow.style.cssText = 'display:flex;align-items:center;gap:12px;justify-content:center;margin:4px 0;'
+    kitRow.style.cssText = 'display:flex;align-items:center;gap:10px;justify-content:center;margin:4px 0;'
+    // a clean framed square the 3D model renders INTO — its own paper card so the
+    // model always has a defined box (no half-models bleeding across the panel).
     const beanCard = document.createElement('div')
-    beanCard.style.cssText = 'width:96px;height:120px;flex-shrink:0;'
+    beanCard.style.cssText = 'width:112px;height:112px;flex-shrink:0;border-radius:12px;overflow:hidden;'
+    paperPanel(beanCard, { w: 112, h: 112, weight: 2.6 })
     const arrowL = document.createElement('button')
     arrowL.textContent = '‹'
     arrowL.style.cssText = 'font-size:22px;padding:6px 12px;'
@@ -194,6 +217,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     actions.append(back, go)
     panel.appendChild(actions)
 
+    scheduleRefit() // fit the ink frame to the built content height
     return panel
   }
 
@@ -318,29 +342,29 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   const rosterBeans = new Map<number, UiBeanSlot>()
   let rosterSig = ''
   function buildRoster(): HTMLElement {
-    rosterEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;justify-content:center;min-height:110px;'
+    // compact single-row roster so all 6 seats fit inside the panel (never wraps
+    // to a 2nd row that would spill past the ink frame — idea.md §menu fit)
+    rosterEl.style.cssText = 'display:flex;flex-wrap:nowrap;gap:4px;justify-content:center;min-height:74px;'
     const code = document.createElement('div')
-    code.style.cssText = `font-family:${FONT_HAND};font-size:16px;text-align:center;width:100%;`
+    code.style.cssText = `font-family:${FONT_HAND};font-size:14px;text-align:center;width:100%;line-height:1.1;`
     code.textContent = `room ${client.roomId} · friends join automatically`
     const host = document.createElement('div')
-    host.style.cssText = 'display:flex;flex-direction:column;gap:8px;width:100%;'
+    host.style.cssText = 'display:flex;gap:8px;width:100%;justify-content:center;'
     if (client.isHost()) {
-      const r = document.createElement('div')
-      r.style.cssText = 'display:flex;gap:8px;justify-content:center;'
       const addBot = document.createElement('button')
       addBot.textContent = '+ BOT'
       addBot.style.cssText = 'font-size:13px;padding:6px 14px;'
-      paperButton(addBot, { tint: '#4fa3d8', w: 84, h: 32 })
+      paperButton(addBot, { tint: '#4fa3d8', w: 84, h: 30 })
       addBot.addEventListener('click', () => client.addBot())
       const fill = document.createElement('button')
       fill.textContent = 'FILL'
       fill.style.cssText = 'font-size:13px;padding:6px 14px;'
-      paperButton(fill, { tint: '#9678c8', w: 84, h: 32 })
+      paperButton(fill, { tint: '#9678c8', w: 84, h: 30 })
       fill.addEventListener('click', () => client.fillBots())
-      r.append(addBot, fill)
-      host.appendChild(r)
+      host.append(addBot, fill)
     }
     const box = document.createElement('div')
+    box.style.cssText = 'display:flex;flex-direction:column;gap:6px;'
     box.append(code, rosterEl, host)
     return box
   }
@@ -351,6 +375,7 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     const sig = players.map((p) => `${p.seat}${p.kitId}${p.kitAway ? 'a' : ''}${p.name}`).join(',')
     if (sig === rosterSig) return
     rosterSig = sig
+    scheduleRefit() // roster count/size changed → re-fit the panel frame
     // drop stale slots
     const seats = new Set(players.map((p) => p.seat))
     for (const [seat, slot] of rosterBeans) {
@@ -361,13 +386,14 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
     }
     rosterEl.replaceChildren()
     for (const p of players) {
+      // narrow cards so all 6 fit one row inside the panel; name clipped to width
       const card = document.createElement('div')
-      card.style.cssText = 'width:66px;height:92px;position:relative;'
+      card.style.cssText = 'width:56px;height:74px;position:relative;flex-shrink:0;'
       const beanBox = document.createElement('div')
-      beanBox.style.cssText = 'width:66px;height:70px;'
+      beanBox.style.cssText = 'width:56px;height:58px;'
       const tag = document.createElement('div')
       tag.style.cssText =
-        `font-family:${FONT_HAND};font-size:12px;text-align:center;color:${INK};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`
+        `font-family:${FONT_HAND};font-size:11px;text-align:center;color:${INK};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`
       tag.textContent = `${p.bot ? '🤖 ' : ''}${p.name}`
       card.append(beanBox, tag)
       rosterEl.appendChild(card)

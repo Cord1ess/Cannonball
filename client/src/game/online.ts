@@ -1176,10 +1176,12 @@ export function createOnlineGame(
         }
       }
 
-      // OWN-ZONE ALARM: ball sitting in MY wedge -> blink that wedge + prompt
+      // OWN-ZONE ALARM: ball sitting in MY wedge -> blink that wedge + prompt.
+      // NEVER while the match is a menu backdrop — the red glow on the local
+      // seat's wedge reads as odd on the clean menu view (idea.md §menu).
       const ballZone = footprintZone(arena, ball.x, ball.z)
       const myZoneUnderBall =
-        ballZone >= 0 && zoneSeatArr?.[ballZone] === mySeat && aliveOf(mySeat) && isPlayPhase(state.phase ?? 0)
+        !menuMode && ballZone >= 0 && zoneSeatArr?.[ballZone] === mySeat && aliveOf(mySeat) && isPlayPhase(state.phase ?? 0)
       alarmPulse = myZoneUnderBall
         ? 0.5 + 0.5 * Math.sin((performance.now() / 1000) * 9) // fast blink
         : 0

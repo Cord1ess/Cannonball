@@ -8,15 +8,20 @@ import type { KitColors } from '@shared/cosmetics/jerseys.ts'
  * character slot in the UI (jersey picker, joined players, bots) is a REAL 3D
  * bean — the same `createBean()` used in-world — blinking, idling, emoting.
  *
- * One shared mini-scene holds a pool of beans, each pinned to a DOM anchor
- * element. Every frame we render each active bean into a small scissor viewport
- * positioned over its anchor (the PIP-selfie technique), so the beans float in
- * their UI cards with true 3D shading + the built-in blink/fidget animation.
- * One renderer, N cheap viewport passes — no per-slot WebGL context.
+ * RENDERING: each slot owns its OWN <canvas> element inserted into its DOM box
+ * (so it sits ON TOP of the opaque paper panel — z-order correct). One shared
+ * offscreen WebGLRenderer draws the bean into a small buffer, then we blit that
+ * buffer into every slot's 2D canvas each frame. This replaces the old
+ * scissor-viewport-into-the-main-canvas trick, which rendered BEHIND the opaque
+ * menu panel and only ever peeked out where a bean spilled past the panel edge
+ * (the "half a model on top, half on the bottom" + "no model at all" bugs).
+ * One offscreen GL context, N cheap canvas blits — no per-slot WebGL context.
  */
 
+const BUF = 256 // offscreen render buffer size (square, DPR-independent)
+
 export interface UiBeanSlot {
-  /** the DOM element this bean renders on top of (the manager reads its rect);
+  /** the DOM element this bean renders inside (its own <canvas> is appended);
    *  writable so a slot can be re-anchored to a fresh card on a roster rebuild */
   anchor: HTMLElement
   setKit(kit: KitColors): void
@@ -32,14 +37,16 @@ export interface UiBeanStage {
   slot(anchor: HTMLElement, kit: KitColors): UiBeanSlot
   /** advance all bean animations */
   update(dt: number): void
-  /** render every active slot into its anchor's viewport (call after main render) */
-  render(renderer: THREE.WebGLRenderer): void
+  /** render every active slot into its own canvas (call after the main render) */
+  render(mainRenderer: THREE.WebGLRenderer): void
   dispose(): void
 }
 
 interface Entry {
   bean: Bean
   anchor: HTMLElement
+  canvas: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D | null
   kit: KitColors
   active: boolean
   spin: number // slow idle turn so they show off the jersey
@@ -56,7 +63,32 @@ export function createUiBeanStage(): UiBeanStage {
   scene.add(key)
   scene.add(new THREE.HemisphereLight(0xdcefe8, 0xcbbfa6, 0.85))
 
+  // one shared OFFSCREEN renderer — transparent bg so beans blit cleanly onto
+  // the paper card behind them. Kept small (square) and DPR 1: it's a source
+  // buffer we scale into each slot canvas, so device pixels don't matter here.
+  const gl = new THREE.WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: false })
+  gl.setPixelRatio(1)
+  gl.setSize(BUF, BUF, false)
+  gl.setClearColor(0x000000, 0)
+
   const entries: Entry[] = []
+
+  function hostCanvas(anchor: HTMLElement, canvas: HTMLCanvasElement): void {
+    // the anchor box defines the visible size + framing; the canvas fills it and
+    // is clipped to it. Force the box to be a positioning context + clip so the
+    // absolutely-positioned canvas can NEVER escape it (a detached element can
+    // report position:'' not 'static', so set it unconditionally — otherwise the
+    // canvas anchors to the viewport and renders full-screen).
+    anchor.style.position = 'relative'
+    anchor.style.overflow = 'hidden'
+    canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:block;pointer-events:none;'
+    anchor.appendChild(canvas)
+  }
+  function makeCanvas(anchor: HTMLElement): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D | null } {
+    const canvas = document.createElement('canvas')
+    hostCanvas(anchor, canvas)
+    return { canvas, ctx: canvas.getContext('2d') }
+  }
 
   function rebuildBean(e: Entry): void {
     scene.remove(e.bean.group)
@@ -69,9 +101,12 @@ export function createUiBeanStage(): UiBeanStage {
     slot(anchor, kit): UiBeanSlot {
       const bean = createBean(kit)
       scene.add(bean.group)
+      const { canvas, ctx } = makeCanvas(anchor)
       const entry: Entry = {
         bean,
         anchor,
+        canvas,
+        ctx,
         kit,
         active: true,
         spin: Math.random() * Math.PI * 2,
@@ -84,7 +119,9 @@ export function createUiBeanStage(): UiBeanStage {
           return entry.anchor
         },
         set anchor(el: HTMLElement) {
+          // re-home the slot's own canvas into the new card element
           entry.anchor = el
+          hostCanvas(el, entry.canvas)
         },
         setKit(k) {
           entry.kit = k
@@ -96,12 +133,14 @@ export function createUiBeanStage(): UiBeanStage {
         setActive(on) {
           entry.active = on
           entry.bean.group.visible = on
+          entry.canvas.style.display = on ? 'block' : 'none'
         },
         dispose() {
           const i = entries.indexOf(entry)
           if (i >= 0) entries.splice(i, 1)
           scene.remove(entry.bean.group)
           entry.bean.dispose()
+          entry.canvas.remove()
         },
       }
     },
@@ -136,50 +175,41 @@ export function createUiBeanStage(): UiBeanStage {
       }
     },
 
-    render(renderer) {
-      const canvas = renderer.domElement
-      const cssH = canvas.clientHeight
-      // the GL drawing buffer is in DEVICE pixels; getBoundingClientRect is in
-      // CSS pixels — scale by the renderer's pixel ratio or the viewports land
-      // in the wrong place on hi-dpi / devicePixelRatio != 1.
-      // NOTE: three.js setViewport/setScissor multiply by the renderer's pixel
-      // ratio INTERNALLY, so pass CSS pixels here — NOT device pixels (doing the
-      // ×dpr ourselves double-applied it and threw the bean off its card).
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    render(_mainRenderer) {
+      // frame the WHOLE bean (~1.7 tall, centred ~y=0.95) squarely in the buffer
+      cam.aspect = 1
+      cam.position.set(0, 1.0, 3.0)
+      cam.lookAt(0, 0.95, 0)
+      cam.updateProjectionMatrix()
       for (const e of entries) {
-        if (!e.active || !e.anchor.isConnected) continue
+        if (!e.active || !e.ctx || !e.anchor.isConnected) continue
+        // skip totally off-screen cards (menu can scroll) — cheap guard
         const r = e.anchor.getBoundingClientRect()
-        if (r.width < 4 || r.height < 4 || r.bottom < 0 || r.top > cssH) continue
-        // gl viewport origin is bottom-left; DOM is top-left → flip Y
-        const px = Math.round(r.left)
-        const py = Math.round(cssH - r.bottom)
-        const w = Math.round(r.width)
-        const h = Math.round(r.height)
-        // set viewport + scissor + enable the test PER PASS, right before the
-        // render (three.js's render() manages viewport/scissor state, so setting
-        // it once outside the loop gets clobbered — mirror the PIP-cam pattern).
-        cam.aspect = w / h
-        cam.position.set(0, 1.2, 2.4) // close in so the bean FILLS the card
-        cam.lookAt(0, 1.0, 0)
-        cam.updateProjectionMatrix()
-        // isolate: only this entry's bean is visible during its pass
-        for (const other of entries) other.bean.group.visible = other === e && e.active
-        renderer.setViewport(px, py, w, h)
-        renderer.setScissor(px, py, w, h)
-        renderer.setScissorTest(true)
-        renderer.render(scene, cam)
-        renderer.setScissorTest(false)
+        if (r.width < 2 || r.height < 2) continue
+        // isolate: only this bean is visible during its pass
+        for (const other of entries) other.bean.group.visible = other === e
+        gl.render(scene, cam)
+        // blit the offscreen buffer into this slot's own canvas (clear first so
+        // the transparent bg shows the paper card through it)
+        if (e.canvas.width !== BUF) {
+          e.canvas.width = BUF
+          e.canvas.height = BUF
+        }
+        e.ctx.clearRect(0, 0, BUF, BUF)
+        e.ctx.drawImage(gl.domElement, 0, 0, BUF, BUF)
       }
       for (const e of entries) e.bean.group.visible = e.active
-      // restore full viewport for the next main render (CSS px — see note above)
-      renderer.setViewport(0, 0, canvas.clientWidth, canvas.clientHeight)
     },
 
     dispose() {
       for (const e of entries.slice()) {
         scene.remove(e.bean.group)
         e.bean.dispose()
+        e.canvas.remove()
       }
       entries.length = 0
+      gl.dispose()
     },
   }
 }
