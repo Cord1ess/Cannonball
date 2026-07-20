@@ -1,0 +1,8 @@
+CANNONBALL — audio credits
+==========================
+CC0 sounds need no credit. For any CC-BY sound, add a line:
+
+  <slot>  |  "<sound title>" by <author>  |  <source URL>  |  <license>
+
+Example:
+  cannon  |  "Cannon Fire" by someuser  |  https://freesound.org/s/123456/  |  CC-BY 4.0

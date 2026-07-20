@@ -90,7 +90,7 @@ interface RemoteEntity {
 }
 
 export interface MatchEvent {
-  type: 'elim' | 'overtime' | 'volley' | 'emote' | 'save' | 'ability' | 'header' | 'knock' | 'goal'
+  type: 'elim' | 'overtime' | 'volley' | 'emote' | 'save' | 'ability' | 'header' | 'knock' | 'goal' | 'bounce'
   seat?: number
   seats?: number[]
   id?: number
@@ -210,6 +210,8 @@ export interface OnlineGame {
   /** MAIN MENU ONLY: drive the world's day↔night frac (0 day..1 night) for the
    *  looping menu cycle — bypasses the match-progress arc. */
   setMenuDayNight(frac: number): void
+  /** one-shot when the floodlights switch on at nightfall (for the audio "bang") */
+  onNightfall(cb: () => void): void
   readonly match: MatchClient
   readonly debug: DebugHooks
 }
@@ -663,6 +665,9 @@ export function createOnlineGame(
     emitEvent({ type: 'ability', seat, abilityId: id }),
   )
   conn.room.onMessage('save', ({ seat }: { seat: number }) => emitEvent({ type: 'save', seat }))
+  conn.room.onMessage('bounce', ({ x, y, z, speed }: { x: number; y: number; z: number; speed: number }) => {
+    emitEvent({ type: 'bounce', x, y, z, force: Math.max(0.15, Math.min(1, speed / 18)) })
+  })
   conn.room.onMessage('goal', ({ shooter, goalZone }: { shooter: number; goalZone: number }) => {
     // GOLDEN BOOT: spawn the burst at the scored net's mouth
     const seatArr = state.zoneSeat
@@ -845,6 +850,10 @@ export function createOnlineGame(
 
     setMenuMode(on: boolean): void {
       menuMode = on
+    },
+
+    onNightfall(cb: () => void): void {
+      arenaView.onNightfall(cb)
     },
 
     setMenuDayNight(frac: number): void {

@@ -17,6 +17,7 @@ import { createClouds } from './render/clouds.ts'
 import { createParticles } from './render/particles.ts'
 import { createUiBeanStage } from './render/uiBean.ts'
 import { createMainMenu, type MainMenu } from './game/mainMenu.ts'
+import { createGameAudio } from './game/audio.ts'
 import type { WorldLighting } from './render/arenaView.ts'
 
 /**
@@ -107,6 +108,23 @@ scene.add(clouds.group)
 // M6 VFX: pooled particle bursts (headers, knocks, elims, launches)
 const particles = createParticles()
 scene.add(particles.group)
+// M6 AUDIO: real recorded SFX + a lo-fi music bed, over the vendored WebAudio
+// backend. Loads whatever files exist in client/public/audio/ (missing = silent),
+// unlocks on the first user gesture, mutes when the tab is hidden.
+const audio = createGameAudio()
+void audio.load().then(() => {
+  // ambient beds loop from the start (menu + match); they no-op until unlocked
+  audio.startMusic()
+  audio.startCrowd()
+})
+// M key toggles mute (any time)
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyM' && !e.repeat) audio.toggleMute()
+})
+// a soft UI click on any button press (menu, lobby, settings)
+document.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement)?.closest('button')) audio.play('click', { volume: 0.5, vary: 0.06 })
+})
 // bundle the world lighting the day->night arc drives (owned here, passed
 // into the game so its arenaView can ease it toward night as players drop)
 const lighting: WorldLighting = { scene, sun, hemi, sky }
@@ -213,15 +231,35 @@ if ('match' in game) {
   game.match.onEvent((ev) => {
     if (ev.type === 'header' && ev.x !== undefined) {
       particles.header(ev.x, ev.y ?? 1, ev.z ?? 0, ev.force ?? 0.7)
+      // KICK — force scales loudness; pitched DOWN a touch (heavy ball) + varied
+      audio.play('kick', { volume: 0.4 + (ev.force ?? 0.7) * 0.6, rate: 0.9, vary: 0.12 })
     } else if (ev.type === 'knock' && ev.x !== undefined) {
       particles.knock(ev.x, ev.y ?? 0.15, ev.z ?? 0, ev.force ?? 0.5)
+      audio.play('land', { volume: 0.3 + (ev.force ?? 0.5) * 0.4, rate: 0.95, vary: 0.1 })
     } else if (ev.type === 'elim' && ev.x !== undefined) {
       particles.eliminate(ev.x, ev.y ?? 0, ev.z ?? 0, ev.seat !== undefined ? seatHex(ev.seat) : 0xffffff)
+      audio.play('elim', { volume: 0.9 })
+      audio.play('cheer', { volume: 0.5, vary: 0.08 })
     } else if (ev.type === 'goal' && ev.x !== undefined) {
       // GOLDEN BOOT goal: a celebratory confetti burst in the shooter's colour
       particles.eliminate(ev.x, ev.y ?? 1, ev.z ?? 0, ev.seat !== undefined ? seatHex(ev.seat) : 0xffffff)
+      audio.play('goal', { volume: 0.95 })
+      audio.play('cheer', { volume: 0.7 })
+    } else if (ev.type === 'volley') {
+      audio.play('cannon', { volume: 1, vary: 0.06 }) // kickoff boom
+      audio.play('whistle', { volume: 0.6 })
+    } else if (ev.type === 'save' && ev.seat !== undefined) {
+      audio.play('save', { volume: 0.6 })
+    } else if (ev.type === 'overtime') {
+      audio.play('whistle', { volume: 0.8, rate: 1.1 })
+    } else if (ev.type === 'bounce') {
+      // heavy ball: pitched down, loudness by impact speed, varied per hit
+      audio.play('bounce', { volume: 0.25 + (ev.force ?? 0.3) * 0.5, rate: 0.85, vary: 0.14 })
     }
   })
+
+  // the floodlights-on "bang" at nightfall (hook was reserved for this)
+  if ('onNightfall' in game && game.onNightfall) game.onNightfall(() => audio.play('bang', { volume: 0.9 }))
 }
 
 renderer.domElement.addEventListener('click', () => {

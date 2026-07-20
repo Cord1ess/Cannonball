@@ -1060,6 +1060,10 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     }
     for (const knock of this.#events.knocks)
       this.broadcast('knock', { seat: knock.seat, speed: knock.speed })
+    // ball bounce (floor/wall) → client SFX at the ball, loudness by impact speed
+    if (this.#events.bounces > 0) {
+      this.broadcast('bounce', { x: this.#ball.x, y: this.#ball.y, z: this.#ball.z, speed: this.#events.bounceSpeed })
+    }
     for (const ability of this.#events.abilities) this.broadcast('ability', ability)
     clearEvents(this.#events)
 

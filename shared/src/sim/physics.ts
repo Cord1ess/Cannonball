@@ -135,11 +135,13 @@ export interface SimEvents {
   shoves: ShoveEvent[]
   knocks: KnockEvent[]
   abilities: AbilityEvent[]
-  bounces: number // wall/floor impacts this step (for SFX later)
+  bounces: number // wall/floor impacts this step (for SFX)
+  /** strongest impact speed this step (drives bounce SFX loudness), 0 = none */
+  bounceSpeed: number
 }
 
 export function makeEvents(): SimEvents {
-  return { headers: [], shoves: [], knocks: [], abilities: [], bounces: 0 }
+  return { headers: [], shoves: [], knocks: [], abilities: [], bounces: 0, bounceSpeed: 0 }
 }
 
 export function clearEvents(events: SimEvents): void {
@@ -148,6 +150,7 @@ export function clearEvents(events: SimEvents): void {
   events.knocks.length = 0
   events.abilities.length = 0
   events.bounces = 0
+  events.bounceSpeed = 0
 }
 
 export function makeBall(): BallSim {
@@ -399,7 +402,10 @@ function integrateBall(ball: BallSim, arena: Arena, h: number, events: SimEvents
   if (ball.y < BALL_RADIUS) {
     ball.y = BALL_RADIUS
     if (ball.vy < 0) {
-      if (ball.vy < -1.5) events.bounces++
+      if (ball.vy < -1.5) {
+        events.bounces++
+        events.bounceSpeed = Math.max(events.bounceSpeed, -ball.vy)
+      }
       ball.vy = -ball.vy * BALL_RESTITUTION
       if (Math.abs(ball.vy) < 0.9) ball.vy = 0
     }
@@ -417,7 +423,10 @@ function integrateBall(ball: BallSim, arena: Arena, h: number, events: SimEvents
     if (vn > 0) {
       ball.vx -= hit.x * vn * (1 + BALL_RESTITUTION)
       ball.vz -= hit.z * vn * (1 + BALL_RESTITUTION)
-      if (vn > 1.5) events.bounces++
+      if (vn > 1.5) {
+        events.bounces++
+        events.bounceSpeed = Math.max(events.bounceSpeed, vn)
+      }
     }
   }
 }
