@@ -441,4 +441,13 @@ try {
 
 requestAnimationFrame(frame)
 
+// drop the boot LOADING… overlay once the game has actually drawn a real frame
+// (two rAFs in, so the first scene render is on-screen — no blank gap). This
+// also covers the reload-into-a-fresh-room path.
+requestAnimationFrame(() =>
+  requestAnimationFrame(() => {
+    document.getElementById('boot')?.remove()
+  }),
+)
+
 console.log('[cannonball] WASD run, Shift sprint, Space jump, Click/Ctrl mid-air = DIVE, Q/E tilt')
