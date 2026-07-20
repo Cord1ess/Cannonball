@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { BALL_RADIUS } from '@shared/constants.ts'
-import { addInkOutline, INK_WEIGHT, toonRamp } from './materials.ts'
+import { addInkOutline, INK_WEIGHT, makeInkMaterial, toonRamp } from './materials.ts'
 import { ballTexture } from './textures.ts'
 
 /**
@@ -58,26 +58,34 @@ export function createBallView(): BallView {
       // MeshToonMaterial toned toward CREAM, so the ball matches the world's
       // matte, sketch-shaded style instead of looking like a photoreal football.
       const ramp = toonRamp()
+      // collect meshes first — attaching a hull child mid-traverse would make
+      // traverse() also visit the hull, recursing.
+      const meshes: THREE.Mesh[] = []
       model.traverse((o) => {
-        if ((o as THREE.Mesh).isMesh) {
-          const m = o as THREE.Mesh
-          m.castShadow = true
-          const src = m.material as THREE.MeshStandardMaterial
-          const patternTex = src?.map ?? null
-          if (patternTex) patternTex.colorSpace = THREE.SRGBColorSpace
-          const toon = new THREE.MeshToonMaterial({
-            gradientMap: ramp,
-            map: patternTex, // the perfect black/white pentagon pattern
-            // tone the stark white toward warm cream so it sits in the palette;
-            // the black pentagons stay dark, the whites read as cream paper
-            color: 0xf2ecdc,
-          })
-          m.material = toon
-          if (src) src.dispose() // drop the PBR material + its normal map
-        }
+        if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh)
       })
-      // NOTE: no addInkOutline on the GLB — makeHullGeometry()/mergeVertices() is
-      // O(n²)-ish and froze the main thread on this dense model.
+      for (const m of meshes) {
+        m.castShadow = true
+        const src = m.material as THREE.MeshStandardMaterial
+        const patternTex = src?.map ?? null
+        if (patternTex) patternTex.colorSpace = THREE.SRGBColorSpace
+        m.material = new THREE.MeshToonMaterial({
+          gradientMap: ramp,
+          map: patternTex, // the perfect black/white pentagon pattern
+          // near-white, just a hair warm so it isn't a clinical pure white but
+          // reads clearly as a white football (whiter than the earlier cream)
+          color: 0xfbf7ee,
+        })
+        if (src) src.dispose() // drop the PBR material + its normal map
+        // TOON OUTLINE the CHEAP way: an inverted-hull child that REUSES the
+        // mesh's OWN geometry (already has normals). No makeHullGeometry /
+        // mergeVertices — that O(n²) pass is what froze the game. The ink shader
+        // pushes verts out along their normal, so a shared-geometry BackSide hull
+        // is a clean sketch outline for free, riding the mesh's exact transform.
+        const hull = new THREE.Mesh(m.geometry, makeInkMaterial(INK_WEIGHT.character))
+        hull.castShadow = false
+        m.add(hull)
+      }
       spinner.remove(placeholder)
       placeholder.geometry.dispose()
       ;(placeholder.material as THREE.Material).dispose()
