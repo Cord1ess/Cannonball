@@ -112,11 +112,17 @@ scene.add(particles.group)
 // backend. Loads whatever files exist in client/public/audio/ (missing = silent),
 // unlocks on the first user gesture, mutes when the tab is hidden.
 const audio = createGameAudio()
-void audio.load().then(() => {
-  // ambient beds loop from the start (menu + match); they no-op until unlocked
-  audio.startMusic()
-  audio.startCrowd()
-})
+// DEFER audio loading until AFTER the page's load event so the (currently empty)
+// audio-file fetches never sit in the initial request queue and stall the
+// browser's loading indicator. Runs in the background; missing files stay silent.
+const kickoffAudio = (): void => {
+  void audio.load().then(() => {
+    audio.startMusic()
+    audio.startCrowd()
+  })
+}
+if (document.readyState === 'complete') kickoffAudio()
+else window.addEventListener('load', kickoffAudio, { once: true })
 // M key toggles mute (any time)
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM' && !e.repeat) audio.toggleMute()

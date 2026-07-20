@@ -117,14 +117,29 @@ export function createGameAudio(): GameAudio {
     const base = `/audio/${SOUND_FILES[name]}`
     for (const ext of ['ogg', 'wav', 'mp3']) {
       try {
-        const res = await fetch(`${base}.${ext}`)
+        // ABORT the fetch quickly if it doesn't resolve — a missing/absent audio
+        // file must NEVER leave a request hanging (that stalls the browser's load
+        // indicator). The whole audio layer is optional; failing fast is correct.
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 4000)
+        let res: Response
+        try {
+          res = await fetch(`${base}.${ext}`, { signal: ctrl.signal, cache: 'no-store' })
+        } finally {
+          clearTimeout(timer)
+        }
         if (!res.ok) continue
+        // Vite's dev server returns index.html (HTTP 200, text/html) for a
+        // MISSING public file instead of a 404 — feeding that HTML into the audio
+        // decoder hangs/errors. Only accept a real audio content-type.
+        const ct = res.headers.get('content-type') ?? ''
+        if (!ct.startsWith('audio/') && !ct.includes('octet-stream')) continue
         const bytes = await res.arrayBuffer()
         const clip = await backend.decode(bytes)
         clips.set(name, clip)
         return
       } catch {
-        // missing / undecodable → try the next extension, else stay silent
+        // missing / undecodable / aborted → try the next extension, else silent
       }
     }
   }
