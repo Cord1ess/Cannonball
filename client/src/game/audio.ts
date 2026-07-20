@@ -2,6 +2,7 @@ import { createWebAudioBackend } from '@vendor/audio/webaudio-backend.ts'
 import type { AudioBackend, ClipHandle, SoundHandle } from '@vendor/audio/backend.ts'
 import { installAutoplayUnlock } from '@vendor/platform/unlock.ts'
 import { onVisibilityChange } from '@vendor/platform/visibility.ts'
+import { synthSfx } from './sfxSynth.ts'
 
 /**
  * GAME AUDIO (M6). A thin party-game layer over the vendored WebAudio backend:
@@ -139,8 +140,17 @@ export function createGameAudio(): GameAudio {
         clips.set(name, clip)
         return
       } catch {
-        // missing / undecodable / aborted → try the next extension, else silent
+        // missing / undecodable / aborted → try the next extension, else synth
       }
+    }
+    // no real file → SYNTHESIZE the slot (procedural fallback) so the game has a
+    // full soundscape from just the two supplied atmosphere tracks. Real files,
+    // when present, always win (we only reach here after every ext missed).
+    try {
+      const pcm = synthSfx(name, 44100)
+      if (pcm) clips.set(name, backend.createClip(pcm, 44100))
+    } catch {
+      /* synth failed → that slot stays silent */
     }
   }
 
