@@ -147,6 +147,9 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   #freeSaves: number[] = new Array(MAX_SEATS).fill(0)
   /** how long the ball has continuously dwelt in each seat's zone (grace) */
   #zoneDwell: number[] = new Array(MAX_SEATS).fill(0)
+  /** MENU DEMO: an endless 6-bean backdrop match — no eliminations, no ending,
+   *  ball + bots stay live for the main menu. Set via the `menuDemo` debug cmd. */
+  #menuDemo = false
   /** GAME MODE settings (chosen in the lobby by the host, before start) */
   #mode: GameModeId = GameMode.HotZone
   #matchTime = DEFAULT_MATCH_TIME_S
@@ -340,6 +343,9 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
           break
         case 'instantArena':
           this.#debugInstantArena()
+          break
+        case 'menuDemo':
+          this.#debugMenuDemo()
           break
         case 'botPlus':
           this.#debugAddBotLive()
@@ -733,6 +739,7 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#overtimeSeats = []
     this.state.overtimeSeats.splice(0, this.state.overtimeSeats.length)
     this.#tickRemaining = this.#scale(this.#interval())
+    this.#menuDemo = false // leaving the menu backdrop → a real match can start
     // reopen the room to newcomers now that we're back in the lobby
     void this.unlock().catch(() => undefined)
     for (const session of this.#sessions.values()) {
@@ -1217,6 +1224,16 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
   }
 
   #resolveTick(): void {
+    // MENU DEMO: never eliminate — just recycle the interval and re-kickoff so
+    // the backdrop stays a lively 6-bean match forever (no ending).
+    if (this.#menuDemo) {
+      this.#meters.fill(0)
+      this.#goals.fill(0)
+      this.#beginLaunch()
+      // #beginLaunch entered Launch; fire immediately so play resumes at once
+      this.#fire()
+      return
+    }
     const occupiedAlive = this.#alive.map((a, seat) => a && this.#seatOccupied(seat))
     let losers: number[]
     if (this.#mode === GameMode.GoldenBoot) {
@@ -1383,6 +1400,14 @@ export class MatchRoom extends Room<{ state: MatchStateT }> {
     this.#tickRemaining = this.#scale(this.#interval())
     this.#enter(Phase.Arena, 0)
     this.broadcast('volley', {})
+  }
+
+  /** MENU DEMO: an ENDLESS 6-bean backdrop match for the main menu — bots play,
+   *  the ball is live, but NOBODY is ever eliminated and it never ends. The tick
+   *  just recycles the interval + re-kicks the ball for constant visual life. */
+  #debugMenuDemo(): void {
+    this.#menuDemo = true
+    this.#debugInstantArena()
   }
 
   /** drop a bot straight onto the field mid-match: zones repaint live */

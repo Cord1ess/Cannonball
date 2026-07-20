@@ -15,17 +15,19 @@
 
 // self-hosted webfonts (bundled by vite, no CDN) — §9. Latin subset only:
 // the game text is English, so we skip the Devanagari/other-script weights.
-import '@fontsource/baloo-2/latin-600.css'
-import '@fontsource/baloo-2/latin-700.css'
-import '@fontsource/baloo-2/latin-800.css'
-import '@fontsource/patrick-hand/latin-400.css'
+// Abeto-style pairing (messenger.abeto.co): a BOLD BOXY signage face for titles
+// + headers (Bungee) and a THIN crayon/pen handwriting for labels + notes
+// (Caveat). Replaces the earlier Baloo/Patrick-Hand which read too comic-sans.
+import '@fontsource/bungee/latin-400.css'
+import '@fontsource/caveat/latin-500.css'
+import '@fontsource/caveat/latin-700.css'
 
 import { PALETTE } from '../render/palette.ts'
 
 export const INK = '#4a443c' // the palette ink — warm dark gray-brown, never black
 export const PAPER = '#f6f1e2' // warm cream paper
-export const FONT_HEAD = "'Baloo 2', system-ui, sans-serif" // headers + numbers
-export const FONT_HAND = "'Patrick Hand', 'Baloo 2', cursive" // hand-written notes
+export const FONT_HEAD = "'Bungee', system-ui, sans-serif" // boxy signage headers
+export const FONT_HAND = "'Caveat', 'Bungee', cursive" // thin crayon handwriting
 
 function hex(n: number): string {
   return `#${n.toString(16).padStart(6, '0')}`
@@ -82,8 +84,10 @@ export function paperTexture(): string {
 // second, offset faint stroke gives the double-line sketch feel. Cached by a
 // coarse key so we don't rebuild identical frames.
 const frameCache = new Map<string, string>()
-export function inkFrameUrl(w = 220, h = 60, color = INK, weight = 2.4): string {
-  const key = `${w}x${h}:${color}:${weight}`
+// `fill` (optional) fills the wobbly SHAPE itself so a coloured button never
+// pokes a hard rectangle past its sketched outline — the fill IS the outline.
+export function inkFrameUrl(w = 220, h = 60, color = INK, weight = 2.4, fill?: string): string {
+  const key = `${w}x${h}:${color}:${weight}:${fill ?? '-'}`
   const hit = frameCache.get(key)
   if (hit) return hit
   const pad = 5
@@ -112,8 +116,8 @@ export function inkFrameUrl(w = 220, h = 60, color = INK, weight = 2.4): string 
   const path = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ') + ' Z'
   const svg =
     `<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}' viewBox='0 0 ${w} ${h}'>` +
-    `<path d='${path}' fill='none' stroke='${color}' stroke-width='${weight}' ` +
-    `stroke-linejoin='round' stroke-linecap='round' opacity='0.92'/>` +
+    `<path d='${path}' fill='${fill ?? 'none'}' stroke='${color}' stroke-width='${weight}' ` +
+    `stroke-linejoin='round' stroke-linecap='round' opacity='0.95'/>` +
     `</svg>`
   const url = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
   frameCache.set(key, url)
@@ -122,9 +126,14 @@ export function inkFrameUrl(w = 220, h = 60, color = INK, weight = 2.4): string 
 
 /** apply the paper card look to a DOM element: paper bg + wobbly ink frame. */
 export function paperPanel(el: HTMLElement, opts: { w?: number; h?: number; color?: string; weight?: number } = {}): void {
-  el.style.backgroundImage = `${inkFrameUrl(opts.w, opts.h, opts.color, opts.weight)}, url("${paperTexture()}")`
+  // the wobbly frame is FILLED with cream so the panel edge is exactly the drawn
+  // line (no rectangle past it); a faint paper texture sits under, inset so it
+  // never reaches the corners past the wobble.
+  el.style.backgroundImage = `${inkFrameUrl(opts.w, opts.h, opts.color ?? INK, opts.weight, PAPER)}, url("${paperTexture()}")`
   el.style.backgroundSize = '100% 100%, 128px 128px'
-  el.style.backgroundRepeat = 'no-repeat, repeat'
+  el.style.backgroundPosition = 'center, center'
+  el.style.backgroundRepeat = 'no-repeat, no-repeat'
+  el.style.backgroundClip = 'padding-box, content-box'
   el.style.border = 'none'
   el.style.borderRadius = '10px'
 }
@@ -156,21 +165,24 @@ export function paperButton(
 ): void {
   const w = opts.w ?? 140
   const h = opts.h ?? 40
-  const layers = [inkFrameUrl(w, h, INK, opts.big ? 3.2 : 2.6)]
-  if (opts.tint) {
-    // a translucent colour wash over the paper so the tint still reads as paint
-    layers.push(`linear-gradient(0deg, ${opts.tint}dd, ${opts.tint}dd)`)
-  }
-  layers.push(`url("${paperTexture()}")`)
-  btn.style.backgroundImage = layers.join(', ')
-  btn.style.backgroundSize = opts.tint ? '100% 100%, 100% 100%, 128px 128px' : '100% 100%, 128px 128px'
-  btn.style.backgroundRepeat = opts.tint ? 'no-repeat, no-repeat, repeat' : 'no-repeat, repeat'
+  // The FILL is the wobbly shape itself (the SVG path is filled), so the colour
+  // never pokes a hard rectangle past the sketched outline. Tinted buttons fill
+  // the shape with the tint; plain buttons fill with cream paper. The faint
+  // paper texture sits UNDER, clipped to the same shape by an inset border-radius.
+  const fill = opts.tint ?? PAPER
+  // ONE filled-shape SVG is the whole button surface — no separate rectangular
+  // layer to overflow the outline. Transparent elsewhere so corners stay clean.
+  btn.style.backgroundImage = inkFrameUrl(w, h, INK, opts.big ? 3.2 : 2.6, fill)
+  btn.style.backgroundSize = '100% 100%'
+  btn.style.backgroundRepeat = 'no-repeat'
+  btn.style.backgroundColor = 'transparent'
   btn.style.border = 'none'
-  btn.style.borderRadius = '10px'
   btn.style.color = opts.tint ? '#fdfaf0' : INK
   btn.style.fontFamily = FONT_HEAD
   btn.style.fontWeight = '800'
   btn.style.cursor = 'pointer'
   btn.style.textShadow = opts.tint ? '0 1px 1px rgba(40,34,26,0.55)' : 'none'
-  btn.style.boxShadow = '0 3px 0 rgba(74,68,60,0.20)'
+  // drop shadow OFFSET so it doesn't leak past the wobble either
+  btn.style.boxShadow = 'none'
+  btn.style.filter = 'drop-shadow(0 2px 0 rgba(74,68,60,0.18))'
 }

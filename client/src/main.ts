@@ -221,8 +221,9 @@ if ('match' in game) {
     document.head.appendChild(menuCss)
     // the match behind the menu is a pure backdrop — no tags, no labels
     if ('setMenuMode' in game) game.setMenuMode(true)
-    // kick off the cosmetic bot match behind the menu
-    game.debug.send('instantArena')
+    // kick off the ENDLESS menu-demo match behind the menu: 6 beans play forever,
+    // nobody is eliminated, it never ends (a real match starts on Play).
+    game.debug.send('menuDemo')
   }
 
   // M6 juice: spawn particle bursts off match events (positions come from the

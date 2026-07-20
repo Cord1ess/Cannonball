@@ -52,14 +52,20 @@ export function createMainMenu(client: MatchClient, beans: UiBeanStage, hooks: M
   const left = document.createElement('div')
   left.style.cssText = 'align-self:center;margin:0 0 0 6vw;max-width:34vw;pointer-events:none;'
   const title = document.createElement('div')
-  // white with a sharp offset ink shadow — smaller, clean and punchy
+  // Bungee boxy signage caps, white, with a SOLID stepped ink drop shadow (the
+  // Abeto title look). Bungee is a single weight + already boxy, so no bold /
+  // negative tracking — the shadow gives the punch. Two-line for a poster feel.
   title.style.cssText =
-    'font-size:clamp(40px,5vw,72px);font-weight:800;line-height:0.95;letter-spacing:-1px;' +
-    `color:#ffffff;text-shadow:3px 3px 0 ${INK};`
-  title.textContent = 'CANNONBALL'
+    `font-family:${FONT_HEAD};font-size:clamp(38px,4.6vw,68px);line-height:0.98;` +
+    `color:#fdfaf0;` +
+    // layered hard offsets = a chunky solid shadow, not a soft blur
+    `text-shadow:2px 2px 0 ${INK}, 4px 4px 0 ${INK}, 6px 6px 0 ${INK}, 5px 5px 0 ${INK};`
+  title.innerHTML = 'CANNON<br>BALL'
   const tag = document.createElement('div')
+  // Caveat is a thin script → it reads small for its size, so bump it up
   tag.style.cssText =
-    `font-family:${FONT_HAND};font-size:clamp(16px,1.6vw,22px);margin-top:12px;color:#ffffff;text-shadow:2px 2px 0 ${INK};`
+    `font-family:${FONT_HAND};font-weight:500;font-size:clamp(22px,2.4vw,34px);margin-top:16px;` +
+    `color:#fdfaf0;text-shadow:2px 2px 0 ${INK};line-height:1.05;`
   tag.textContent = TAGLINE
   left.append(title, tag)
   root.appendChild(left)
