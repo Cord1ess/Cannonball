@@ -112,17 +112,14 @@ scene.add(particles.group)
 // backend. Loads whatever files exist in client/public/audio/ (missing = silent),
 // unlocks on the first user gesture, mutes when the tab is hidden.
 const audio = createGameAudio()
-// DEFER audio loading until AFTER the page's load event so the (currently empty)
-// audio-file fetches never sit in the initial request queue and stall the
-// browser's loading indicator. Runs in the background; missing files stay silent.
-const kickoffAudio = (): void => {
-  void audio.load().then(() => {
-    audio.startMusic()
-    audio.startCrowd()
-  })
-}
-if (document.readyState === 'complete') kickoffAudio()
-else window.addEventListener('load', kickoffAudio, { once: true })
+// Load audio in the background right away — request the loops NOW so they're
+// armed; they actually begin the instant BOTH (a) their clip has decoded and
+// (b) the first user gesture has unlocked the AudioContext, whichever is last.
+// (The earlier window.load deferral raced: load often fired before this module
+// finished its top-level await, so the listener missed it and audio never ran.)
+audio.startMusic()
+audio.startCrowd()
+void audio.load()
 // M key toggles mute (any time)
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM' && !e.repeat) audio.toggleMute()

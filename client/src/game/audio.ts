@@ -118,11 +118,14 @@ export function createGameAudio(): GameAudio {
     const base = `/audio/${SOUND_FILES[name]}`
     for (const ext of ['ogg', 'wav', 'mp3']) {
       try {
-        // ABORT the fetch quickly if it doesn't resolve — a missing/absent audio
-        // file must NEVER leave a request hanging (that stalls the browser's load
-        // indicator). The whole audio layer is optional; failing fast is correct.
+        // ABORT the fetch if it never resolves — a missing/absent audio file must
+        // never leave a request hanging. But allow plenty of time: the atmosphere
+        // tracks are multi-MB and a short 4s abort was killing the crowd/music
+        // download+decode before it finished (→ silent menu). The content-type
+        // check below is what actually guards the index.html-fallback case (that
+        // response returns instantly), so a long timeout here is safe.
         const ctrl = new AbortController()
-        const timer = setTimeout(() => ctrl.abort(), 4000)
+        const timer = setTimeout(() => ctrl.abort(), 30000)
         let res: Response
         try {
           res = await fetch(`${base}.${ext}`, { signal: ctrl.signal, cache: 'no-store' })
@@ -171,7 +174,22 @@ export function createGameAudio(): GameAudio {
 
   return {
     async load(): Promise<void> {
-      await Promise.all((Object.keys(SOUND_FILES) as SoundName[]).map(loadOne))
+      // load the two looping atmosphere tracks FIRST and kick their loops the
+      // instant they're ready (they're the big files) — don't make the whole
+      // soundscape wait on every one-shot decoding. If the loops were already
+      // requested (startMusic/startCrowd) and we're unlocked, they start now.
+      await Promise.all(
+        (['music', 'crowd'] as SoundName[]).map((n) =>
+          loadOne(n).then(() => {
+            if (n === 'music' && wantMusic) startMusicInternal()
+            if (n === 'crowd' && wantCrowd) startCrowdInternal()
+          }),
+        ),
+      )
+      // then the rest (one-shots + synth fallbacks) in the background
+      await Promise.all(
+        (Object.keys(SOUND_FILES) as SoundName[]).filter((n) => n !== 'music' && n !== 'crowd').map(loadOne),
+      )
     },
     play(name, opts): void {
       if (!backend || !unlocked) return
